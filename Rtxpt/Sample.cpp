@@ -524,6 +524,7 @@ void Sample::SceneUnloading( )
     m_lights.clear();
     m_ui.SelectedMaterial = nullptr;
     m_ui.SelectedNode = nullptr;
+    m_ui.SelectedGaussianSplat = false;
     m_ui.EnvironmentMapParams = EnvironmentMapRuntimeParameters();
     m_envMapBaker = nullptr;
     m_lightsBaker = nullptr;
@@ -2044,6 +2045,14 @@ void Sample::RenderGaussianSplats()
     settings.alphaCullThreshold = m_ui.GaussianSplatAlphaCullThreshold;
     settings.shadowsEnabled = m_ui.GaussianSplatShadows;
     settings.shadowStrength = m_ui.GaussianSplatShadowStrength;
+    {
+        constexpr float deg2rad = 3.14159265358979323846f / 180.0f;
+        const dm::float3 eulerRadians = m_ui.GaussianSplatRotationEulerDeg * deg2rad;
+        dm::affine3 objectToWorld = dm::scaling(m_ui.GaussianSplatObjectScale);
+        objectToWorld *= dm::rotationQuat(eulerRadians).toAffine();
+        objectToWorld *= dm::translation(m_ui.GaussianSplatTranslation);
+        settings.objectToWorld = dm::affineToHomogeneous(objectToWorld);
+    }
 
     for (const auto& light : m_lights)
     {
@@ -2480,7 +2489,11 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
             m_ui.SelectedMaterial = FindMaterial(int(m_feedbackData.pickedMaterialID));
 
         if (m_pickInstance)
+        {
             m_ui.SelectedNode = FindNodeByInstanceIndex(int(m_feedbackData.pickedInstanceIndex));
+            if (m_ui.SelectedNode != nullptr)
+                m_ui.SelectedGaussianSplat = false;
+        }
 
         m_pick = false;
         m_pickInstance = false;

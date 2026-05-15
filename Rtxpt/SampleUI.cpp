@@ -113,7 +113,10 @@ namespace
         const bool open = ImGui::TreeNodeEx(node, flags, "%s", label.c_str());
 
         if (isMeshNode && ImGui::IsItemClicked())
+        {
             ui.SelectedNode = node->shared_from_this();
+            ui.SelectedGaussianSplat = false;
+        }
 
         if (isMeshNode && ImGui::IsItemHovered())
             ImGui::SetTooltip("Mesh instance. Click to open it in Inspector.");
@@ -2005,11 +2008,50 @@ void SampleUI::buildUI(void)
         ImGui::End();
     }
 
+    if (m_ui.SelectedGaussianSplat && m_ui.GaussianSplatCount > 0 && m_ui.ShowInspector)
+    {
+        ImGui::SetNextWindowPos(ImVec2(float(scaledWidth) - 10.f, 10.f), ImGuiCond_Appearing, ImVec2(1.f, 0.f));
+        ImGui::SetNextWindowSize(ImVec2(defWindowWidth, 0), ImGuiCond_Appearing);
+        ImGui::Begin("Inspector");
+        ImGui::PushItemWidth(defItemWidth);
+
+        const std::filesystem::path splatPath(m_ui.GaussianSplatFileName);
+        const std::string splatName = splatPath.filename().empty() ? m_ui.GaussianSplatFileName : splatPath.filename().string();
+        ImGui::Text("Node: %s", splatName.c_str());
+        ImGui::Text("Type: 3D Gaussian Splats");
+        ImGui::Text("Splats: %u", m_ui.GaussianSplatCount);
+        ImGui::TextWrapped("Source: %s", m_ui.GaussianSplatFileName.c_str());
+        ImGui::Separator();
+
+        if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            RESET_ON_CHANGE(ImGui::DragFloat3("Position", (float*)&m_ui.GaussianSplatTranslation.x, 0.01f));
+            RESET_ON_CHANGE(ImGui::DragFloat3("Rotation (deg)", (float*)&m_ui.GaussianSplatRotationEulerDeg.x, 0.5f, -360.0f, 360.0f, "%.1f"));
+            RESET_ON_CHANGE(ImGui::DragFloat3("Scale", (float*)&m_ui.GaussianSplatObjectScale.x, 0.01f, 0.001f, 1000.0f));
+        }
+
+        if (ImGui::CollapsingHeader("Properties", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            RESET_ON_CHANGE(ImGui::Checkbox("Enabled", &m_ui.EnableGaussianSplats));
+            RESET_ON_CHANGE(ImGui::Checkbox("Mesh Depth Test", &m_ui.GaussianSplatDepthTest));
+            RESET_ON_CHANGE(ImGui::Checkbox("Hybrid Shadows", &m_ui.GaussianSplatShadows));
+            RESET_ON_CHANGE(ImGui::DragFloat("Footprint Scale", &m_ui.GaussianSplatScale, 0.01f, 0.01f, 10.0f, "%.2f"));
+            RESET_ON_CHANGE(ImGui::DragFloat("Alpha", &m_ui.GaussianSplatAlphaScale, 0.01f, 0.0f, 4.0f, "%.2f"));
+            RESET_ON_CHANGE(ImGui::DragFloat("Brightness", &m_ui.GaussianSplatBrightness, 0.01f, 0.0f, 16.0f, "%.2f"));
+            RESET_ON_CHANGE(ImGui::DragFloat("Alpha Cull", &m_ui.GaussianSplatAlphaCullThreshold, 0.001f, 0.0f, 0.25f, "%.3f"));
+            RESET_ON_CHANGE(ImGui::DragFloat("Shadow Strength", &m_ui.GaussianSplatShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f"));
+        }
+
+        ImGui::PopItemWidth();
+        ImGui::End();
+    }
+
     // Material Editor panel (right-click pick)
     std::shared_ptr<PTMaterial> material = PTMaterial::SafeCast(m_ui.SelectedMaterial);
     if (material != nullptr && m_app.GetMaterialsBaker() != nullptr && m_ui.ShowMaterialEditor)
     {
-        ImGui::SetNextWindowPos(ImVec2(float(scaledWidth) - 10.f, (m_ui.SelectedNode != nullptr && m_ui.ShowInspector) ? 350.f : 10.f), ImGuiCond_Appearing, ImVec2(1.f, 0.f));
+        const bool inspectorVisible = (m_ui.SelectedNode != nullptr || m_ui.SelectedGaussianSplat) && m_ui.ShowInspector;
+        ImGui::SetNextWindowPos(ImVec2(float(scaledWidth) - 10.f, inspectorVisible ? 350.f : 10.f), ImGuiCond_Appearing, ImVec2(1.f, 0.f));
         ImGui::SetNextWindowSize(ImVec2(defWindowWidth, 0), ImGuiCond_Appearing);
         ImGui::Begin("Material Editor");
         ImGui::PushItemWidth(defItemWidth);
@@ -2275,10 +2317,19 @@ void SampleUI::buildUI(void)
             {
                 const std::filesystem::path splatPath(m_ui.GaussianSplatFileName);
                 const std::string splatName = splatPath.filename().empty() ? m_ui.GaussianSplatFileName : splatPath.filename().string();
-                ImGui::BulletText("[3DGS] %s (%u splats)", splatName.c_str(), m_ui.GaussianSplatCount);
+                const std::string label = "[3DGS] " + splatName + " (" + std::to_string(m_ui.GaussianSplatCount) + " splats)";
+                if (ImGui::Selectable(label.c_str(), m_ui.SelectedGaussianSplat))
+                {
+                    m_ui.SelectedGaussianSplat = true;
+                    m_ui.SelectedNode = nullptr;
+                    m_ui.SelectedMaterial = nullptr;
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("3D Gaussian Splat object. Click to open it in Inspector.");
             }
             else
             {
+                m_ui.SelectedGaussianSplat = false;
                 ImGui::TextDisabled("No 3DGS object loaded.");
             }
             ImGui::TreePop();

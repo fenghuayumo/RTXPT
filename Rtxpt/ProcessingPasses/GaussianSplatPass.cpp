@@ -806,11 +806,12 @@ void GaussianSplatPass::InvalidateSortCache()
     m_cachedSortSplatCount = 0;
 }
 
-bool GaussianSplatPass::CanReuseSort(const SimpleViewConstants& viewConstants) const
+bool GaussianSplatPass::CanReuseSort(const GaussianSplatConstants& constants) const
 {
     return m_sortCacheValid
         && m_cachedSortSplatCount == m_splatCount
-        && MatrixEquals(m_cachedSortWorldToClipNoOffset, viewConstants.matWorldToClipNoOffset);
+        && MatrixEquals(m_cachedSortWorldToClipNoOffset, constants.view.matWorldToClipNoOffset)
+        && MatrixEquals(m_cachedSortObjectToWorld, constants.objectToWorld);
 }
 
 bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool convertRdfToDonut)
@@ -1026,12 +1027,12 @@ void GaussianSplatPass::UploadSplatDataIfNeeded(nvrhi::ICommandList* commandList
     m_splatUploadPending = false;
 }
 
-void GaussianSplatPass::SortSplats(nvrhi::ICommandList* commandList, const SimpleViewConstants& viewConstants)
+void GaussianSplatPass::SortSplats(nvrhi::ICommandList* commandList, const GaussianSplatConstants& constants)
 {
     if (!m_gpuSort || !m_sortKeyBindingSet || !m_sortKeyPipeline || !m_sortControlBuffer)
         return;
 
-    if (CanReuseSort(viewConstants))
+    if (CanReuseSort(constants))
         return;
 
     {
@@ -1054,7 +1055,8 @@ void GaussianSplatPass::SortSplats(nvrhi::ICommandList* commandList, const Simpl
 
     m_gpuSort->Sort(commandList, m_sortControlBuffer, 0, m_sortKeyBuffer, m_indexBuffer, m_splatCount, true);
 
-    m_cachedSortWorldToClipNoOffset = viewConstants.matWorldToClipNoOffset;
+    m_cachedSortWorldToClipNoOffset = constants.view.matWorldToClipNoOffset;
+    m_cachedSortObjectToWorld = constants.objectToWorld;
     m_cachedSortSplatCount = m_splatCount;
     m_sortCacheValid = true;
 }
@@ -1089,6 +1091,7 @@ void GaussianSplatPass::Render(
     constants.view = FromPlanarViewConstants(planarView);
     const float3 cameraPosition = view.GetViewOrigin();
     constants.cameraPosition = float4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f);
+    constants.objectToWorld = settings.objectToWorld;
     constants.splatScale = settings.splatScale;
     constants.alphaScale = settings.alphaScale;
     constants.brightness = settings.brightness;
@@ -1106,7 +1109,7 @@ void GaussianSplatPass::Render(
     constants.shadowRayTMax = settings.shadowRayTMax;
     commandList->writeBuffer(m_constantBuffer, &constants, sizeof(constants));
 
-    SortSplats(commandList, constants.view);
+    SortSplats(commandList, constants);
 
     commandList->setBufferState(m_indexBuffer, nvrhi::ResourceStates::ShaderResource);
     commandList->setTextureState(renderTargets.Depth, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);

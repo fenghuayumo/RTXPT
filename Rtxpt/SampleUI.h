@@ -329,6 +329,10 @@ struct SampleUIData
     float                               GaussianSplatShadowStrength = 0.75f;
     uint32_t                            GaussianSplatCount = 0;
     std::string                         GaussianSplatFileName;
+    bool                                SelectedGaussianSplat = false;
+    dm::float3                          GaussianSplatTranslation = dm::float3(0.0f);
+    dm::float3                          GaussianSplatRotationEulerDeg = dm::float3(0.0f);
+    dm::float3                          GaussianSplatObjectScale = dm::float3(1.0f);
 
     bool                                DbgFreezeRealtimeNoiseSeed = false;               // stops noise from changing at real-time - useful for reproducing rare bugs
     bool                                DbgDisableSERTerminationHint = false;

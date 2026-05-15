@@ -41,6 +41,7 @@ struct GaussianSplatRenderSettings
     float shadowStrength = 0.75f;
     float shadowRayTMax = 100000.0f;
     donut::math::float3 shadowDirectionToLight = donut::math::float3(0.0f, 1.0f, 0.0f);
+    donut::math::float4x4 objectToWorld = donut::math::float4x4::identity();
 };
 
 class GaussianSplatPass
@@ -73,8 +74,8 @@ public:
 private:
     void CreateBindingSets(const RenderTargets& renderTargets, nvrhi::rt::IAccelStruct* meshTopLevelAS);
     void UploadSplatDataIfNeeded(nvrhi::ICommandList* commandList);
-    void SortSplats(nvrhi::ICommandList* commandList, const SimpleViewConstants& viewConstants);
-    [[nodiscard]] bool CanReuseSort(const SimpleViewConstants& viewConstants) const;
+    void SortSplats(nvrhi::ICommandList* commandList, const GaussianSplatConstants& constants);
+    [[nodiscard]] bool CanReuseSort(const GaussianSplatConstants& constants) const;
     void InvalidateSortCache();
 
     nvrhi::DeviceHandle m_device;
@@ -112,5 +113,6 @@ private:
     bool m_sortCacheValid = false;
     uint32_t m_cachedSortSplatCount = 0;
     donut::math::float4x4 m_cachedSortWorldToClipNoOffset = donut::math::float4x4::identity();
+    donut::math::float4x4 m_cachedSortObjectToWorld = donut::math::float4x4::identity();
     std::string m_sourceFileName;
 };

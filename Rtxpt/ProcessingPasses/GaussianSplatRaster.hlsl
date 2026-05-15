@@ -26,8 +26,9 @@ void cs_sort_keys(uint splatIndex : SV_DispatchThreadID)
         return;
 
     GaussianSplatData splat = t_Splats[splatIndex];
+    float4 worldCenter = mul(float4(splat.centerOpacity.xyz, 1.0f), g_Const.objectToWorld);
     // Depth sorting ignores sub-pixel jitter so the sorted index buffer can be reused.
-    float4 clipCenter = mul(float4(splat.centerOpacity.xyz, 1.0f), g_Const.view.matWorldToClipNoOffset);
+    float4 clipCenter = mul(worldCenter, g_Const.view.matWorldToClipNoOffset);
 
     float reverseZ = 0.0f;
     if (clipCenter.w > 0.0f)
@@ -81,10 +82,12 @@ float2 GetQuadCorner(uint vertexInSplat)
 
 float3x3 LoadCovariance(GaussianSplatData splat)
 {
-    return float3x3(
+    float3x3 covariance = float3x3(
         splat.covariance0.x, splat.covariance0.y, splat.covariance0.z,
         splat.covariance0.y, splat.covariance0.w, splat.covariance1.x,
         splat.covariance0.z, splat.covariance1.x, splat.covariance1.y);
+    float3x3 objectToWorld = (float3x3)g_Const.objectToWorld;
+    return mul(transpose(objectToWorld), mul(covariance, objectToWorld));
 }
 
 float3 ProjectCovariance(float3x3 cov3D, float4 viewCenter)
@@ -227,7 +230,7 @@ VertexOutput vs_main(uint vertexId : SV_VertexID)
         return output;
     }
 
-    float4 worldCenter = float4(splat.centerOpacity.xyz, 1.0f);
+    float4 worldCenter = mul(float4(splat.centerOpacity.xyz, 1.0f), g_Const.objectToWorld);
     float4 viewCenter = mul(worldCenter, g_Const.view.matWorldToView);
     float4 clipCenter = mul(worldCenter, g_Const.view.matWorldToClip);
 
@@ -258,7 +261,7 @@ VertexOutput vs_main(uint vertexId : SV_VertexID)
     float3 color = splat.color.rgb;
     if (g_Const.shDegree > 0)
     {
-        float3 worldViewDir = normalize(splat.centerOpacity.xyz - g_Const.cameraPosition.xyz);
+        float3 worldViewDir = normalize(worldCenter.xyz - g_Const.cameraPosition.xyz);
         color += FetchViewDependentRadiance(sourceSplatIndex, worldViewDir);
     }
 
@@ -267,7 +270,7 @@ VertexOutput vs_main(uint vertexId : SV_VertexID)
     output.position = float4(ndcCenter.xy + ndcOffset, ndcCenter.z, 1.0f);
     output.fragPos = corner * kSqrt8;
     output.color = float4(SrgbToLinear(displayColor) * g_Const.brightness, splat.centerOpacity.w);
-    output.worldCenter = splat.centerOpacity.xyz;
+    output.worldCenter = worldCenter.xyz;
 
     return output;
 }

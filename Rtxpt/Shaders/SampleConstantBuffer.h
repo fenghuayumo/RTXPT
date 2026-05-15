@@ -82,6 +82,7 @@ struct GaussianSplatConstants
     SimpleViewConstants view;
 
     float4 cameraPosition;
+    float4x4 objectToWorld;
 
     float splatScale;
     float alphaScale;
