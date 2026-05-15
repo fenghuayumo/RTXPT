@@ -168,6 +168,7 @@ void PTPipelineVariant::CompileIfNeeded_Enqueue(std::filesystem::file_time_type 
 
     // start preparing the command - this is shared amongst all permutations
     const std::string commandBase = "\"" + baker->GetShaderCompilerPath().string() + "\"";
+    const bool isVulkanBackend = baker->GetDevice()->getGraphicsAPI() == nvrhi::GraphicsAPI::VULKAN;
     bool resetPipelineNeeded = false;
     for( ShaderPermutation * permutation : currentList )
     {
@@ -269,11 +270,12 @@ void PTPipelineVariant::CompileIfNeeded_Enqueue(std::filesystem::file_time_type 
         }
         else // we need to re-compile!
         {
-            command = commandBase + command 
+            command = commandBase + command;
 #if !PIPELINE_BAKER_EMBED_PDBS
-                + " /Fd \"" + compiledFullPathPdb + "\"" 
+            if (!isVulkanBackend)
+                command += " /Fd \"" + compiledFullPathPdb + "\"";
 #endif
-                + " -Fo \"" + permutation->CompiledFullPath + "\"";
+            command += " -Fo \"" + permutation->CompiledFullPath + "\"";
 
             if (baker->IsVerbose())
                 donut::log::info("Enqueuing shader variant of '%s'...", srcFullPath.string().c_str());
@@ -668,12 +670,17 @@ void PTPipelineBaker::Update(const std::shared_ptr<class ExtendedScene>& scene, 
 
         if (firstError!="")
         {
+            bool retry = false;
 #if _WIN32
-            extern HWND HelpersGetActiveWindow();
-            int result = MessageBoxA(HelpersGetActiveWindow(), firstError.c_str(),
-                "Shader compile error", MB_RETRYCANCEL | MB_ICONWARNING | MB_SETFOREGROUND | MB_TASKMODAL);
-            if (result == IDCANCEL)
+            if (!HelpersIsNonInteractive())
+            {
+                extern HWND HelpersGetActiveWindow();
+                int result = MessageBoxA(HelpersGetActiveWindow(), firstError.c_str(),
+                    "Shader compile error", MB_RETRYCANCEL | MB_ICONWARNING | MB_SETFOREGROUND | MB_TASKMODAL);
+                retry = result != IDCANCEL;
+            }
 #endif
+            if (!retry)
                 break;
 
             for (const std::shared_ptr<PTPipelineVariant>& variant : updateQueue)

@@ -277,12 +277,17 @@ void ComputePipelineBaker::Update(bool forceReload)
 
         if (!firstError.empty())
         {
+            bool retry = false;
 #if _WIN32
-            extern HWND HelpersGetActiveWindow();
-            int result = MessageBoxA(HelpersGetActiveWindow(), firstError.c_str(),
-                "Compute Shader Compile Error", MB_RETRYCANCEL | MB_ICONWARNING | MB_SETFOREGROUND | MB_TASKMODAL);
-            if (result == IDCANCEL)
+            if (!HelpersIsNonInteractive())
+            {
+                extern HWND HelpersGetActiveWindow();
+                int result = MessageBoxA(HelpersGetActiveWindow(), firstError.c_str(),
+                    "Compute Shader Compile Error", MB_RETRYCANCEL | MB_ICONWARNING | MB_SETFOREGROUND | MB_TASKMODAL);
+                retry = result != IDCANCEL;
+            }
 #endif
+            if (!retry)
                 break;
         }
         else
@@ -392,7 +397,8 @@ void ComputeShaderVariant::PrepareCompilation(std::filesystem::file_time_type la
         command += cmdResult.CommandBase;
         
 #if !COMPUTE_BAKER_EMBED_PDBS
-        command += " /Fd \"" + compiledFullPathPdb + "\"";
+        if (baker->GetCompilerConfig().GraphicsAPI != nvrhi::GraphicsAPI::VULKAN)
+            command += " /Fd \"" + compiledFullPathPdb + "\"";
 #endif
         command += " -Fo \"" + m_compiledFullPath + "\"";
 

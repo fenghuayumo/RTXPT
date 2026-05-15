@@ -121,6 +121,7 @@ bool CompressTextures(std::map<std::shared_ptr<donut::engine::LoadedTexture>, Te
 
 void HelpersRegisterActiveWindow(); // call this from process main thread to grab current main window; this is optional and only used for progress bar to appear centered in the main window
 void HelpersSetNonInteractive();
+bool HelpersIsNonInteractive();
 int  ProgressBarStart(const char * windowText);
 void ProgressBarStop(int slotIndex);
 void ProgressBarUpdate(int slotIndex, int percentage);

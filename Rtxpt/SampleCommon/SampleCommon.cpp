@@ -183,6 +183,11 @@ void HelpersSetNonInteractive()
     g_NonInteractive = true;
 }
 
+bool HelpersIsNonInteractive()
+{
+    return g_NonInteractive;
+}
+
 #ifdef _WIN32
 static std::atomic<HWND>    g_hActiveParentWindow(NULL);
 void HelpersRegisterActiveWindow()
@@ -359,6 +364,9 @@ bool IsWindowFullscreen()
 
 int ProgressBarStart(const char * windowText)
 {
+    if (g_NonInteractive)
+        return -1;
+
     // progress bar currently interfering with fullscreen so disable
     if (IsWindowFullscreen())
         return -1;

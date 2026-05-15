@@ -335,9 +335,9 @@ bool SampleBaseApp::InitDeviceAndWindow(const donut::app::DeviceCreationParamete
 {
     if (m_CmdLine.noWindow)
     {
-        if (!m_DeviceManager->CreateInstance(deviceParams))
+        if (!m_DeviceManager->CreateHeadlessDevice(deviceParams))
         {
-            donut::log::fatal("CreateDeviceAndSwapChain failed: Cannot initialize a graphics device with the requested parameters");
+            donut::log::fatal("CreateHeadlessDevice failed: Cannot initialize a graphics device with the requested parameters");
             return false;
         }
     }

@@ -226,6 +226,7 @@ RenderSession::RenderSession(const Config& cfg)
     // the renderer (CaptureScriptManager, Sample::Init, ...) consumes.
     m_cmdLine.width             = uint32_t(cfg.width);
     m_cmdLine.height            = uint32_t(cfg.height);
+    m_cmdLine.noWindow          = cfg.headless;
     m_cmdLine.useVulkan         = cfg.useVulkan;
     m_cmdLine.adapterIndex      = cfg.adapterIndex;
     m_cmdLine.debug             = cfg.debug;
@@ -296,29 +297,27 @@ bool RenderSession::InitDevice()
         deviceParams.d3d12DeviceFactory = m_d3d12DeviceFactory.Get();
 #endif
 
-    // Even in headless mode, we currently rely on a real GLFW window so the
-    // existing swap-chain & DLSS/Streamline code paths keep working.  We
-    // simply create the window invisible (GLFW_VISIBLE = FALSE is the donut
-    // default) and never call glfwShowWindow afterwards.
-    if (!glfwInit())
+    if (m_config.headless)
     {
-        log::error("RenderSession: glfwInit failed");
-        return false;
+        if (!m_deviceManager->CreateHeadlessDevice(deviceParams))
+        {
+            log::error("RenderSession: failed to create headless device and offscreen back buffers");
+            return false;
+        }
     }
-
-    if (!m_deviceManager->CreateWindowDeviceAndSwapChain(deviceParams, "rtxpt_py"))
+    else
     {
-        log::error("RenderSession: failed to create device and swap chain");
-        return false;
+        if (!m_deviceManager->CreateWindowDeviceAndSwapChain(deviceParams, "rtxpt_py"))
+        {
+            log::error("RenderSession: failed to create device and swap chain");
+            return false;
+        }
     }
 
     m_deviceManager->m_callbacks.beforePresent =
         [this](donut::app::DeviceManager& manager, uint32_t) {
             m_lastRenderedBackBufferIndex = manager.GetCurrentBackBufferIndex();
         };
-
-    if (m_config.headless && m_deviceManager->GetWindow())
-        glfwHideWindow(m_deviceManager->GetWindow());
 
     return true;
 }
@@ -485,11 +484,15 @@ bool RenderSession::SaveScreenshot(const std::string& outputPath)
     if (p.has_parent_path())
         EnsureDirectoryExists(p.parent_path());
 
+    nvrhi::ResourceStates state = m_config.headless
+        ? nvrhi::ResourceStates::RenderTarget
+        : nvrhi::ResourceStates::Present;
+
     return donut::engine::SaveTextureToFile(
         m_deviceManager->GetDevice(),
         commonPasses.get(),
         tex,
-        nvrhi::ResourceStates::Present,
+        state,
         outputPath.c_str());
 }
 

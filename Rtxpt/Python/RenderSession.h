@@ -21,8 +21,8 @@
 //    session->StepN(64);
 //    session->SaveScreenshot("out.png");
 //
-// Headless = the GLFW window is created but kept hidden, so the entire
-// renderer (DLSS / Streamline / RTXDI / NRD) keeps working unchanged.
+// Headless = no OS window or swap chain is created. The renderer uses
+// offscreen back buffers owned by DeviceManager.
 
 #pragma once
 
@@ -53,7 +53,7 @@ public:
     {
         int         width             = 1920;
         int         height            = 1080;
-        bool        headless          = true;     // hide the OS window
+        bool        headless          = true;     // render into offscreen back buffers
         bool        useVulkan         = false;    // false => DX12
         int         adapterIndex      = -1;       // -1 => default
         bool        debug             = false;

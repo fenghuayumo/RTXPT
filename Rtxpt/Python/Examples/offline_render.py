@@ -10,9 +10,8 @@ Usage:
                              --width 1280 --height 720 --spp 256 \
                              --out my_frame.png
 
-The renderer is created with `headless=True`, which keeps the OS window
-hidden but otherwise re-uses the exact same graphics pipeline as the
-interactive Rtxpt.exe (DLSS / RTXDI / NRD / etc).  This makes it easy to
+The renderer is created with `headless=True`, which uses offscreen back
+buffers without creating an OS window or swap chain. This makes it easy to
 script reference renders of variations of a scene from Python.
 """
 

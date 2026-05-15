@@ -62,8 +62,8 @@ r.save_screenshot("frame.png")
 r.close()
 ```
 
-`headless=True` keeps the OS window hidden but otherwise re-uses the same
-DX12/Vulkan + DLSS / RTXDI / NRD pipeline as `Rtxpt.exe`.
+`headless=True` creates a DX12/Vulkan device with offscreen back buffers,
+without creating an OS window or swap chain.
 
 ## Bindings overview
 

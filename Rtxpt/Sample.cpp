@@ -268,7 +268,7 @@ void Sample::Init(const std::string& preferredScene,
     globalBindingLayoutDesc.bindings.push_back(nvrhi::BindingLayoutItem::Texture_SRV(82));   // t_SSRBlurChain
     globalBindingLayoutDesc.bindings.push_back(nvrhi::BindingLayoutItem::Texture_SRV(83));   // t_BRDFLUT
     globalBindingLayoutDesc.bindings.push_back(nvrhi::BindingLayoutItem::Texture_SRV(84));   // t_DepthHierarchy
-    globalBindingLayoutDesc.bindings.push_back(nvrhi::BindingLayoutItem::ConstantBuffer(10)); // ReflectionConstants
+    globalBindingLayoutDesc.bindings.push_back(nvrhi::BindingLayoutItem::VolatileConstantBuffer(10)); // ReflectionConstants
     // SSRConstants removed - SSR now uses push constants instead of constant buffer
     
     // SSR result UAV (depth hierarchy UAVs u80-84 are in a dedicated binding set)
@@ -1031,16 +1031,25 @@ void Sample::FillPTPipelineGlobalMacros(std::vector<donut::engine::ShaderMacro> 
 {
     macros.clear();
 
-    assert(!m_ui.NVAPIHitObjectExtension || !m_ui.DXHitObjectExtension);
+    auto device = GetDevice();
+    const bool canUseNvapiHitObject =
+        m_ui.NVAPIHitObjectExtension &&
+        device->getGraphicsAPI() == nvrhi::GraphicsAPI::D3D12 &&
+        device->queryFeatureSupport(nvrhi::Feature::HlslExtensionUAV);
+    const bool canUseDxHitObject =
+        m_ui.DXHitObjectExtension &&
+        device->getGraphicsAPI() == nvrhi::GraphicsAPI::D3D12;
+
+    assert(!canUseNvapiHitObject || !canUseDxHitObject);
 
     macros.push_back({ "ENABLE_DEBUG_SURFACE_VIZ",  (m_ui.DebugView != DebugViewType::Disabled)?("1"):("0") });
     macros.push_back({ "ENABLE_DEBUG_LINES_VIZ",    (m_ui.ShowDebugLines)?("1"):("0") });
 
-    macros.push_back({ "USE_NVAPI_HIT_OBJECT_EXTENSION", (m_ui.NVAPIHitObjectExtension)?("1"):("0") });
-    macros.push_back({ "USE_NVAPI_REORDER_THREADS", (m_ui.NVAPIHitObjectExtension && m_ui.NVAPIReorderThreads)?("1"):("0") });
+    macros.push_back({ "USE_NVAPI_HIT_OBJECT_EXTENSION", canUseNvapiHitObject ? "1" : "0" });
+    macros.push_back({ "USE_NVAPI_REORDER_THREADS", (canUseNvapiHitObject && m_ui.NVAPIReorderThreads) ? "1" : "0" });
 
-    macros.push_back({ "USE_DX_HIT_OBJECT_EXTENSION", (m_ui.DXHitObjectExtension) ? ("1") : ("0") });
-    macros.push_back({ "USE_DX_MAYBE_REORDER_THREADS", (m_ui.DXHitObjectExtension && m_ui.DXMaybeReorderThreads) ? ("1") : ("0") });
+    macros.push_back({ "USE_DX_HIT_OBJECT_EXTENSION", canUseDxHitObject ? "1" : "0" });
+    macros.push_back({ "USE_DX_MAYBE_REORDER_THREADS", (canUseDxHitObject && m_ui.DXMaybeReorderThreads) ? "1" : "0" });
 
     macros.push_back({ "PT_ENABLE_RUSSIAN_ROULETTE", (m_ui.EnableRussianRoulette) ? ("1") : ("0") });
 
@@ -2925,7 +2934,7 @@ void Sample::ApplyReferenceOIDN()
     {
         nvrhi::TextureDesc oidnOutputDesc = processedDesc;
         oidnOutputDesc.debugName = "ReferenceOIDNDenoisedOutput";
-        oidnOutputDesc.initialState = nvrhi::ResourceStates::Common;
+        oidnOutputDesc.initialState = nvrhi::ResourceStates::CopySource;
         oidnOutputDesc.keepInitialState = true;
         m_oidnDenoisedOutput = GetDevice()->createTexture(oidnOutputDesc);
         m_oidnDenoisedOutputValid = false;

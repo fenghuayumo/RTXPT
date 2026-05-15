@@ -148,7 +148,7 @@ NB_MODULE(rtxpt, m)
     nb::class_<PyRenderer>(m, "Renderer",
         "Standalone path-tracer renderer.  Each instance owns its own GPU\n"
         "device (DX12 / Vulkan), shaders, scene, and back buffer.  In headless\n"
-        "mode the OS window is created but kept hidden.\n\n"
+        "mode rendering uses offscreen back buffers without creating an OS window.\n\n"
         "Example:\n"
         "    import rtxpt\n"
         "    r = rtxpt.Renderer(width=1280, height=720, headless=True,\n"
