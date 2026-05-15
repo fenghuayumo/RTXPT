@@ -419,10 +419,12 @@ void RegisterCoreBindings(nb::module_& m)
 
         .def_rw("enable_gaussian_splats",        &SampleUIData::EnableGaussianSplats)
         .def_rw("gaussian_splat_depth_test",     &SampleUIData::GaussianSplatDepthTest)
+        .def_rw("gaussian_splat_shadows",        &SampleUIData::GaussianSplatShadows)
         .def_rw("gaussian_splat_scale",          &SampleUIData::GaussianSplatScale)
         .def_rw("gaussian_splat_alpha_scale",    &SampleUIData::GaussianSplatAlphaScale)
         .def_rw("gaussian_splat_brightness",     &SampleUIData::GaussianSplatBrightness)
         .def_rw("gaussian_splat_alpha_cull_threshold", &SampleUIData::GaussianSplatAlphaCullThreshold)
+        .def_rw("gaussian_splat_shadow_strength", &SampleUIData::GaussianSplatShadowStrength)
         .def_ro("gaussian_splat_count",          &SampleUIData::GaussianSplatCount)
         .def_ro("gaussian_splat_file_name",      &SampleUIData::GaussianSplatFileName)
 

@@ -56,9 +56,14 @@ struct SampleConstants
     float4 denoisingHitParamConsts;
 
     uint MaterialCount;
-    uint _padding0;
-    uint _padding1;
-    uint _padding2;
+    uint GaussianSplatShadowCount;
+    uint GaussianSplatShadowsEnabled;
+    float GaussianSplatShadowScale;
+
+    float GaussianSplatShadowAlphaThreshold;
+    float _padding0;
+    float _padding1;
+    float _padding2;
 };
 
 // Used in a couple of places like multipass postprocess where you want to keep SampleConstants the same for all passes, but send just a few additional per-pass parameters 
@@ -86,7 +91,14 @@ struct GaussianSplatConstants
     float alphaCullThreshold;
     uint shDegree;
     uint depthTest;
+    uint shadowsEnabled;
+
+    float4 shadowDirectionToLight;
+
+    float shadowStrength;
+    float shadowRayTMax;
     uint unused0;
+    uint unused1;
 };
 
 struct GaussianSplatData

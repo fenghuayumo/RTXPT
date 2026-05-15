@@ -33,10 +33,14 @@ struct GaussianSplatRenderSettings
 {
     bool enabled = true;
     bool depthTest = true;
+    bool shadowsEnabled = true;
     float splatScale = 1.0f;
     float alphaScale = 1.0f;
     float brightness = 1.0f;
     float alphaCullThreshold = 1.0f / 255.0f;
+    float shadowStrength = 0.75f;
+    float shadowRayTMax = 100000.0f;
+    donut::math::float3 shadowDirectionToLight = donut::math::float3(0.0f, 1.0f, 0.0f);
 };
 
 class GaussianSplatPass
@@ -51,19 +55,23 @@ public:
     bool LoadFromFile(const std::filesystem::path& fileName, bool convertRdfToDonut);
 
     void CreatePipeline(const RenderTargets& renderTargets);
+    void BuildAccelerationStructures(nvrhi::ICommandList* commandList);
 
     void Render(
         nvrhi::ICommandList* commandList,
         const donut::engine::IView& view,
+        nvrhi::rt::IAccelStruct* meshTopLevelAS,
         const RenderTargets& renderTargets,
         const GaussianSplatRenderSettings& settings);
 
     [[nodiscard]] bool HasSplats() const { return m_splatCount > 0; }
     [[nodiscard]] uint32_t GetSplatCount() const { return m_splatCount; }
     [[nodiscard]] const std::string& GetSourceFileName() const { return m_sourceFileName; }
+    [[nodiscard]] nvrhi::rt::IAccelStruct* GetTopLevelAS() const { return m_splatTopLevelAS.Get(); }
+    [[nodiscard]] nvrhi::IBuffer* GetSplatBuffer() const { return m_splatBuffer.Get(); }
 
 private:
-    void CreateBindingSets(const RenderTargets& renderTargets);
+    void CreateBindingSets(const RenderTargets& renderTargets, nvrhi::rt::IAccelStruct* meshTopLevelAS);
     void UploadSplatDataIfNeeded(nvrhi::ICommandList* commandList);
     void SortSplats(nvrhi::ICommandList* commandList, const SimpleViewConstants& viewConstants);
     [[nodiscard]] bool CanReuseSort(const SimpleViewConstants& viewConstants) const;
@@ -79,6 +87,7 @@ private:
     nvrhi::BufferHandle m_indexBuffer;
     nvrhi::BufferHandle m_sortKeyBuffer;
     nvrhi::BufferHandle m_sortControlBuffer;
+    nvrhi::BufferHandle m_splatAabbBuffer;
 
     nvrhi::BindingLayoutHandle m_renderBindingLayout;
     nvrhi::BindingLayoutHandle m_sortKeyBindingLayout;
@@ -90,12 +99,16 @@ private:
     nvrhi::ShaderHandle m_sortKeyShader;
     nvrhi::GraphicsPipelineHandle m_renderPipeline;
     nvrhi::ComputePipelineHandle m_sortKeyPipeline;
+    nvrhi::rt::AccelStructHandle m_splatBottomLevelAS;
+    nvrhi::rt::AccelStructHandle m_splatTopLevelAS;
+    nvrhi::rt::IAccelStruct* m_renderMeshTopLevelAS = nullptr;
 
     std::vector<GaussianSplatData> m_splats;
     std::vector<donut::math::float4> m_shCoefficients;
     uint32_t m_splatCount = 0;
     uint32_t m_shDegree = 0;
     bool m_splatUploadPending = false;
+    bool m_accelStructBuildPending = false;
     bool m_sortCacheValid = false;
     uint32_t m_cachedSortSplatCount = 0;
     donut::math::float4x4 m_cachedSortWorldToClipNoOffset = donut::math::float4x4::identity();

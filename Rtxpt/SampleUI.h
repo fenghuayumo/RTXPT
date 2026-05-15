@@ -321,10 +321,12 @@ struct SampleUIData
 
     bool                                EnableGaussianSplats = true;
     bool                                GaussianSplatDepthTest = true;
+    bool                                GaussianSplatShadows = true;
     float                               GaussianSplatScale = 1.0f;
     float                               GaussianSplatAlphaScale = 1.0f;
     float                               GaussianSplatBrightness = 1.0f;
     float                               GaussianSplatAlphaCullThreshold = 1.0f / 255.0f;
+    float                               GaussianSplatShadowStrength = 0.75f;
     uint32_t                            GaussianSplatCount = 0;
     std::string                         GaussianSplatFileName;
 

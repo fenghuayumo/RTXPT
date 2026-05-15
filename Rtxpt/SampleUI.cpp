@@ -636,10 +636,12 @@ void SampleUI::buildUI(void)
                 ImGui::Text("Splats: %u", m_ui.GaussianSplatCount);
                 RESET_ON_CHANGE(ImGui::Checkbox("Enabled", &m_ui.EnableGaussianSplats));
                 RESET_ON_CHANGE(ImGui::Checkbox("Mesh Depth Test", &m_ui.GaussianSplatDepthTest));
+                RESET_ON_CHANGE(ImGui::Checkbox("Hybrid Shadows", &m_ui.GaussianSplatShadows));
                 RESET_ON_CHANGE(ImGui::DragFloat("Scale", &m_ui.GaussianSplatScale, 0.01f, 0.01f, 10.0f, "%.2f"));
                 RESET_ON_CHANGE(ImGui::DragFloat("Alpha", &m_ui.GaussianSplatAlphaScale, 0.01f, 0.0f, 4.0f, "%.2f"));
                 RESET_ON_CHANGE(ImGui::DragFloat("Brightness", &m_ui.GaussianSplatBrightness, 0.01f, 0.0f, 16.0f, "%.2f"));
                 RESET_ON_CHANGE(ImGui::DragFloat("Alpha Cull", &m_ui.GaussianSplatAlphaCullThreshold, 0.001f, 0.0f, 0.25f, "%.3f"));
+                RESET_ON_CHANGE(ImGui::DragFloat("Shadow Strength", &m_ui.GaussianSplatShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f"));
             }
 
             if (ImGui::CollapsingHeader("Environment Map"))

@@ -36,6 +36,8 @@ using namespace donut::math;
 namespace
 {
     constexpr float kSH_C0 = 0.28209479177387814f;
+    constexpr float kGaussianSplatAsMaxUiScale = 10.0f;
+    constexpr float kGaussianSplatAsRadius = 2.8284271247461903f;
     constexpr std::array<float, 15> kRdfToRubShFlip = {
         -1.0f, -1.0f, 1.0f, -1.0f, 1.0f,
          1.0f, -1.0f, 1.0f, -1.0f, 1.0f,
@@ -85,6 +87,36 @@ namespace
         float color[3] = { 1.0f, 1.0f, 1.0f };
         float alpha = 1.0f;
     };
+
+    std::vector<nvrhi::rt::GeometryAABB> BuildGaussianAabbs(const std::vector<GaussianSplatData>& splats)
+    {
+        std::vector<nvrhi::rt::GeometryAABB> aabbs;
+        aabbs.reserve(splats.size());
+
+        for (const GaussianSplatData& splat : splats)
+        {
+            const float3 center = splat.centerOpacity.xyz();
+            const float3 variance = float3(
+                std::max(splat.covariance0.x, 1e-8f),
+                std::max(splat.covariance0.w, 1e-8f),
+                std::max(splat.covariance1.y, 1e-8f));
+            const float3 extent = float3(
+                std::sqrt(variance.x),
+                std::sqrt(variance.y),
+                std::sqrt(variance.z)) * (kGaussianSplatAsRadius * kGaussianSplatAsMaxUiScale);
+
+            nvrhi::rt::GeometryAABB aabb = {};
+            aabb.minX = center.x - extent.x;
+            aabb.minY = center.y - extent.y;
+            aabb.minZ = center.z - extent.z;
+            aabb.maxX = center.x + extent.x;
+            aabb.maxY = center.y + extent.y;
+            aabb.maxZ = center.z + extent.z;
+            aabbs.push_back(aabb);
+        }
+
+        return aabbs;
+    }
 
     std::string ToLower(std::string value)
     {
@@ -748,7 +780,8 @@ GaussianSplatPass::GaussianSplatPass(
         nvrhi::BindingLayoutItem::StructuredBuffer_SRV(0),
         nvrhi::BindingLayoutItem::TypedBuffer_SRV(1),
         nvrhi::BindingLayoutItem::StructuredBuffer_SRV(2),
-        nvrhi::BindingLayoutItem::Texture_SRV(3)
+        nvrhi::BindingLayoutItem::Texture_SRV(3),
+        nvrhi::BindingLayoutItem::RayTracingAccelStruct(4)
     };
     m_renderBindingLayout = m_device->createBindingLayout(renderLayoutDesc);
 
@@ -839,18 +872,83 @@ bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool
     sortControlDesc.keepInitialState = true;
     m_sortControlBuffer = m_device->createBuffer(sortControlDesc);
 
+    nvrhi::BufferDesc aabbBufferDesc;
+    aabbBufferDesc.byteSize = uint64_t(m_splatCount) * sizeof(nvrhi::rt::GeometryAABB);
+    aabbBufferDesc.debugName = "GaussianSplatAabbBuffer";
+    aabbBufferDesc.isAccelStructBuildInput = true;
+    aabbBufferDesc.initialState = nvrhi::ResourceStates::AccelStructBuildInput;
+    aabbBufferDesc.keepInitialState = true;
+    m_splatAabbBuffer = m_device->createBuffer(aabbBufferDesc);
+
     m_renderBindingSet = nullptr;
     m_sortKeyBindingSet = nullptr;
+    m_splatBottomLevelAS = nullptr;
+    m_splatTopLevelAS = nullptr;
     m_sourceFileName = fileName.string();
     m_splatUploadPending = true;
+    m_accelStructBuildPending = true;
     InvalidateSortCache();
 
     return true;
 }
 
-void GaussianSplatPass::CreateBindingSets(const RenderTargets& renderTargets)
+void GaussianSplatPass::BuildAccelerationStructures(nvrhi::ICommandList* commandList)
 {
-    if (!m_splatBuffer || !m_shBuffer || !m_indexBuffer || !m_sortKeyBuffer)
+    if (!HasSplats() || !m_splatAabbBuffer)
+        return;
+
+    UploadSplatDataIfNeeded(commandList);
+
+    std::vector<nvrhi::rt::GeometryAABB> aabbs = BuildGaussianAabbs(m_splats);
+    commandList->writeBuffer(m_splatAabbBuffer, aabbs.data(), aabbs.size() * sizeof(nvrhi::rt::GeometryAABB));
+    commandList->setBufferState(m_splatAabbBuffer, nvrhi::ResourceStates::AccelStructBuildInput);
+    commandList->commitBarriers();
+
+    nvrhi::rt::GeometryDesc geometryDesc;
+    nvrhi::rt::GeometryAABBs aabbGeometry;
+    aabbGeometry.buffer = m_splatAabbBuffer;
+    aabbGeometry.offset = 0;
+    aabbGeometry.count = m_splatCount;
+    aabbGeometry.stride = sizeof(nvrhi::rt::GeometryAABB);
+    geometryDesc.setAABBs(aabbGeometry);
+    geometryDesc.flags = nvrhi::rt::GeometryFlags::NoDuplicateAnyHitInvocation;
+
+    nvrhi::rt::AccelStructDesc blasDesc;
+    blasDesc.isTopLevel = false;
+    blasDesc.debugName = "GaussianSplatAabbBLAS";
+    blasDesc.buildFlags = nvrhi::rt::AccelStructBuildFlags::PreferFastTrace | nvrhi::rt::AccelStructBuildFlags::AllowUpdate;
+    blasDesc.bottomLevelGeometries.push_back(geometryDesc);
+
+    m_splatBottomLevelAS = m_device->createAccelStruct(blasDesc);
+    nvrhi::utils::BuildBottomLevelAccelStruct(commandList, m_splatBottomLevelAS, blasDesc);
+
+    nvrhi::rt::AccelStructDesc tlasDesc;
+    tlasDesc.isTopLevel = true;
+    tlasDesc.debugName = "GaussianSplatTLAS";
+    tlasDesc.topLevelMaxInstances = 1;
+    tlasDesc.buildFlags = nvrhi::rt::AccelStructBuildFlags::PreferFastTrace | nvrhi::rt::AccelStructBuildFlags::AllowUpdate;
+    m_splatTopLevelAS = m_device->createAccelStruct(tlasDesc);
+
+    nvrhi::rt::InstanceDesc instanceDesc = {};
+    instanceDesc.bottomLevelAS = m_splatBottomLevelAS;
+    instanceDesc.instanceMask = 0xff;
+    instanceDesc.instanceID = 0;
+    instanceDesc.instanceContributionToHitGroupIndex = 0;
+    instanceDesc.flags = nvrhi::rt::InstanceFlags::ForceNonOpaque;
+    std::memcpy(instanceDesc.transform, nvrhi::rt::c_IdentityTransform, sizeof(nvrhi::rt::AffineTransform));
+
+    commandList->buildTopLevelAccelStruct(
+        m_splatTopLevelAS,
+        &instanceDesc,
+        1,
+        nvrhi::rt::AccelStructBuildFlags::PreferFastTrace | nvrhi::rt::AccelStructBuildFlags::AllowUpdate);
+
+    m_accelStructBuildPending = false;
+}
+
+void GaussianSplatPass::CreateBindingSets(const RenderTargets& renderTargets, nvrhi::rt::IAccelStruct* meshTopLevelAS)
+{
+    if (!m_splatBuffer || !m_shBuffer || !m_indexBuffer || !m_sortKeyBuffer || meshTopLevelAS == nullptr)
         return;
 
     nvrhi::BindingSetDesc renderBindingSetDesc;
@@ -859,9 +957,11 @@ void GaussianSplatPass::CreateBindingSets(const RenderTargets& renderTargets)
         nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_splatBuffer),
         nvrhi::BindingSetItem::TypedBuffer_SRV(1, m_indexBuffer, nvrhi::Format::R32_UINT),
         nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_shBuffer),
-        nvrhi::BindingSetItem::Texture_SRV(3, renderTargets.Depth)
+        nvrhi::BindingSetItem::Texture_SRV(3, renderTargets.Depth),
+        nvrhi::BindingSetItem::RayTracingAccelStruct(4, meshTopLevelAS)
     };
     m_renderBindingSet = m_device->createBindingSet(renderBindingSetDesc, m_renderBindingLayout);
+    m_renderMeshTopLevelAS = meshTopLevelAS;
 
     nvrhi::BindingSetDesc sortKeyBindingSetDesc;
     sortKeyBindingSetDesc.bindings = {
@@ -912,7 +1012,8 @@ void GaussianSplatPass::CreatePipeline(const RenderTargets& renderTargets)
     computePipelineDesc.CS = m_sortKeyShader;
     m_sortKeyPipeline = m_device->createComputePipeline(computePipelineDesc);
 
-    CreateBindingSets(renderTargets);
+    m_renderBindingSet = nullptr;
+    m_renderMeshTopLevelAS = nullptr;
 }
 
 void GaussianSplatPass::UploadSplatDataIfNeeded(nvrhi::ICommandList* commandList)
@@ -961,15 +1062,25 @@ void GaussianSplatPass::SortSplats(nvrhi::ICommandList* commandList, const Simpl
 void GaussianSplatPass::Render(
     nvrhi::ICommandList* commandList,
     const donut::engine::IView& view,
+    nvrhi::rt::IAccelStruct* meshTopLevelAS,
     const RenderTargets& renderTargets,
     const GaussianSplatRenderSettings& settings)
 {
-    if (!settings.enabled || !HasSplats() || !m_renderPipeline || !m_renderBindingSet || !m_gpuSort)
+    if (!settings.enabled || !HasSplats() || !m_renderPipeline || !m_gpuSort || meshTopLevelAS == nullptr)
         return;
 
     commandList->beginMarker("GaussianSplats");
 
     UploadSplatDataIfNeeded(commandList);
+
+    if (!m_renderBindingSet || m_renderMeshTopLevelAS != meshTopLevelAS)
+        CreateBindingSets(renderTargets, meshTopLevelAS);
+
+    if (!m_renderBindingSet)
+    {
+        commandList->endMarker();
+        return;
+    }
 
     PlanarViewConstants planarView = {};
     view.FillPlanarViewConstants(planarView);
@@ -985,6 +1096,14 @@ void GaussianSplatPass::Render(
     constants.alphaCullThreshold = settings.alphaCullThreshold;
     constants.shDegree = m_shDegree;
     constants.depthTest = settings.depthTest ? 1u : 0u;
+    constants.shadowsEnabled = settings.shadowsEnabled ? 1u : 0u;
+    float3 shadowDir = settings.shadowDirectionToLight;
+    if (length(shadowDir) < 1e-4f)
+        shadowDir = float3(0.0f, 1.0f, 0.0f);
+    shadowDir = normalize(shadowDir);
+    constants.shadowDirectionToLight = float4(shadowDir.x, shadowDir.y, shadowDir.z, 0.0f);
+    constants.shadowStrength = settings.shadowStrength;
+    constants.shadowRayTMax = settings.shadowRayTMax;
     commandList->writeBuffer(m_constantBuffer, &constants, sizeof(constants));
 
     SortSplats(commandList, constants.view);

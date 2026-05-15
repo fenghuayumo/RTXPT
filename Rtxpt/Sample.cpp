@@ -208,6 +208,8 @@ void Sample::Init(const std::string& preferredScene,
         nvrhi::BindingLayoutItem::StructuredBuffer_SRV(4),
         nvrhi::BindingLayoutItem::StructuredBuffer_SRV(5),
         nvrhi::BindingLayoutItem::Texture_SRV(6),               // t_LdrColorScratch
+        nvrhi::BindingLayoutItem::RayTracingAccelStruct(7),     // GaussianSplatBVH
+        nvrhi::BindingLayoutItem::StructuredBuffer_SRV(8),      // t_GaussianShadowSplats
         nvrhi::BindingLayoutItem::Texture_SRV(10),              // t_EnvironmentMap
         nvrhi::BindingLayoutItem::Texture_SRV(11),              // t_EnvironmentMapImportanceMap        <- TODO: remove this, no longer used
         nvrhi::BindingLayoutItem::StructuredBuffer_SRV(12),     // t_LightsCB
@@ -483,6 +485,7 @@ bool Sample::LoadGaussianSplatFile(const std::filesystem::path& fileName, bool c
     m_ui.GaussianSplatFileName = splatPath.string();
     m_ui.GaussianSplatCount = m_gaussianSplatPass->GetSplatCount();
     m_ui.EnableGaussianSplats = true;
+    m_ui.AccelerationStructRebuildRequested = true;
     m_ui.ResetAccumulation = true;
 
     if (m_renderTargets != nullptr && m_shaderDebug != nullptr)
@@ -1247,6 +1250,8 @@ void Sample::CreateAccelStructs(nvrhi::ICommandList* commandList)
     if(m_ommBaker) m_ommBaker->CreateOpacityMicromaps(*m_scene);
     CreateBlases(commandList);
     CreateTlas(commandList);
+    if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->HasSplats())
+        m_gaussianSplatPass->BuildAccelerationStructures(commandList);
 }
 
 void Sample::RecreateAccelStructs(nvrhi::ICommandList* commandList)
@@ -2035,13 +2040,27 @@ void Sample::RenderGaussianSplats()
     settings.alphaScale = m_ui.GaussianSplatAlphaScale;
     settings.brightness = m_ui.GaussianSplatBrightness;
     settings.alphaCullThreshold = m_ui.GaussianSplatAlphaCullThreshold;
+    settings.shadowsEnabled = m_ui.GaussianSplatShadows;
+    settings.shadowStrength = m_ui.GaussianSplatShadowStrength;
+
+    for (const auto& light : m_lights)
+    {
+        std::shared_ptr<DirectionalLight> dirLight = std::dynamic_pointer_cast<DirectionalLight>(light);
+        if (dirLight != nullptr)
+        {
+            LightConstants lightConstants;
+            dirLight->FillLightConstants(lightConstants);
+            settings.shadowDirectionToLight = -lightConstants.direction;
+            break;
+        }
+    }
 
     donut::engine::PlanarView splatView = *m_view;
     splatView.SetViewport(nvrhi::Viewport(float(m_displaySize.x), float(m_displaySize.y)));
     splatView.SetPixelOffset(dm::float2::zero());
     splatView.UpdateCache();
 
-    m_gaussianSplatPass->Render(m_commandList, splatView, *m_renderTargets, settings);
+    m_gaussianSplatPass->Render(m_commandList, splatView, m_topLevelAS.Get(), *m_renderTargets, settings);
 }
 
 void Sample::Render(nvrhi::IFramebuffer* framebuffer)
@@ -2300,7 +2319,14 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
     {
         UpdatePathTracerConstants(constants.ptConsts, cameraData);
         constants.MaterialCount = m_materialsBaker->GetMaterialDataCount(); // m_scene->GetSceneGraph()->GetMaterials().size();
-        constants._padding1 = 0;
+        constants.GaussianSplatShadowCount = (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->GetTopLevelAS() != nullptr)
+            ? m_gaussianSplatPass->GetSplatCount()
+            : 0;
+        constants.GaussianSplatShadowsEnabled = (m_ui.GaussianSplatShadows && constants.GaussianSplatShadowCount > 0) ? 1u : 0u;
+        constants.GaussianSplatShadowScale = m_ui.GaussianSplatScale;
+        constants.GaussianSplatShadowAlphaThreshold = m_ui.GaussianSplatAlphaCullThreshold;
+        constants._padding0 = 0.0f;
+        constants._padding1 = 0.0f;
         constants._padding2 = 0;
 
         constants.envMapSceneParams = m_envMapSceneParams;
@@ -2483,6 +2509,14 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
 void Sample::RecreateBindingSet()
 {
 	// WARNING: this must match the layout of the m_bindingLayout (or switch to CreateBindingSetAndLayout)
+    nvrhi::rt::IAccelStruct* gaussianSplatAS = m_topLevelAS;
+    nvrhi::IBuffer* gaussianSplatBuffer = m_materialsBaker->GetMaterialDataBuffer();
+    if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->GetTopLevelAS() != nullptr && m_gaussianSplatPass->GetSplatBuffer() != nullptr)
+    {
+        gaussianSplatAS = m_gaussianSplatPass->GetTopLevelAS();
+        gaussianSplatBuffer = m_gaussianSplatPass->GetSplatBuffer();
+    }
+
     // Fixed resources that do not change between binding sets
     nvrhi::BindingSetDesc bindingSetDescBase;
     bindingSetDescBase.bindings = {
@@ -2496,6 +2530,8 @@ void Sample::RecreateBindingSet()
         nvrhi::BindingSetItem::StructuredBuffer_SRV(4, (m_ommBaker)?(m_ommBaker->GetGeometryDebugBuffer()):(m_materialsBaker->GetMaterialDataBuffer().Get()) ),   // YUCK
         nvrhi::BindingSetItem::StructuredBuffer_SRV(5, m_materialsBaker->GetMaterialDataBuffer()),
         nvrhi::BindingSetItem::Texture_SRV(6,  m_renderTargets->LdrColorScratch, nvrhi::Format::SRGBA8_UNORM),
+        nvrhi::BindingSetItem::RayTracingAccelStruct(7, gaussianSplatAS),
+        nvrhi::BindingSetItem::StructuredBuffer_SRV(8, gaussianSplatBuffer),
         nvrhi::BindingSetItem::Texture_SRV(10, m_envMapBaker->GetEnvMapCube()), //m_EnvironmentMap->IsEnvMapLoaded() ? m_EnvironmentMap->GetEnvironmentMap() : m_CommonPasses->m_BlackTexture),
         nvrhi::BindingSetItem::Texture_SRV(11, m_envMapBaker->GetImportanceSampling()->GetImportanceMapOnly()), //m_EnvironmentMap->IsImportanceMapLoaded() ? m_EnvironmentMap->GetImportanceMap() : m_CommonPasses->m_BlackTexture),
         nvrhi::BindingSetItem::StructuredBuffer_SRV(12, m_lightsBaker->GetControlBuffer()),

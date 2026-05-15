@@ -41,12 +41,16 @@ void cs_sort_keys(uint splatIndex : SV_DispatchThreadID)
 Buffer<uint> t_SplatIndices : register(t1);
 StructuredBuffer<float4> t_SplatSH : register(t2);
 Texture2D<float> t_Depth : register(t3);
+RaytracingAccelerationStructure t_MeshBVH : register(t4);
+
+#include "../Shaders/HybridGaussianShadow.hlsli"
 
 struct VertexOutput
 {
     float4 position : SV_Position;
     float2 fragPos : TEXCOORD0;
     nointerpolation float4 color : COLOR0;
+    nointerpolation float3 worldCenter : TEXCOORD1;
 };
 
 static const float kSqrt8 = 2.8284271247461903f;
@@ -263,6 +267,7 @@ VertexOutput vs_main(uint vertexId : SV_VertexID)
     output.position = float4(ndcCenter.xy + ndcOffset, ndcCenter.z, 1.0f);
     output.fragPos = corner * kSqrt8;
     output.color = float4(SrgbToLinear(displayColor) * g_Const.brightness, splat.centerOpacity.w);
+    output.worldCenter = splat.centerOpacity.xyz;
 
     return output;
 }
@@ -292,7 +297,20 @@ float4 ps_main(VertexOutput input) : SV_Target0
         }
     }
 
-    return float4(input.color.rgb, saturate(opacity));
+    float shadow = 1.0f;
+    if (g_Const.shadowsEnabled != 0 && g_Const.shadowStrength > 0.0f)
+    {
+        RayDesc shadowRay;
+        shadowRay.Origin = input.worldCenter + g_Const.shadowDirectionToLight.xyz * 0.01f;
+        shadowRay.Direction = g_Const.shadowDirectionToLight.xyz;
+        shadowRay.TMin = 0.0f;
+        shadowRay.TMax = g_Const.shadowRayTMax;
+
+        if (HybridGaussian_TraceMeshShadow(t_MeshBVH, shadowRay))
+            shadow = 1.0f - saturate(g_Const.shadowStrength);
+    }
+
+    return float4(input.color.rgb * shadow, saturate(opacity));
 }
 
 #endif

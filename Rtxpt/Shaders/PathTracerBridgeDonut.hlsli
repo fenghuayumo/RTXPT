@@ -31,6 +31,7 @@
 #include "Bindings/SamplerBindings.hlsli"
 
 #include "Libraries\MicroRng.hlsli"
+#include "HybridGaussianShadow.hlsli"
 
 
 #if PATH_TRACER_MODE==PATH_TRACER_MODE_BUILD_STABLE_PLANES // build
@@ -1026,7 +1027,19 @@ bool Bridge::traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pa
         debug.DrawLine(ray.Origin, ray.Origin+ray.Direction*ray.TMax, float4(visible.x, visible.x, 0.8, 0.2), float4(visible.x, visible.x, 0.8, 0.2));
 #endif
 
-    return !rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+    bool visibilityResult = rayQuery.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
+    if (visibilityResult && g_Const.GaussianSplatShadowsEnabled != 0)
+    {
+        visibilityResult = !HybridGaussian_TraceGaussianShadow(
+            GaussianSplatBVH,
+            t_GaussianShadowSplats,
+            g_Const.GaussianSplatShadowCount,
+            ray,
+            g_Const.GaussianSplatShadowScale,
+            g_Const.GaussianSplatShadowAlphaThreshold);
+    }
+
+    return visibilityResult;
 }
 
 void Bridge::traceScatterRay(const PathState path, inout RayQuery<RAY_FLAG_NONE, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS> rayQuery, const float2 tMinMax, DebugContext debug)

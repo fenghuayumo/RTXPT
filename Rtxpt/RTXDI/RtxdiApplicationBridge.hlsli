@@ -208,6 +208,19 @@ RayHitInfo TraceVisibilityRay(RaytracingAccelerationStructure accelStruct, RayDe
         outHitInfo.InitTriangleHit(rayQuery.CommittedInstanceID(), rayQuery.CommittedGeometryIndex(), rayQuery.CommittedPrimitiveIndex(), rayQuery.CommittedTriangleBarycentrics());
         return outHitInfo;
     }
+    else if (g_Const.GaussianSplatShadowsEnabled != 0
+        && HybridGaussian_TraceGaussianShadow(
+            GaussianSplatBVH,
+            t_GaussianShadowSplats,
+            g_Const.GaussianSplatShadowCount,
+            ray,
+            g_Const.GaussianSplatShadowScale,
+            g_Const.GaussianSplatShadowAlphaThreshold))
+    {
+        RayHitInfo outHitInfo;
+        outHitInfo.InitTriangleHit(0, 0, 0, 0.0f);
+        return outHitInfo;
+    }
     else
     {
         RayHitInfo outHitInfo;
