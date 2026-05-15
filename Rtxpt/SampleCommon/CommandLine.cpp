@@ -63,7 +63,9 @@ bool CommandLineOptions::InitFromCommandLine(int _argc, char const* const* _argv
             ("disablePostProcessFilters", "Disable post-process filters like bloom", value(DisablePostProcessFilters))
             ("cameraPosDirUp", "Specify camera location to set after loading the scene; format is 9 comma separated values; can be obtained via UI Camera->Copy TO clipboard", value(cameraPosDirUp))
             ("propShowTags", "To show special props only if tag found in list (comma separated values)", value(PropShowTags))
-            ("propCameraAttach", "After load, try to attach camera to the named prop", value(PropCameraAttach))            
+            ("propCameraAttach", "After load, try to attach camera to the named prop", value(PropCameraAttach))
+            ("pythonScript", "Path to a Python (.py) file executed once after the scene is loaded; uses the embedded `rtxpt` module.", value(pythonScript))
+            ("pythonExpr", "Inline Python expression executed once after the scene is loaded.", value(pythonExpr))
             ;
 
 		int argc = _argc;

@@ -59,6 +59,12 @@ struct CommandLineOptions
     std::string PropShowTags        = "";
     std::string PropCameraAttach    = "";
 
+    // Embedded Python scripting hooks.  When --pythonScript is given the
+    // script is enqueued for execution right after the scene finishes loading.
+    // --pythonExpr runs an inline expression with the same lifecycle.
+    std::string pythonScript        = "";
+    std::string pythonExpr          = "";
+
 	CommandLineOptions(){}
 
 	bool InitFromCommandLine(int argc, char const* const* argv);

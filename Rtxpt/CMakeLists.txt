@@ -16,6 +16,26 @@ list(REMOVE_ITEM shared_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/AdvancedSample.cpp"
 )
 
+# Strip the Python sources from the generic shared_sources list - they are handled
+# below using nanobind helpers (only added when RTXPT_WITH_PYTHON is enabled).
+file(GLOB rtxpt_python_sources
+    "${CMAKE_CURRENT_SOURCE_DIR}/Python/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Python/*.h"
+)
+if (rtxpt_python_sources)
+    list(REMOVE_ITEM shared_sources ${rtxpt_python_sources})
+endif()
+
+# The two NB_MODULE entry points are mutually exclusive (one defines the
+# embed-mode `rtxpt` module that lives inside Rtxpt.exe, the other defines
+# the Python extension `rtxpt.pyd`).  They are added to their respective
+# targets later - never to RtxptCore.
+set(rtxpt_python_core_sources ${rtxpt_python_sources})
+list(REMOVE_ITEM rtxpt_python_core_sources
+    "${CMAKE_CURRENT_SOURCE_DIR}/Python/PythonBindings_Embed.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Python/PythonBindings_Extension.cpp"
+)
+
 file(GLOB NRD_INTEGRATION_HEADERS "../External/Nrd/Integration/*.h" "../External/Nrd/Integration/*.hpp")
 source_group("RayTracingDenoiser" FILES ${NRD_INTEGRATION_HEADERS})
 
@@ -130,9 +150,45 @@ target_link_libraries(RtxptCore PUBLIC cxxopts donut_render donut_app donut_engi
 target_include_directories(RtxptCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "../External/Nrd/Include" ${CMAKE_SOURCE_DIR}/External/Rtxdi/Include)
 target_compile_definitions(RtxptCore PUBLIC RTXPT_D3D12_WITH_NVAPI=$<BOOL:${NVRHI_WITH_NVAPI}>)
 target_compile_definitions(RtxptCore PUBLIC RTXPT_WITH_OIDN=$<BOOL:${RTXPT_WITH_OIDN}>)
+target_compile_definitions(RtxptCore PUBLIC RTXPT_WITH_PYTHON=$<BOOL:${RTXPT_WITH_PYTHON}>)
 if (RTXPT_WITH_OIDN)
     target_link_libraries(RtxptCore PUBLIC OpenImageDenoise)
 endif()
+
+# -------------------------------------------------------------------
+# Embedded Python scripting (nanobind + CPython development library)
+# -------------------------------------------------------------------
+if (RTXPT_WITH_PYTHON AND rtxpt_python_core_sources)
+    # Shared bindings + scripting host go into RtxptCore so both the host
+    # executable (embed mode) and the standalone Python extension can pull
+    # them in.  The NB_MODULE() entry points themselves live in their own
+    # translation units which are added later to the matching targets.
+    target_sources(RtxptCore PRIVATE ${rtxpt_python_core_sources})
+
+    # nanobind ships a static helper target named `nanobind-static`.  Link it
+    # PUBLIC so the embed-mode entry point (compiled into Rtxpt.exe) can use it.
+    if (NOT TARGET nanobind-static)
+        nanobind_build_library(nanobind-static)
+    endif()
+    target_link_libraries(RtxptCore PUBLIC nanobind-static Python::Python)
+    target_include_directories(RtxptCore PUBLIC ${Python_INCLUDE_DIRS})
+    if (MSVC)
+        target_compile_options(RtxptCore PRIVATE /bigobj)
+    endif()
+
+    # Copy a few example python scripts next to the binary at build time
+    file(GLOB rtxpt_python_examples "${CMAKE_CURRENT_SOURCE_DIR}/Python/Examples/*.py")
+    if (rtxpt_python_examples)
+        add_custom_target(RtxptPythonExamples ALL
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/PythonExamples"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${rtxpt_python_examples} "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/PythonExamples"
+            COMMENT "Copying RTXPT Python example scripts"
+        )
+        add_dependencies(RtxptCore RtxptPythonExamples)
+        set_target_properties(RtxptPythonExamples PROPERTIES FOLDER ${folder})
+    endif()
+endif()
+
 add_dependencies(RtxptCore rtxpt_shaders nrd_shaders omm_shaders ShaderDynamicAssets ShaderDynamicAssets_CopyAlways)
 set_target_properties(RtxptCore PROPERTIES FOLDER ${folder})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${shaders})
@@ -152,7 +208,14 @@ endif()
 
 # Macro to create sample executables with common settings
 macro(add_rtxpt_sample TARGET_NAME MAIN_SOURCE)
-    add_executable(${TARGET_NAME} WIN32 ${MAIN_SOURCE})
+    set(_extra_sources "")
+    if (RTXPT_WITH_PYTHON)
+        # Embed-mode NB_MODULE has to live in a target that does NOT also link
+        # the Python extension's entry point - hence we attach it to each
+        # executable individually instead of RtxptCore.
+        list(APPEND _extra_sources "${CMAKE_CURRENT_SOURCE_DIR}/Python/PythonBindings_Embed.cpp")
+    endif()
+    add_executable(${TARGET_NAME} WIN32 ${MAIN_SOURCE} ${_extra_sources})
     target_link_libraries(${TARGET_NAME} PRIVATE RtxptCore)
     add_dependencies(${TARGET_NAME} rtxpt_shaders nrd_shaders omm_shaders ShaderDynamicAssets ShaderDynamicAssets_CopyAlways)
     set_target_properties(${TARGET_NAME} PROPERTIES 
@@ -186,3 +249,61 @@ endmacro()
 # Build both sample executables
 #add_rtxpt_sample(IntroSample "IntroSample.cpp") # Work in progress!
 add_rtxpt_sample(Rtxpt "AdvancedSample.cpp")
+
+# -------------------------------------------------------------------
+# Python extension module: rtxpt_py.pyd
+# -------------------------------------------------------------------
+# Allows scripts to drive the renderer headlessly:
+#   import rtxpt
+#   r = rtxpt.Renderer(width=1280, height=720, headless=True,
+#                      scene='bistro-programmer-art.scene.json')
+#   r.step_until_accumulated()
+#   r.save_screenshot('frame.png')
+if (RTXPT_WITH_PYTHON AND TARGET nanobind-static)
+    nanobind_add_module(rtxpt_py STABLE_ABI
+        "${CMAKE_CURRENT_SOURCE_DIR}/Python/PythonBindings_Extension.cpp"
+    )
+    # Note: nanobind defaults the python module name to the target name; we
+    # pin it to `rtxpt` so users can write `import rtxpt`.
+    # Drop the .pyd next to Rtxpt.exe / the runtime DLLs / ShaderPrecompiled
+    # so the extension can find shaders and AgilitySDK redistributables.
+    set_target_properties(rtxpt_py PROPERTIES
+        OUTPUT_NAME "rtxpt"
+        FOLDER ${folder}
+        LIBRARY_OUTPUT_DIRECTORY                "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG          "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        LIBRARY_OUTPUT_DIRECTORY_MINSIZEREL     "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        RUNTIME_OUTPUT_DIRECTORY                "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG          "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL     "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+    )
+
+    target_link_libraries(rtxpt_py PRIVATE RtxptCore)
+    target_compile_definitions(rtxpt_py PRIVATE RTXPT_BUILDING_EXTENSION=1)
+
+    add_dependencies(rtxpt_py rtxpt_shaders nrd_shaders omm_shaders ShaderDynamicAssets ShaderDynamicAssets_CopyAlways)
+
+    if (RTXPT_WITH_OIDN)
+        add_custom_command(
+            TARGET rtxpt_py POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RTXPT_OIDN_RUNTIME_DLLS} "$<TARGET_FILE_DIR:rtxpt_py>"
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+
+    if (RTXPT_D3D_AGILITY_SDK_PATH AND RTXPT_D3D_AGILITY_SDK_VERSION)
+        target_compile_definitions(rtxpt_py PUBLIC RTXPT_D3D_AGILITY_SDK_VERSION=${RTXPT_D3D_AGILITY_SDK_VERSION})
+        add_custom_command(
+            TARGET rtxpt_py POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:rtxpt_py>/D3D12/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RTXPT_D3D_AGILITY_SDK_PATH}/build/native/bin/x64/D3D12Core.dll "$<TARGET_FILE_DIR:rtxpt_py>/D3D12/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RTXPT_D3D_AGILITY_SDK_PATH}/build/native/bin/x64/d3d12SDKLayers.dll "$<TARGET_FILE_DIR:rtxpt_py>/D3D12/"
+        )
+        target_compile_definitions(rtxpt_py PRIVATE NVRHI_D3D12_WITH_DXR12_OPACITY_MICROMAP=$<BOOL:${NVRHI_D3D12_WITH_DXR12_OPACITY_MICROMAP}>)
+        target_include_directories(rtxpt_py PRIVATE ${RTXPT_D3D_AGILITY_SDK_PATH}/build/native/include)
+    endif()
+endif()

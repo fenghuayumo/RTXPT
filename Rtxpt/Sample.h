@@ -47,6 +47,7 @@ class CaptureScriptManager;
 class ComputePipelineBaker;
 class ComputeShaderVariant;
 class OidnDenoiser;
+class PythonScripting;
 
 class Sample : public donut::app::ApplicationBase
 {
@@ -173,6 +174,10 @@ public:
 
     const std::unique_ptr<CaptureScriptManager> & GetCaptureScriptManager() const { return m_captureScriptManager; }
 
+    // Embedded Python scripting host (nullptr when built without RTXPT_WITH_PYTHON
+    // - all forwarding methods on the wrapper are still safe to call).
+    const std::unique_ptr<PythonScripting> & GetPythonScripting() const { return m_pythonScripting; }
+
     bool                                    HasAsyncLoadingInProgress() const   { return m_asyncLoadingInProgress || m_ui.ShaderAndACRefreshDelayedRequest > 0; }
 
     bool                                    AccumulationCompleted() const       { return m_accumulationCompleted; }
@@ -214,6 +219,7 @@ protected:
     std::shared_ptr<class PTPipelineVariant>    m_ptPipelineEdgeDetection;
 
     std::unique_ptr<CaptureScriptManager>       m_captureScriptManager;
+    std::unique_ptr<PythonScripting>            m_pythonScripting;
 
 private:
     void                                    UpdateCameraFromScene( const std::shared_ptr<donut::engine::PerspectiveCamera> & sceneCamera );

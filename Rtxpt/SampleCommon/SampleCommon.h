@@ -113,6 +113,9 @@ size_t FindSubStringIgnoreCase(const std::string & text, const std::string & sub
 bool EqualsIgnoreCase(const std::string & a, const std::string & b);
 
 std::filesystem::path GetLocalPath(std::string subfolder);
+void SetLocalPathBaseOverride(const std::filesystem::path& basePath);
+std::filesystem::path GetRuntimeDirectory();
+void SetRuntimeDirectoryOverride(const std::filesystem::path& runtimeDirectory);
 
 bool CompressTextures(std::map<std::shared_ptr<donut::engine::LoadedTexture>, TextureCompressionType> & uncompressedTextures);
 

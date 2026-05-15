@@ -50,9 +50,11 @@ namespace ShaderCompilerUtils
         GraphicsAPI = device->getGraphicsAPI();
         
         std::string platformName = "x64"; // add "arm64" for ARM
+        const std::filesystem::path runtimeDirectory = GetRuntimeDirectory();
+        const std::filesystem::path sourceRootDirectory = runtimeDirectory.parent_path();
         
         ShaderCompilerPath = std::filesystem::absolute(
-            donut::app::GetDirectoryWithExecutable() / "ShaderDynamic/Tools" / graphicsAPIName / platformName / "dxc.exe");
+            runtimeDirectory / "ShaderDynamic/Tools" / graphicsAPIName / platformName / "dxc.exe");
         
         if (!std::filesystem::exists(ShaderCompilerPath))
         {
@@ -62,9 +64,9 @@ namespace ShaderCompilerUtils
         }
         
         std::filesystem::path shaderSourcePathDevelopment = 
-            donut::app::GetDirectoryWithExecutable() / "../Rtxpt/Shaders";
+            sourceRootDirectory / "Rtxpt/Shaders";
         std::filesystem::path shaderSourcePathRuntime = 
-            donut::app::GetDirectoryWithExecutable() / "ShaderDynamic/Source/Rtxpt";
+            runtimeDirectory / "ShaderDynamic/Source/Rtxpt";
         
         if (!std::filesystem::exists(shaderSourcePathDevelopment))
         {
@@ -81,19 +83,19 @@ namespace ShaderCompilerUtils
             
             ShadersPath = shaderSourcePathRuntime;
             ShadersPathExternalIncludes1 = 
-                donut::app::GetDirectoryWithExecutable() / "ShaderDynamic/Source/External";
+                runtimeDirectory / "ShaderDynamic/Source/External";
             ShadersPathExternalIncludes2 = std::filesystem::path();
         }
         else
         {
             ShadersPath = shaderSourcePathDevelopment;
             ShadersPathExternalIncludes1 = 
-                donut::app::GetDirectoryWithExecutable() / "../External/Donut/Include";
+                sourceRootDirectory / "External/Donut/Include";
             ShadersPathExternalIncludes2 = 
-                donut::app::GetDirectoryWithExecutable() / "../External";
+                sourceRootDirectory / "External";
         }
         
-        ShaderBinariesPath = donut::app::GetDirectoryWithExecutable() / binarySubfolder / 
+        ShaderBinariesPath = runtimeDirectory / binarySubfolder / 
             donut::app::GetShaderTypeName(device->getGraphicsAPI());
         
         // Convert all paths to absolute

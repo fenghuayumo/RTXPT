@@ -8,56 +8,10 @@
 * license agreement from NVIDIA CORPORATION is strictly prohibited.
 */
 
-#include "Sample.h"
+#include "AdvancedSample.h"
 #include <SampleCommon/SampleBaseApp.h>
-#include <SampleCommon/PTPipelineBaker.h>
 
 #include "SampleCommon/SplashScreen.h"
-
-// IntroRenderer: Simplified renderer for introductory samples
-// Currently just uses the base Sample class as-is
-// TODO: Override methods to simplify/disable advanced features
-class AdvancedPathTracer : public Sample
-{
-public:
-    using Sample::Sample;
-
-    virtual void SampleRenderCode(nvrhi::IFramebuffer* framebuffer, nvrhi::CommandListHandle commandList, const SampleConstants& constants) override
-    {
-        if (m_ui.ActualUseRTXDIPasses())
-            m_rtxdiPass->BeginFrame(commandList, *m_renderTargets, m_bindingLayout, m_bindingSet);
-
-        PathTrace(framebuffer, constants);
-
-        Denoise(framebuffer);
-    }
-
-    virtual void CreateRTPipelines() override
-    {
-        auto pipelineBaker = GetRTPipelineBaker();
-        using SM = donut::engine::ShaderMacro;
-
-        // these don't actually compile any shaders - this happens later in m_ptPipelineBaker->Update
-        m_ptPipelineReference = pipelineBaker->CreateVariant("PathTracerSample.hlsl", { SM("PATH_TRACER_MODE", "PATH_TRACER_MODE_REFERENCE") }, "REF");
-        m_ptPipelineBuildStablePlanes = pipelineBaker->CreateVariant("PathTracerSample.hlsl", { SM("PATH_TRACER_MODE", "PATH_TRACER_MODE_BUILD_STABLE_PLANES") }, "BUILD");
-        m_ptPipelineFillStablePlanes = pipelineBaker->CreateVariant("PathTracerSample.hlsl", { SM("PATH_TRACER_MODE", "PATH_TRACER_MODE_FILL_STABLE_PLANES") }, "FILL");
-        m_ptPipelineTestRaygenPPHDR = pipelineBaker->CreateVariant("TestRaygenPP.hlsl", { SM("PP_TEST_HDR", "1") }, "TESTRG", true);
-        m_ptPipelineEdgeDetection = pipelineBaker->CreateVariant("TestRaygenPP.hlsl", { SM("PP_EDGE_DETECTION", "1") }, "EDGY", true);
-    }
-
-    virtual void DestroyRTPipelines() override
-    {
-        m_ptPipelineReference = nullptr;
-        m_ptPipelineBuildStablePlanes = nullptr;
-        m_ptPipelineFillStablePlanes = nullptr;
-        m_ptPipelineTestRaygenPPHDR = nullptr;
-        m_ptPipelineEdgeDetection = nullptr;
-    }
-
-    virtual std::string GetMaterialSpecializationShader() const override {
-        return "PathTracerMaterialSpecializations.hlsl";
-    }
-};
 
 class AdvancedSample : public SampleBaseApp
 {

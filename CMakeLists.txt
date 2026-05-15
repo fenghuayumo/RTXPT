@@ -108,6 +108,32 @@ set(DXC_CUSTOM_PATH "${CMAKE_SOURCE_DIR}/External/dxc/build/native/bin/x64/" CAC
 #----------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------
+# Python scripting via nanobind (embeds CPython into Rtxpt and exposes scene/material/light/ui bindings)
+option(RTXPT_WITH_PYTHON "Enable embedded Python scripting via nanobind (allows customizing materials, lights, etc. from Python scripts)" ON)
+set(RTXPT_PYTHON_MIN_VERSION "3.8" CACHE STRING "Minimum required Python version for embedded scripting")
+set(RTXPT_NANOBIND_GIT_TAG "v2.4.0" CACHE STRING "Git tag/branch of nanobind to fetch")
+
+if (RTXPT_WITH_PYTHON)
+    # Need both the embedded interpreter (libpython) and the development headers
+    find_package(Python ${RTXPT_PYTHON_MIN_VERSION} COMPONENTS Interpreter Development REQUIRED)
+    message(STATUS "Found Python ${Python_VERSION} at ${Python_EXECUTABLE}")
+    message(STATUS "  include dirs : ${Python_INCLUDE_DIRS}")
+    message(STATUS "  libraries    : ${Python_LIBRARIES}")
+
+    include(FetchContent)
+    if (NOT TARGET nanobind-static)
+        FetchContent_Declare(
+            nanobind
+            GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+            GIT_TAG        ${RTXPT_NANOBIND_GIT_TAG}
+            GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(nanobind)
+    endif()
+endif()
+#----------------------------------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------------------------------------------------
 # Intel Open Image Denoise for offline reference-mode denoising
 option(RTXPT_WITH_OIDN "Enable Intel Open Image Denoise for Reference path tracing mode" ON)
 set(RTXPT_OIDN_VERSION "2.4.1" CACHE STRING "Open Image Denoise release version")

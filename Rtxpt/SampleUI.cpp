@@ -29,6 +29,10 @@
 #include "Misc/ZoomTool.h"
 
 #include "SampleCommon/CaptureScriptManager.h"
+#include "Python/PythonScripting.h"
+
+#include <cstdio>
+#include <filesystem>
 
 using namespace donut::app;
 using namespace donut::engine;
@@ -480,6 +484,14 @@ void SampleUI::buildUI(void)
 
                     m_app.GetCaptureScriptManager()->ScriptMainUI(warnColor, categoryColor, indent, m_currentScale);
                 }
+
+#if RTXPT_WITH_PYTHON
+                if (ImGui::CollapsingHeader("Python scripting"))
+                {
+                    RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
+                    BuildPythonScriptingUI(indent);
+                }
+#endif
             }
 
             if (ImGui::CollapsingHeader("Info")) //, ImGuiTreeNodeFlags_DefaultOpen))
@@ -2337,6 +2349,86 @@ void TogglableNode::SetSelected(bool selected)
     else
         SceneNode->SetTranslation( {-10000.0,-10000.0,-10000.0} );
 }
+
+#if RTXPT_WITH_PYTHON
+void SampleUI::BuildPythonScriptingUI(float indent)
+{
+    auto& scripting = m_app.GetPythonScripting();
+    if (!scripting)
+    {
+        ImGui::TextDisabled("Python scripting host unavailable.");
+        return;
+    }
+
+    if (!scripting->IsInitialized())
+    {
+        if (ImGui::Button("Initialize Python interpreter"))
+            scripting->Initialize();
+        ImGui::TextDisabled("(Click to start the embedded CPython runtime.)");
+        return;
+    }
+
+    // ---- File-based scripts ---------------------------------------------
+    ImGui::TextUnformatted("Run Python script (.py):");
+    static char pathBuffer[1024] = {};
+    if (m_pythonScriptPath.size() && pathBuffer[0] == '\0')
+    {
+        std::snprintf(pathBuffer, sizeof(pathBuffer), "%s", m_pythonScriptPath.c_str());
+    }
+    ImGui::PushItemWidth(-200.0f * m_currentScale);
+    ImGui::InputText("##PythonScriptPath", pathBuffer, sizeof(pathBuffer));
+    ImGui::PopItemWidth();
+    ImGui::SameLine();
+    if (ImGui::Button("Browse##PyScript"))
+    {
+        std::string picked;
+        if (donut::app::FileDialog(true, "Python Scripts (*.py)\0*.py\0All\0*.*\0", picked))
+        {
+            std::snprintf(pathBuffer, sizeof(pathBuffer), "%s", picked.c_str());
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Run##PyScript"))
+    {
+        m_pythonScriptPath = pathBuffer;
+        if (!m_pythonScriptPath.empty())
+            scripting->QueueScriptFile(std::filesystem::path(m_pythonScriptPath));
+    }
+
+    ImGui::Separator();
+
+    // ---- Inline expression / snippet ------------------------------------
+    ImGui::TextUnformatted("Inline expression:");
+    static char inlineBuffer[8192] = "import rtxpt\nfor mat in rtxpt.app().get_materials():\n    print(mat.name, mat.base_color)\n";
+    ImGui::InputTextMultiline("##PythonInline", inlineBuffer, sizeof(inlineBuffer),
+        ImVec2(-1.0f, ImGui::GetTextLineHeight() * 6.0f));
+    if (ImGui::Button("Run inline"))
+    {
+        m_pythonInlineCode = inlineBuffer;
+        scripting->QueueScriptString(m_pythonInlineCode, "<UI inline>");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear inline"))
+        inlineBuffer[0] = '\0';
+
+    // ---- Output log ------------------------------------------------------
+    std::string newLog = scripting->ConsumeOutputLog();
+    if (!newLog.empty())
+        m_pythonOutputLog += newLog;
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Captured stdout/stderr:");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Clear log"))
+        m_pythonOutputLog.clear();
+    ImGui::BeginChild("##PythonOutput",
+        ImVec2(-1.0f, ImGui::GetTextLineHeight() * 8.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::TextUnformatted(m_pythonOutputLog.c_str());
+    if (!newLog.empty())
+        ImGui::SetScrollHereY(1.0f);
+    ImGui::EndChild();
+}
+#endif // RTXPT_WITH_PYTHON
 
 void UpdateTogglableNodes(std::vector<TogglableNode>& togglableNodes, donut::engine::SceneGraphNode* node)
 {

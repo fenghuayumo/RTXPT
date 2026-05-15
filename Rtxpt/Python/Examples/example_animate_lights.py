@@ -1,0 +1,37 @@
+# --------------------------------------------------------------------
+# RTXPT Python scripting - per-frame light animation
+# --------------------------------------------------------------------
+# Each top-level call of this script picks the next phase in a
+# pre-baked color table and writes it to every PointLight / SpotLight
+# in the scene.
+#
+# To get a continuously-animated light, pair this script with the
+# in-app inline runner (Run inline button) and tap it repeatedly,
+# or wrap the body in your own scheduling logic from the host side.
+# --------------------------------------------------------------------
+
+import math
+import time
+import rtxpt
+
+app = rtxpt.app()
+
+phase = (time.monotonic() % (2.0 * math.pi))
+
+palette = [
+    (1.0, 0.2, 0.2),   # red
+    (0.2, 1.0, 0.4),   # green
+    (0.2, 0.4, 1.0),   # blue
+    (1.0, 0.9, 0.2),   # yellow
+]
+
+for i, light in enumerate(app.get_lights()):
+    if not hasattr(light, "intensity"):
+        continue
+    color = palette[i % len(palette)]
+    light.color = (color[0] * (0.7 + 0.3 * math.sin(phase + i)),
+                   color[1] * (0.7 + 0.3 * math.sin(phase + i + 1.2)),
+                   color[2] * (0.7 + 0.3 * math.sin(phase + i + 2.4)))
+    light.intensity = max(50.0, light.intensity)
+
+rtxpt.log_info(f"Updated {len(app.get_lights())} lights at phase {phase:.2f}")

@@ -52,6 +52,8 @@
 
 #include "SampleGame/GameScene.h"
 
+#include "Python/PythonScripting.h"
+
 using namespace donut;
 using namespace donut::math;
 using namespace donut::app;
@@ -113,18 +115,35 @@ Sample::Sample(donut::app::DeviceManager& deviceManager,
     // Enumerate all environment maps in the media folder
     m_envMapMediaList.clear();
     m_envMapMediaFolder = GetLocalPath(c_AssetsFolder) / c_EnvMapSubFolder;
-    for (const auto& file : std::filesystem::directory_iterator(m_envMapMediaFolder))
+    if (std::filesystem::exists(m_envMapMediaFolder))
     {
-        if (!file.is_regular_file()) continue;
-        if (file.path().extension() == ".exr" || file.path().extension() == ".hdr" || file.path().extension() == ".dds")
-            m_envMapMediaList.push_back(file.path());
+        for (const auto& file : std::filesystem::directory_iterator(m_envMapMediaFolder))
+        {
+            if (!file.is_regular_file()) continue;
+            if (file.path().extension() == ".exr" || file.path().extension() == ".hdr" || file.path().extension() == ".dds")
+                m_envMapMediaList.push_back(file.path());
+        }
+    }
+    else
+    {
+        log::warning("Environment map folder '%s' does not exist.", m_envMapMediaFolder.string().c_str());
     }
 
     m_captureScriptManager = std::make_unique<CaptureScriptManager>(*this, m_ui, m_cmdLine);
+
+    // Embedded Python scripting host - we always create the wrapper but the
+    // interpreter itself is initialized on demand the first time a script
+    // gets queued.  This keeps cold-start overhead at zero when scripting is
+    // unused even if the executable was built with RTXPT_WITH_PYTHON=ON.
+    m_pythonScripting = std::make_unique<PythonScripting>(*this);
 }
 
 Sample::~Sample()
 {
+    // Tear down the Python interpreter first so that any nb::class_<>-bound
+    // C++ objects (materials, lights, ...) are released while their owning
+    // C++ data is still alive.
+    m_pythonScripting.reset();
 }
 
 void Sample::DebugDrawLine( float3 start, float3 stop, float4 col1, float4 col2 )
@@ -673,6 +692,20 @@ void Sample::SceneLoaded( )
     m_ui.MaterialVariantIndex = 0;
 
     m_asyncLoadingInProgress = true;
+
+    // Initialize the embedded Python interpreter (lazily) and queue the
+    // command-line scripts/expressions so that they execute against a fully
+    // populated scene.  Actual execution happens during Animate() below.
+    if (m_pythonScripting && (!m_cmdLine.pythonScript.empty() || !m_cmdLine.pythonExpr.empty()))
+    {
+        if (m_pythonScripting->Initialize())
+        {
+            if (!m_cmdLine.pythonScript.empty())
+                m_pythonScripting->QueueScriptFile(m_cmdLine.pythonScript);
+            if (!m_cmdLine.pythonExpr.empty())
+                m_pythonScripting->QueueScriptString(m_cmdLine.pythonExpr, "<--pythonExpr>");
+        }
+    }
 }
 
 bool Sample::KeyboardUpdate(int key, int scancode, int action, int mods)
@@ -769,6 +802,12 @@ void Sample::Animate(float fElapsedTimeSeconds)
         fElapsedTimeSeconds = 1.0f / (float)m_ui.ActualFPSLimiter();
 
     m_captureScriptManager->PreAnim(fElapsedTimeSeconds);
+
+    // Drain any pending Python scripts. We do this on the renderer thread so
+    // bindings observe a coherent scene state and so they can mutate UI
+    // settings before rendering for the current frame happens.
+    if (m_pythonScripting && IsSceneLoaded())
+        m_pythonScripting->ProcessPendingScripts();
 
     m_lastDeltaTime = fElapsedTimeSeconds;
 
@@ -1999,7 +2038,7 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
             
             // Additional paths to monitor for compute shader hot reload (besides the default Shaders path)
             std::vector<std::filesystem::path> additionalShaderPaths = {
-                GetDirectoryWithExecutable() / "../Rtxpt/Lighting"  // For shaders outside the main Shaders folder
+                GetRuntimeDirectory().parent_path() / "Rtxpt/Lighting"  // For shaders outside the main Shaders folder
             };
             m_computePipelineBaker = std::make_shared<ComputePipelineBaker>(GetDevice(), additionalShaderPaths);
             

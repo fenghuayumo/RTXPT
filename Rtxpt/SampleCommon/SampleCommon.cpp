@@ -20,6 +20,19 @@
 using namespace donut;
 using namespace donut::math;
 
+namespace
+{
+    std::mutex g_localPathBaseMutex;
+    std::filesystem::path g_localPathBaseOverride;
+    std::filesystem::path g_runtimeDirectoryOverride;
+
+    std::filesystem::path GetLocalPathBaseOverride()
+    {
+        std::lock_guard guard(g_localPathBaseMutex);
+        return g_localPathBaseOverride;
+    }
+}
+
 #include <windows.h>
 #include <commctrl.h>
 #include <thread>
@@ -404,14 +417,44 @@ std::filesystem::path GetLocalPath(std::string subfolder)
     static std::filesystem::path oneChoice;
     // if( oneChoice.empty() )
     {
-        std::filesystem::path candidateA = donut::app::GetDirectoryWithExecutable() / subfolder;
-        std::filesystem::path candidateB = donut::app::GetDirectoryWithExecutable().parent_path() / subfolder;
+        std::filesystem::path baseOverride = GetLocalPathBaseOverride();
+        std::filesystem::path candidateA = baseOverride.empty()
+            ? donut::app::GetDirectoryWithExecutable() / subfolder
+            : baseOverride / subfolder;
+        std::filesystem::path candidateB = baseOverride.empty()
+            ? donut::app::GetDirectoryWithExecutable().parent_path() / subfolder
+            : baseOverride.parent_path() / subfolder;
         if (std::filesystem::exists(candidateA))
             oneChoice = candidateA;
         else
             oneChoice = candidateB;
     }
     return oneChoice;
+}
+
+void SetLocalPathBaseOverride(const std::filesystem::path& basePath)
+{
+    std::lock_guard guard(g_localPathBaseMutex);
+    g_localPathBaseOverride = basePath.empty()
+        ? std::filesystem::path()
+        : std::filesystem::absolute(basePath).lexically_normal();
+}
+
+std::filesystem::path GetRuntimeDirectory()
+{
+    std::lock_guard guard(g_localPathBaseMutex);
+    if (!g_runtimeDirectoryOverride.empty())
+        return g_runtimeDirectoryOverride;
+
+    return donut::app::GetDirectoryWithExecutable();
+}
+
+void SetRuntimeDirectoryOverride(const std::filesystem::path& runtimeDirectory)
+{
+    std::lock_guard guard(g_localPathBaseMutex);
+    g_runtimeDirectoryOverride = runtimeDirectory.empty()
+        ? std::filesystem::path()
+        : std::filesystem::absolute(runtimeDirectory).lexically_normal();
 }
 
 std::string StringLoadFromFile( const std::filesystem::path & filePath )

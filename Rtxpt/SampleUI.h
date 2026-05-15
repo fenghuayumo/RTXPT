@@ -347,12 +347,20 @@ private:
     void DLSSFGSelectorUI();
 
 private:
+    void BuildPythonScriptingUI(float indent);
+
+private:
     class SampleBaseApp& m_baseApp;
     class Sample& m_app;
 
     int                         m_currentFontScaleIndex = -1;
     float                       m_currentScale = 1.0f;
     ImGuiStyle                  m_defaultStyle;
+
+    // Embedded Python scripting UI state
+    std::string                 m_pythonScriptPath;     // Last loaded path
+    std::string                 m_pythonInlineCode;     // Editable inline expression
+    std::string                 m_pythonOutputLog;      // Captured stdout/stderr from scripts
 
     float                       m_showSceneWidgets = 0.0f;
 
