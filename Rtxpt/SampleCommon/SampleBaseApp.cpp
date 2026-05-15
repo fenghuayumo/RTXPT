@@ -18,6 +18,8 @@
 #include <donut/app/ApplicationBase.h>
 #include "../Sample.h"
 
+#include <GLFW/glfw3.h>
+
 extern SampleUIData g_sampleUIData;
 extern const char* g_windowTitle;
 
@@ -118,6 +120,16 @@ SampleBaseApp::InitReturnCodes SampleBaseApp::Init(int argc, const char* const* 
         m_UIRender = std::make_unique<SampleUI>(m_DeviceManager.get(), *this, *m_MainSceneRender, g_sampleUIData, IsSERSupported(), m_CmdLine);
         m_UIRender->Init(m_ShaderFactory);
         m_DeviceManager->AddRenderPassToBack(m_UIRender.get());
+    }
+
+    // Register GLFW drag-and-drop callback
+    if (!m_CmdLine.noWindow && m_DeviceManager->GetWindow())
+    {
+        glfwSetDropCallback(m_DeviceManager->GetWindow(), [](GLFWwindow* /*window*/, int count, const char** paths)
+        {
+            for (int i = 0; i < count; i++)
+                g_sampleUIData.PendingDroppedFiles.emplace_back(paths[i]);
+        });
     }
 
     LocalConfig::PostAppInit(g_sampleUIData);

@@ -144,6 +144,11 @@ struct SampleUIData
     bool                                EnableAnimations                        = false;
     bool                                EnableVsync                             = false;
     std::shared_ptr<donut::engine::Material> SelectedMaterial;
+    std::shared_ptr<donut::engine::SceneGraphNode> SelectedNode;
+    std::weak_ptr<donut::engine::SceneGraphNode> InspectorRotationNode;
+    dm::dquat                           InspectorRotationQuat                   = dm::dquat::identity();
+    dm::float3                          InspectorRotationEulerDeg               = dm::float3(0.0f);
+    bool                                InspectorRotationEulerValid             = false;
     bool                                ShaderReloadRequested                   = false;
     bool                                AccelerationStructRebuildRequested      = false;
     float                               ShaderAndACRefreshDelayedRequest        = 0.0f;
@@ -240,6 +245,7 @@ struct SampleUIData
     
     bool                                ShowDeltaTree = false;
     bool                                ShowMaterialEditor = true;  // this makes material editor default right click option
+    bool                                ShowInspector = true;       // combined Material + Transform inspector panel
 
 #if DONUT_WITH_STREAMLINE
     // DLSS specific parameters
@@ -331,6 +337,8 @@ struct SampleUIData
     bool                                DbgDisablePostProcessFilters = false;
 
     int                                 MaterialVariantIndex = 0;                       // each scene can have multiple material presets
+
+    std::vector<std::string>            PendingDroppedFiles;                            // files dropped via drag-and-drop, consumed by Sample each frame
 };
 
 extern SampleUIData g_sampleUIData;

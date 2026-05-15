@@ -843,7 +843,10 @@ static PathTracer::SurfaceData Bridge::loadSurface( const uint instanceIndex, co
 
 #if ENABLE_DEBUG_VIZUALISATIONS && !NON_PATH_TRACING_PASS
     if( debug.IsDebugPixel(pixelPos) && pathVertexIndex==1 && !debug.constants.exploreDeltaTree )
+    {
         debug.SetPickedMaterial( materialIndex );
+        debug.SetPickedInstance( instanceIndex );
+    }
     surfaceDebugViz( pixelPos, ret, barycentrics, rayDir, rayCone, pathVertexIndex, ommDebug, materialIndex, debug );
 #if OMM_DEBUG_VIEW_OVERLAY
     debug.DrawDebugViz(float4(ommDebug.opacityStateDebugColor, 1.0));

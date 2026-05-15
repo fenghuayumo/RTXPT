@@ -283,7 +283,7 @@ float4 ps_main(VertexOutput input) : SV_Target0
         uint height = 0;
         t_Depth.GetDimensions(width, height);
 
-        uint2 pixel = uint2(input.position.xy);
+        uint2 pixel = uint2(input.position.xy * float2(width, height) * g_Const.view.viewportSizeInv);
         if (pixel.x < width && pixel.y < height)
         {
             float sceneDepth = t_Depth.Load(int3(pixel, 0));

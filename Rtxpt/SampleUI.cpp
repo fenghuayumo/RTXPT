@@ -16,6 +16,7 @@
 #include <donut/app/UserInterfaceUtils.h>
 #include <donut/core/vfs/VFS.h>
 #include <donut/engine/SceneTypes.h>
+#include <donut/engine/SceneGraph.h>
 #include <iterator>
 #include <imgui_internal.h>
 #include "Materials\MaterialsBaker.h"
@@ -32,6 +33,7 @@
 #include "Python/PythonScripting.h"
 
 #include <cstdio>
+#include <cmath>
 #include <filesystem>
 
 using namespace donut::app;
@@ -54,6 +56,54 @@ KORGI_KNOB(g_sampleUIData.ToneMappingParams.exposureCompensation, 0, Slider1, -8
 
 const static ImVec4 warnColor = { 1,0.5f,0.5f,1 };
 const static ImVec4 categoryColor = { 0.5f,1.0f,0.7f,1 };
+
+namespace
+{
+    float WrapDegrees(float degrees)
+    {
+        degrees = std::fmod(degrees, 360.0f);
+        if (degrees < 0.0f)
+            degrees += 360.0f;
+        return degrees;
+    }
+
+    dm::float3 QuaternionToEulerDegreesXYZ(const dm::dquat& rotation)
+    {
+        constexpr float rad2deg = 180.0f / 3.14159265f;
+        const dm::double3x3 m = rotation.toMatrix();
+
+        const double y = std::asin(dm::clamp(-m.m_data[2], -1.0, 1.0));
+        const double cy = std::cos(y);
+
+        double x = 0.0;
+        double z = 0.0;
+        if (std::abs(cy) > 1e-8)
+        {
+            x = std::atan2(m.m_data[5], m.m_data[8]);
+            z = std::atan2(m.m_data[1], m.m_data[0]);
+        }
+        else
+        {
+            x = std::atan2(-m.m_data[7], m.m_data[4]);
+        }
+
+        return dm::float3(
+            WrapDegrees(float(x) * rad2deg),
+            WrapDegrees(float(y) * rad2deg),
+            WrapDegrees(float(z) * rad2deg));
+    }
+
+    bool SameRotation(const dm::dquat& a, const dm::dquat& b)
+    {
+        const double lenA = dm::length(a);
+        const double lenB = dm::length(b);
+        if (lenA <= 1e-12 || lenB <= 1e-12)
+            return false;
+
+        const double cosine = std::abs(dm::dot(a / lenA, b / lenB));
+        return cosine > 0.999999999;
+    }
+}
 
 static const PerformancePreset s_performancePresets[] = {
     //                                    NEECand  NEEFull  NEEMIS  SPP  Bounce  DiffBnc   TexLOD  NestDiel  EnvMIP  SPActive  PrimRepl  Bloom    LDSampl    FflyTrhld    DLSS (on separate line due to macros)
@@ -1752,12 +1802,18 @@ void SampleUI::buildUI(void)
 
             ImGui::Checkbox("Show debug lines", &m_ui.ShowDebugLines);
 
+            if (ImGui::Checkbox("Show inspector", &m_ui.ShowInspector) && m_ui.ShowInspector)
+            {
+#if ENABLE_DEBUG_DELTA_TREE_VIZUALISATION
+                m_ui.ShowDeltaTree = false;
+#endif
+            }
+
             if (ImGui::Checkbox("Show material editor", &m_ui.ShowMaterialEditor) && m_ui.ShowMaterialEditor)
             {
 #if ENABLE_DEBUG_DELTA_TREE_VIZUALISATION
-                m_ui.ShowDeltaTree = false; // no space for both
+                m_ui.ShowDeltaTree = false;
 #endif
-                //m_app.SetUIPick();
             }
 
 #if ENABLE_DEBUG_DELTA_TREE_VIZUALISATION
@@ -1770,7 +1826,7 @@ void SampleUI::buildUI(void)
             {
                 if (ImGui::Checkbox("Show delta tree window", &m_ui.ShowDeltaTree) && m_ui.ShowDeltaTree)
                 {
-                    m_ui.ShowMaterialEditor = false; // no space for both
+                    m_ui.ShowInspector = false; // no space for both
                     m_app.SetUIPick();
                 }
             }
@@ -1810,15 +1866,85 @@ void SampleUI::buildUI(void)
         }
     }
 
-    std::shared_ptr<PTMaterial> material = PTMaterial::SafeCast(m_ui.SelectedMaterial);
-    if (material != nullptr && m_ui.ShowMaterialEditor && m_app.GetMaterialsBaker() != nullptr)
+    // Inspector panel: instance Transform + mesh name (right-click pick)
+    if (m_ui.SelectedNode != nullptr && m_ui.ShowInspector)
     {
-        // TODO: move all this to MaterialBaker
-
         ImGui::SetNextWindowPos(ImVec2(float(scaledWidth) - 10.f, 10.f), 0, ImVec2(1.f, 0.f));
+        ImGui::SetNextWindowSize(ImVec2(defWindowWidth, 0), ImGuiCond_Appearing);
+        ImGui::Begin("Inspector");
+        ImGui::PushItemWidth(defItemWidth);
+
+        auto node = m_ui.SelectedNode;
+        ImGui::Text("Node: %s", node->GetName().c_str());
+
+        auto meshInstance = std::dynamic_pointer_cast<donut::engine::MeshInstance>(node->GetLeaf());
+        if (meshInstance && meshInstance->GetMesh())
+            ImGui::Text("Mesh: %s", meshInstance->GetMesh()->name.c_str());
+
+        ImGui::Separator();
+
+        if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            dm::double3 translation = node->GetTranslation();
+            dm::dquat rotation = node->GetRotation();
+            dm::double3 scaling = node->GetScaling();
+
+            float pos[3] = { float(translation.x), float(translation.y), float(translation.z) };
+            if (ImGui::DragFloat3("Position", pos, 0.01f))
+            {
+                node->SetTranslation(dm::double3(pos[0], pos[1], pos[2]));
+                m_ui.ResetAccumulation = true;
+            }
+
+            constexpr double deg2rad = 3.14159265358979323846 / 180.0;
+
+            const bool selectedRotationNodeChanged = m_ui.InspectorRotationNode.lock() != node;
+            if (!m_ui.InspectorRotationEulerValid || selectedRotationNodeChanged || !SameRotation(m_ui.InspectorRotationQuat, rotation))
+            {
+                m_ui.InspectorRotationNode = node;
+                m_ui.InspectorRotationQuat = rotation;
+                m_ui.InspectorRotationEulerDeg = QuaternionToEulerDegreesXYZ(rotation);
+                m_ui.InspectorRotationEulerValid = true;
+            }
+
+            float euler[3] = {
+                m_ui.InspectorRotationEulerDeg.x,
+                m_ui.InspectorRotationEulerDeg.y,
+                m_ui.InspectorRotationEulerDeg.z
+            };
+            if (ImGui::DragFloat3("Rotation (deg)", euler, 0.5f, 0.0f, 360.0f, "%.1f"))
+            {
+                euler[0] = dm::clamp(euler[0], 0.0f, 360.0f);
+                euler[1] = dm::clamp(euler[1], 0.0f, 360.0f);
+                euler[2] = dm::clamp(euler[2], 0.0f, 360.0f);
+                m_ui.InspectorRotationEulerDeg = dm::float3(euler[0], euler[1], euler[2]);
+                const dm::dquat newRotation = dm::rotationQuat(dm::double3(euler[0] * deg2rad, euler[1] * deg2rad, euler[2] * deg2rad));
+                m_ui.InspectorRotationQuat = newRotation;
+                node->SetRotation(newRotation);
+                m_ui.ResetAccumulation = true;
+            }
+
+            float scl[3] = { float(scaling.x), float(scaling.y), float(scaling.z) };
+            if (ImGui::DragFloat3("Scale", scl, 0.01f, 0.001f, 1000.0f))
+            {
+                node->SetScaling(dm::double3(scl[0], scl[1], scl[2]));
+                m_ui.ResetAccumulation = true;
+            }
+        }
+
+        ImGui::PopItemWidth();
+        ImGui::End();
+    }
+
+    // Material Editor panel (right-click pick)
+    std::shared_ptr<PTMaterial> material = PTMaterial::SafeCast(m_ui.SelectedMaterial);
+    if (material != nullptr && m_app.GetMaterialsBaker() != nullptr && m_ui.ShowMaterialEditor)
+    {
+        ImGui::SetNextWindowPos(ImVec2(float(scaledWidth) - 10.f, (m_ui.SelectedNode != nullptr && m_ui.ShowInspector) ? 350.f : 10.f), 0, ImVec2(1.f, 0.f));
         ImGui::SetNextWindowSize(ImVec2(defWindowWidth, 0), ImGuiCond_Appearing);
         ImGui::Begin("Material Editor");
         ImGui::PushItemWidth(defItemWidth);
+
         ImGui::Text("Material %d: %s.%s ", material->GPUDataIndex, material->ModelName.c_str(), material->Name.c_str());
 
         const bool wasAlphaTestedEnabled = material->EnableAlphaTesting;
@@ -1826,7 +1952,7 @@ void SampleUI::buildUI(void)
         const bool wasExcludedFromNEE = material->ExcludeFromNEE;
         const float alphaCutoffBefore = material->AlphaCutoff;
         const bool wasSkipRender = material->SkipRender;
-        
+
         MaterialShaderPermutationKey mspBefore = MaterialShaderPermutationKey(material->ComputeShaderPermutation(""));
 
         bool dirty = material->EditorGUI(*m_app.GetMaterialsBaker());
@@ -1835,9 +1961,9 @@ void SampleUI::buildUI(void)
 
         const float alphaCutoffAfter = material->AlphaCutoff;
 
-        if (mspBefore != mspAfter || 
-            wasAlphaTestedEnabled != material->EnableAlphaTesting || 
-            wasTransmissionEnabled != material->EnableTransmission || 
+        if (mspBefore != mspAfter ||
+            wasAlphaTestedEnabled != material->EnableAlphaTesting ||
+            wasTransmissionEnabled != material->EnableTransmission ||
             wasExcludedFromNEE != material->ExcludeFromNEE ||
             wasSkipRender != material->SkipRender ||
             dirty)
@@ -1846,13 +1972,12 @@ void SampleUI::buildUI(void)
             m_ui.ResetAccumulation = 1;
         }
 
-		// The domain change might require a rebuild without the Opaque flag
         if (wasAlphaTestedEnabled != material->EnableAlphaTesting || alphaCutoffBefore != alphaCutoffAfter ||
             wasExcludedFromNEE != material->ExcludeFromNEE || mspBefore != mspAfter || wasSkipRender != material->SkipRender)
             m_ui.ShaderAndACRefreshDelayedRequest = 1.0f;
 
-        if( m_ui.ShaderAndACRefreshDelayedRequest > 0 )
-            ImGui::TextColored( ImVec4(1,0.5f,0.5f,1), "PLEASE NOTE: shader and AC rebuild scheduled!\nUI might freeze for a bit." );
+        if (m_ui.ShaderAndACRefreshDelayedRequest > 0)
+            ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), "PLEASE NOTE: shader and AC rebuild scheduled!\nUI might freeze for a bit.");
         else
             ImGui::Text(" ");
 

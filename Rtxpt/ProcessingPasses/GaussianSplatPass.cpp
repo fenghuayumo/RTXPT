@@ -905,7 +905,7 @@ void GaussianSplatPass::CreatePipeline(const RenderTargets& renderTargets)
 
     m_renderPipeline = m_device->createGraphicsPipeline(
         pipelineDesc,
-        renderTargets.OutputFramebuffer->GetFramebuffer(nvrhi::AllSubresources));
+        renderTargets.ProcessedOutputFramebuffer->GetFramebuffer(nvrhi::AllSubresources));
 
     nvrhi::ComputePipelineDesc computePipelineDesc;
     computePipelineDesc.bindingLayouts = { m_sortKeyBindingLayout };
@@ -991,13 +991,13 @@ void GaussianSplatPass::Render(
 
     commandList->setBufferState(m_indexBuffer, nvrhi::ResourceStates::ShaderResource);
     commandList->setTextureState(renderTargets.Depth, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);
-    commandList->setTextureState(renderTargets.OutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::RenderTarget);
+    commandList->setTextureState(renderTargets.ProcessedOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::RenderTarget);
     commandList->commitBarriers();
 
     nvrhi::GraphicsState state;
     state.pipeline = m_renderPipeline;
     state.bindings = { m_renderBindingSet };
-    state.framebuffer = renderTargets.OutputFramebuffer->GetFramebuffer(nvrhi::AllSubresources);
+    state.framebuffer = renderTargets.ProcessedOutputFramebuffer->GetFramebuffer(nvrhi::AllSubresources);
     state.viewport = view.GetViewportState();
     commandList->setGraphicsState(state);
 

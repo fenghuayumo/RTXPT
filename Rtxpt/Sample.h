@@ -79,6 +79,14 @@ public:
     void                                    SetUIPick()                             { m_pick = true; }
 
     std::shared_ptr<donut::engine::Material> FindMaterial( int materialID ) const;
+    std::shared_ptr<donut::engine::SceneGraphNode> FindNodeByInstanceIndex(int instanceIndex) const;
+
+    void                                    HandleDroppedFiles();
+    bool                                    LoadMeshFile(const std::filesystem::path& filePath);
+    bool                                    LoadGltfMeshFile(const std::filesystem::path& filePath);
+    bool                                    LoadObjMeshFile(const std::filesystem::path& filePath);
+    void                                    FinalizeRuntimeSceneMutation(const std::shared_ptr<donut::engine::SceneGraphNode>& importedRoot);
+    void                                    RequestFullRebuild();
     
     void                                    CollectUncompressedTextures();
     auto &                                  GetUncompressedTextures()               { return m_uncompressedTextures; }
@@ -321,7 +329,8 @@ private:
     nvrhi::BindingLayoutHandle                  m_linesBindingLayout;
     nvrhi::BindingSetHandle                     m_linesBindingSet;
     uint2                                       m_pickPosition = 0u;
-    bool                                        m_pick = false;         // this is both for pixel and material debugging
+    bool                                        m_pick = false;         // right-click: pixel debug + material and instance picking
+    bool                                        m_pickInstance = false;  // instance picking for Inspector
     DebugFeedbackStruct                         m_feedbackData;
 
     DeltaTreeVizPathVertex                      m_debugDeltaPathTree[cDeltaTreeVizMaxVertices];

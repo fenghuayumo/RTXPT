@@ -173,7 +173,7 @@ struct DebugFeedbackStruct
 
 	int lineVertexCount;
     int pickedMaterialID;
-    int padding1;
+    int pickedInstanceIndex;
     int padding2;
 
     DeltaTreeVizHeader deltaPathTree;
@@ -239,6 +239,8 @@ struct DebugContext
         if (IsDebugPixel(pixelPos))
         {
             feedbackBufferUAV[0].lineVertexCount = 0;
+            feedbackBufferUAV[0].pickedMaterialID = -1;
+            feedbackBufferUAV[0].pickedInstanceIndex = -1;
             feedbackBufferUAV[0].deltaPathTree = DeltaTreeVizHeader::make(); 
             feedbackBufferUAV[0].deltaPathTree.pixelPos = pixelPos;
             feedbackBufferUAV[0].deltaPathTree.sampleIndex = sampleIndex;
@@ -292,6 +294,13 @@ struct DebugContext
     {
 #if ENABLE_DEBUG_VIZUALISATIONS
         feedbackBufferUAV[0].pickedMaterialID = materialID;
+#endif
+    }
+
+    void SetPickedInstance(uint instanceIndex)
+    {
+#if ENABLE_DEBUG_VIZUALISATIONS
+        feedbackBufferUAV[0].pickedInstanceIndex = instanceIndex;
 #endif
     }
 
