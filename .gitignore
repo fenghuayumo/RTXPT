@@ -8,6 +8,7 @@ tests/output/*
 /External/dxc
 /External/AgilitySDK
 /External/Streamline
+/External/OIDN
 
 # local project files for shader development outside of VS
 *.sublime-*

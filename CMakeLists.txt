@@ -107,6 +107,41 @@ CheckAndDownloadPackage("DXC" "v1.9.2602.17" ${CMAKE_CURRENT_SOURCE_DIR}/externa
 set(DXC_CUSTOM_PATH "${CMAKE_SOURCE_DIR}/External/dxc/build/native/bin/x64/" CACHE STRING "Path to embedded dxc")
 #----------------------------------------------------------------------------------------------------------------------
 
+#----------------------------------------------------------------------------------------------------------------------
+# Intel Open Image Denoise for offline reference-mode denoising
+option(RTXPT_WITH_OIDN "Enable Intel Open Image Denoise for Reference path tracing mode" ON)
+set(RTXPT_OIDN_VERSION "2.4.1" CACHE STRING "Open Image Denoise release version")
+
+if (RTXPT_WITH_OIDN)
+    if (WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(RTXPT_OIDN_FETCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/External/OIDN")
+        set(RTXPT_OIDN_PACKAGE_DIR "${RTXPT_OIDN_FETCH_DIR}/oidn-${RTXPT_OIDN_VERSION}.x64.windows")
+        set(RTXPT_OIDN_BIN_DIR "${RTXPT_OIDN_PACKAGE_DIR}/bin" CACHE INTERNAL "Open Image Denoise runtime DLL directory")
+
+        CheckAndDownloadPackage(
+            "Open Image Denoise"
+            "v${RTXPT_OIDN_VERSION}"
+            ${RTXPT_OIDN_FETCH_DIR}
+            "https://github.com/RenderKit/oidn/releases/download/v${RTXPT_OIDN_VERSION}/oidn-${RTXPT_OIDN_VERSION}.x64.windows.zip"
+            "zip")
+
+        find_package(OpenImageDenoise ${RTXPT_OIDN_VERSION} CONFIG REQUIRED
+            PATHS
+                "${RTXPT_OIDN_PACKAGE_DIR}"
+                "${RTXPT_OIDN_PACKAGE_DIR}/lib/cmake/OpenImageDenoise-${RTXPT_OIDN_VERSION}"
+            NO_DEFAULT_PATH)
+
+        set_target_properties(OpenImageDenoise OpenImageDenoise_core PROPERTIES
+            MAP_IMPORTED_CONFIG_DEBUG Release
+            MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
+            MAP_IMPORTED_CONFIG_MINSIZEREL Release)
+    else()
+        message(WARNING "RTXPT_WITH_OIDN currently uses the official x64 Windows OIDN package; disabling OIDN for this platform.")
+        set(RTXPT_WITH_OIDN OFF CACHE BOOL "Enable Intel Open Image Denoise for Reference path tracing mode" FORCE)
+    endif()
+endif()
+#----------------------------------------------------------------------------------------------------------------------
+
 
 #----------------------------------------------------------------------------------------------------------------------
 # Get and unpack the Agility SDK

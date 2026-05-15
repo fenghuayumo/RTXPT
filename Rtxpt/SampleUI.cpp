@@ -928,10 +928,52 @@ void SampleUI::buildUI(void)
                 }
                 else // !m_ui.RealtimeMode
                 {
+#if RTXPT_WITH_OIDN
+                    bool oidnChanged = false;
+                    oidnChanged |= ImGui::Checkbox("Use OIDN denoiser", &m_ui.ReferenceOIDNDenoiser);
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Runs Intel Open Image Denoise once after the Reference accumulation target is reached.\nThe denoised HDR result is reused until accumulation is reset.");
+
+                    {
+                        RAII_SCOPE(ImGui::Indent(indent);, ImGui::Unindent(indent););
+                        UI_SCOPED_DISABLE(!m_ui.ReferenceOIDNDenoiser);
+
+                        oidnChanged |= ImGui::Checkbox("Use GPU", &m_ui.ReferenceOIDNUseGPU);
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Uses OIDN GPU denoising when a supported CUDA/HIP/SYCL device is available; otherwise falls back to CPU.");
+
+                        UI_SCOPED_DISABLE(true);
+                        ImGui::Combo("Denoiser", &m_ui.ReferenceOIDNDenoiserType, "OpenImageDenoise\0\0");
+                    }
+
+                    {
+                        RAII_SCOPE(ImGui::Indent(indent);, ImGui::Unindent(indent););
+                        UI_SCOPED_DISABLE(!m_ui.ReferenceOIDNDenoiser);
+
+                        oidnChanged |= ImGui::Combo("Passes", &m_ui.ReferenceOIDNPasses, "Color Only\0Albedo\0Albedo + Normal\0\0");
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Selects which auxiliary OIDN guide passes are used when available.");
+
+                        oidnChanged |= ImGui::Combo("Prefilter", &m_ui.ReferenceOIDNPrefilter, "None\0Fast\0Accurate\0\0");
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Prefilters noisy auxiliary guide passes before beauty denoising.");
+
+                        oidnChanged |= ImGui::Combo("Quality", &m_ui.ReferenceOIDNQuality, "Fast\0Balanced\0High\0\0");
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("OIDN quality/performance mode.");
+                    }
+
+                    if (oidnChanged)
+                        m_ui.ReferenceOIDNDenoiserChanged = true;
+#else
+                    {
+                        bool oidnDisabled = false;
+                        UI_SCOPED_DISABLE(true);
+                        ImGui::Checkbox("Use OIDN denoiser", &oidnDisabled);
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("OIDN support is disabled in this build. Enable RTXPT_WITH_OIDN in CMake.");
+#endif
+
                     if (ImGui::Button("Photo mode screenshot"))
                         m_ui.ExperimentalPhotoModeScreenshot = true;
                     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Experimental: Saves a photo.bmp next to where .exe is and applies\n"
-                        "denoising using command line tool that wraps OptiX and OIDN denoisers.\n"
+                        "denoising using legacy command line denoiser wrappers if installed.\n"
+                        "For integrated HDR OIDN denoising, enable the OIDN checkbox above.\n"
                         "No guidance buffers are used and color is in LDR (so not as high quality\n"
                         "as it could be - will get improved in the future). \n"
                         "Command line denoiser wrapper tools by Declan Russel, available at:\n"

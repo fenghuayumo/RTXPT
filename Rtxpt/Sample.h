@@ -46,6 +46,7 @@ class DenoisingGuidesBaker;
 class CaptureScriptManager;
 class ComputePipelineBaker;
 class ComputeShaderVariant;
+class OidnDenoiser;
 
 class Sample : public donut::app::ApplicationBase
 {
@@ -218,6 +219,8 @@ private:
     void                                    UpdateCameraFromScene( const std::shared_ptr<donut::engine::PerspectiveCamera> & sceneCamera );
     void                                    UpdateViews( nvrhi::IFramebuffer* framebuffer );
     void                                    DenoisedScreenshot( nvrhi::ITexture * framebufferTexture ) const;
+    void                                    ResetReferenceOIDN();
+    void                                    ApplyReferenceOIDN();
     void                                    PostProcessPreToneMapping(nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView);
     void                                    PostProcessPostToneMapping(nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView);
 
@@ -326,6 +329,10 @@ private:
 
     std::unique_ptr<NrdIntegration>             m_nrd[cStablePlaneCount];       // reminder: when switching between ReLAX/ReBLUR, change settings, reset these to 0 and they'll get re-created in CreateRenderPasses!
     std::unique_ptr<AccumulationPass>           m_accumulationPass;
+    std::unique_ptr<OidnDenoiser>               m_oidnDenoiser;
+    nvrhi::TextureHandle                        m_oidnDenoisedOutput;
+    bool                                        m_oidnDenoisedOutputValid = false;
+    bool                                        m_oidnDenoiserFailed = false;
     std::shared_ptr<ShaderDebug>                m_shaderDebug;
 
     std::shared_ptr<DenoisingGuidesBaker>       m_denoisingGuidesBaker;

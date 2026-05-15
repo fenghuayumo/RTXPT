@@ -148,6 +148,13 @@ struct SampleUIData
     bool                                AccelerationStructRebuildRequested      = false;
     float                               ShaderAndACRefreshDelayedRequest        = 0.0f;
     bool                                ExperimentalPhotoModeScreenshot         = false;
+    bool                                ReferenceOIDNDenoiser                   = false;
+    bool                                ReferenceOIDNUseGPU                     = true;
+    int                                 ReferenceOIDNDenoiserType               = 0;
+    int                                 ReferenceOIDNPasses                     = 1;
+    int                                 ReferenceOIDNPrefilter                  = 1;
+    int                                 ReferenceOIDNQuality                    = 1;
+    bool                                ReferenceOIDNDenoiserChanged            = false;
 
     bool                                UseNEE          /*Defaults in CommandLine >*/;
     int                                 NEEType         /*Defaults in CommandLine >*/;      // '0' is uniform, '1' is power, '2' is NEE-AT; once this solidifies make it a proper enum

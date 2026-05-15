@@ -129,6 +129,10 @@ add_library(RtxptCore STATIC ${shared_sources})
 target_link_libraries(RtxptCore PUBLIC cxxopts donut_render donut_app donut_engine NRD Rtxdi omm-lib omm-gpu-nvrhi)
 target_include_directories(RtxptCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "../External/Nrd/Include" ${CMAKE_SOURCE_DIR}/External/Rtxdi/Include)
 target_compile_definitions(RtxptCore PUBLIC RTXPT_D3D12_WITH_NVAPI=$<BOOL:${NVRHI_WITH_NVAPI}>)
+target_compile_definitions(RtxptCore PUBLIC RTXPT_WITH_OIDN=$<BOOL:${RTXPT_WITH_OIDN}>)
+if (RTXPT_WITH_OIDN)
+    target_link_libraries(RtxptCore PUBLIC OpenImageDenoise)
+endif()
 add_dependencies(RtxptCore rtxpt_shaders nrd_shaders omm_shaders ShaderDynamicAssets ShaderDynamicAssets_CopyAlways)
 set_target_properties(RtxptCore PROPERTIES FOLDER ${folder})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${shaders})
@@ -142,6 +146,10 @@ if (RTXPT_D3D_AGILITY_SDK_PATH AND RTXPT_D3D_AGILITY_SDK_VERSION)
     target_include_directories(RtxptCore PRIVATE ${RTXPT_D3D_AGILITY_SDK_PATH}/build/native/include)
 endif()
 
+if (RTXPT_WITH_OIDN)
+    file(GLOB RTXPT_OIDN_RUNTIME_DLLS "${RTXPT_OIDN_BIN_DIR}/*.dll")
+endif()
+
 # Macro to create sample executables with common settings
 macro(add_rtxpt_sample TARGET_NAME MAIN_SOURCE)
     add_executable(${TARGET_NAME} WIN32 ${MAIN_SOURCE})
@@ -152,6 +160,14 @@ macro(add_rtxpt_sample TARGET_NAME MAIN_SOURCE)
         OUTPUT_NAME_DEBUG "${TARGET_NAME}D"
         OUTPUT_NAME_RELEASE "${TARGET_NAME}"
     )
+
+    if (RTXPT_WITH_OIDN)
+        add_custom_command(
+            TARGET ${TARGET_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RTXPT_OIDN_RUNTIME_DLLS} "$<TARGET_FILE_DIR:${TARGET_NAME}>"
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
     
     # AgilitySDK support for this target
     if (RTXPT_D3D_AGILITY_SDK_PATH AND RTXPT_D3D_AGILITY_SDK_VERSION)

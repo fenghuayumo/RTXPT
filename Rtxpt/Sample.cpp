@@ -19,11 +19,13 @@
 #include <donut/app/DeviceManager.h>
 #include <donut/core/log.h>
 #include <donut/core/json.h>
+#include <donut/core/math/float.h>
 #include <donut/core/math/math.h>
 #include <donut/shaders/light_cb.h>
 #include <donut/shaders/view_cb.h>
 #include <nvrhi/utils.h>
 #include <nvrhi/common/misc.h>
+#include <algorithm>
 #include <cmath>
 
 #include "SampleCommon/PTPipelineBaker.h"
@@ -46,6 +48,7 @@
 #include "Misc/ZoomTool.h"
 
 #include "ProcessingPasses/DenoisingGuidesBaker.h"
+#include "ProcessingPasses/OidnDenoiser.h"
 
 #include "SampleGame/GameScene.h"
 
@@ -1415,6 +1418,13 @@ void Sample::UpdateLighting(nvrhi::CommandListHandle commandList)
 
 void Sample::PreUpdatePathTracing( bool resetAccum, nvrhi::CommandListHandle commandList )
 {
+    const bool resetReferenceOidn = !m_ui.RealtimeMode && (resetAccum || m_ui.ResetAccumulation || m_ui.ReferenceOIDNDenoiserChanged);
+    if (resetReferenceOidn || m_ui.ReferenceOIDNDenoiserChanged)
+    {
+        ResetReferenceOIDN();
+        m_ui.ReferenceOIDNDenoiserChanged = false;
+    }
+
     resetAccum |= m_ui.ResetAccumulation;
     resetAccum |= m_ui.RealtimeMode;
 
@@ -1925,6 +1935,8 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
         for (int i = 0; i < std::size(m_nrd); i++)
             m_nrd[i] = nullptr;
         m_renderTargets = nullptr;
+        m_oidnDenoisedOutput = nullptr;
+        ResetReferenceOIDN();
         m_bindingCache->Clear( );
         m_renderTargets = std::make_unique<RenderTargets>( );
         m_renderTargets->Init(GetDevice( ), m_renderSize, m_displaySize, true, true, c_SwapchainCount, NeedsIntroPathTracerBuffers());
@@ -2184,6 +2196,9 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
         SampleRenderCode(framebuffer, m_commandList, constants);
 
         PostProcessAA(framebuffer, needNewPasses || m_ui.ResetRealtimeCaches);
+        ApplyReferenceOIDN();
+        if (m_ui.ReferenceOIDNDenoiser)
+            m_commandList->writeBuffer(m_constantBuffer, &constants, sizeof(constants));
     }
 
     donut::engine::PlanarView fullscreenView = *m_view;
@@ -2779,6 +2794,251 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
 
 }
 
+static float ReadR11G11B10FloatChannel(uint32_t packed, uint32_t channel)
+{
+    uint16_t halfBits = 0;
+    switch (channel)
+    {
+    case 0: halfBits = uint16_t((packed << 4) & 0x7FF0); break;
+    case 1: halfBits = uint16_t((packed >> 7) & 0x7FF0); break;
+    default: halfBits = uint16_t((packed >> 17) & 0x7FE0); break;
+    }
+
+    const float value = Float16ToFloat32(float16_t{ halfBits });
+    return std::isfinite(value) ? std::max(value, 0.0f) : 0.0f;
+}
+
+static void ReadR11G11B10Float3Staging(nvrhi::IDevice* device, nvrhi::IStagingTexture* stagingTexture, uint32_t width, uint32_t height, std::vector<float>& output)
+{
+    size_t rowPitch = 0;
+    const uint8_t* mappedData = static_cast<const uint8_t*>(device->mapStagingTexture(stagingTexture, nvrhi::TextureSlice(), nvrhi::CpuAccessMode::Read, &rowPitch));
+    if (mappedData == nullptr)
+        return;
+
+    output.resize(size_t(width) * size_t(height) * 3);
+    for (uint32_t y = 0; y < height; y++)
+    {
+        const uint32_t* row = reinterpret_cast<const uint32_t*>(mappedData + size_t(y) * rowPitch);
+        for (uint32_t x = 0; x < width; x++)
+        {
+            const size_t targetOffset = (size_t(y) * size_t(width) + size_t(x)) * 3;
+            const uint32_t packed = row[x];
+            output[targetOffset + 0] = ReadR11G11B10FloatChannel(packed, 0);
+            output[targetOffset + 1] = ReadR11G11B10FloatChannel(packed, 1);
+            output[targetOffset + 2] = ReadR11G11B10FloatChannel(packed, 2);
+        }
+    }
+
+    device->unmapStagingTexture(stagingTexture);
+}
+
+static void ReadRGBA16Float3Staging(nvrhi::IDevice* device, nvrhi::IStagingTexture* stagingTexture, uint32_t width, uint32_t height, std::vector<float>& output)
+{
+    size_t rowPitch = 0;
+    const uint8_t* mappedData = static_cast<const uint8_t*>(device->mapStagingTexture(stagingTexture, nvrhi::TextureSlice(), nvrhi::CpuAccessMode::Read, &rowPitch));
+    if (mappedData == nullptr)
+        return;
+
+    output.resize(size_t(width) * size_t(height) * 3);
+    for (uint32_t y = 0; y < height; y++)
+    {
+        const float16_t4* row = reinterpret_cast<const float16_t4*>(mappedData + size_t(y) * rowPitch);
+        for (uint32_t x = 0; x < width; x++)
+        {
+            const float4 value = Float16ToFloat32x4(row[x]);
+            const size_t targetOffset = (size_t(y) * size_t(width) + size_t(x)) * 3;
+            output[targetOffset + 0] = std::isfinite(value.x) ? std::clamp(value.x, -1.0f, 1.0f) : 0.0f;
+            output[targetOffset + 1] = std::isfinite(value.y) ? std::clamp(value.y, -1.0f, 1.0f) : 0.0f;
+            output[targetOffset + 2] = std::isfinite(value.z) ? std::clamp(value.z, -1.0f, 1.0f) : 1.0f;
+        }
+    }
+
+    device->unmapStagingTexture(stagingTexture);
+}
+
+void Sample::ResetReferenceOIDN()
+{
+    m_oidnDenoisedOutputValid = false;
+    m_oidnDenoiserFailed = false;
+
+    if (m_oidnDenoiser)
+        m_oidnDenoiser->Reset();
+}
+
+void Sample::ApplyReferenceOIDN()
+{
+    if (m_ui.RealtimeMode || !m_ui.ReferenceOIDNDenoiser || m_renderTargets == nullptr)
+        return;
+
+#if RTXPT_WITH_OIDN
+    const bool accumulationReady = m_accumulationCompleted || m_accumulationSampleIndex >= m_ui.AccumulationTarget;
+    if (!accumulationReady)
+        return;
+
+    if (m_oidnDenoiserFailed)
+        return;
+
+    const nvrhi::TextureDesc processedDesc = m_renderTargets->ProcessedOutputColor->getDesc();
+    if (m_oidnDenoisedOutput == nullptr ||
+        m_oidnDenoisedOutput->getDesc().width != processedDesc.width ||
+        m_oidnDenoisedOutput->getDesc().height != processedDesc.height ||
+        m_oidnDenoisedOutput->getDesc().format != processedDesc.format)
+    {
+        nvrhi::TextureDesc oidnOutputDesc = processedDesc;
+        oidnOutputDesc.debugName = "ReferenceOIDNDenoisedOutput";
+        oidnOutputDesc.initialState = nvrhi::ResourceStates::Common;
+        oidnOutputDesc.keepInitialState = true;
+        m_oidnDenoisedOutput = GetDevice()->createTexture(oidnOutputDesc);
+        m_oidnDenoisedOutputValid = false;
+    }
+
+    if (m_oidnDenoisedOutputValid)
+    {
+        m_commandList->copyTexture(m_renderTargets->ProcessedOutputColor, nvrhi::TextureSlice(), m_oidnDenoisedOutput, nvrhi::TextureSlice());
+        return;
+    }
+
+    nvrhi::ITexture* sourceTexture = m_renderTargets->AccumulatedRadiance;
+    nvrhi::TextureDesc sourceDesc = sourceTexture->getDesc();
+    if (sourceDesc.format != nvrhi::Format::RGBA32_FLOAT)
+    {
+        donut::log::warning("OIDN reference denoiser expected RGBA32_FLOAT accumulation buffer, got %s.", nvrhi::utils::FormatToString(sourceDesc.format));
+        m_oidnDenoiserFailed = true;
+        return;
+    }
+
+    const uint32_t width = sourceDesc.width;
+    const uint32_t height = sourceDesc.height;
+
+    OidnDenoiser::Options oidnOptions;
+    oidnOptions.UseGPU = m_ui.ReferenceOIDNUseGPU;
+    oidnOptions.GuidePasses = static_cast<OidnDenoiser::Passes>(std::clamp(m_ui.ReferenceOIDNPasses, 0, 2));
+    oidnOptions.GuidePrefilter = static_cast<OidnDenoiser::Prefilter>(std::clamp(m_ui.ReferenceOIDNPrefilter, 0, 2));
+    oidnOptions.FilterQuality = static_cast<OidnDenoiser::Quality>(std::clamp(m_ui.ReferenceOIDNQuality, 0, 2));
+
+    const bool requestAlbedoGuide = oidnOptions.GuidePasses == OidnDenoiser::Passes::Albedo || oidnOptions.GuidePasses == OidnDenoiser::Passes::AlbedoNormal;
+    const bool requestNormalGuide = oidnOptions.GuidePasses == OidnDenoiser::Passes::AlbedoNormal;
+    if (requestAlbedoGuide || requestNormalGuide)
+    {
+        SampleMiniConstants miniConstants = { uint4(0, 0, 0, 0) };
+        nvrhi::TextureDesc tdesc = m_renderTargets->OutputColor->getDesc();
+        m_commandList->beginMarker("OIDN_PrepareGuides");
+        m_postProcess->Apply(m_commandList, PostProcess::ComputePassType::DLSSRRDenoiserPrepareInputs, m_constantBuffer, miniConstants, m_bindingSet, m_bindingLayout, tdesc.width, tdesc.height);
+        m_commandList->endMarker();
+    }
+
+    nvrhi::StagingTextureHandle stagingTexture = GetDevice()->createStagingTexture(sourceDesc, nvrhi::CpuAccessMode::Read);
+    if (stagingTexture == nullptr)
+    {
+        donut::log::warning("OIDN reference denoiser failed to create a staging texture.");
+        m_oidnDenoiserFailed = true;
+        return;
+    }
+
+    nvrhi::StagingTextureHandle albedoStagingTexture;
+    nvrhi::StagingTextureHandle normalStagingTexture;
+    if (requestAlbedoGuide && m_renderTargets->RRDiffuseAlbedo != nullptr)
+    {
+        albedoStagingTexture = GetDevice()->createStagingTexture(m_renderTargets->RRDiffuseAlbedo->getDesc(), nvrhi::CpuAccessMode::Read);
+        if (albedoStagingTexture != nullptr)
+            m_commandList->copyTexture(albedoStagingTexture, nvrhi::TextureSlice(), m_renderTargets->RRDiffuseAlbedo, nvrhi::TextureSlice());
+    }
+    if (requestNormalGuide && m_renderTargets->RRNormalsAndRoughness != nullptr)
+    {
+        normalStagingTexture = GetDevice()->createStagingTexture(m_renderTargets->RRNormalsAndRoughness->getDesc(), nvrhi::CpuAccessMode::Read);
+        if (normalStagingTexture != nullptr)
+            m_commandList->copyTexture(normalStagingTexture, nvrhi::TextureSlice(), m_renderTargets->RRNormalsAndRoughness, nvrhi::TextureSlice());
+    }
+
+    m_commandList->copyTexture(stagingTexture, nvrhi::TextureSlice(), sourceTexture, nvrhi::TextureSlice());
+    m_commandList->close();
+    GetDevice()->executeCommandList(m_commandList);
+
+    size_t rowPitch = 0;
+    const uint8_t* mappedData = static_cast<const uint8_t*>(GetDevice()->mapStagingTexture(stagingTexture, nvrhi::TextureSlice(), nvrhi::CpuAccessMode::Read, &rowPitch));
+    if (mappedData == nullptr)
+    {
+        m_commandList->open();
+        donut::log::warning("OIDN reference denoiser failed to map the accumulation buffer.");
+        m_oidnDenoiserFailed = true;
+        return;
+    }
+
+    std::vector<float> inputRgb(size_t(width) * size_t(height) * 3);
+
+    for (uint32_t y = 0; y < height; y++)
+    {
+        const float* row = reinterpret_cast<const float*>(mappedData + size_t(y) * rowPitch);
+        for (uint32_t x = 0; x < width; x++)
+        {
+            const size_t sourceOffset = size_t(x) * 4;
+            const size_t targetOffset = (size_t(y) * size_t(width) + size_t(x)) * 3;
+            for (uint32_t channel = 0; channel < 3; channel++)
+            {
+                const float value = row[sourceOffset + channel];
+                inputRgb[targetOffset + channel] = (std::isfinite(value) && value > 0.0f) ? value : 0.0f;
+            }
+        }
+    }
+
+    GetDevice()->unmapStagingTexture(stagingTexture);
+
+    std::vector<float> albedoRgb;
+    std::vector<float> normalRgb;
+    if (albedoStagingTexture != nullptr)
+    {
+        ReadR11G11B10Float3Staging(GetDevice(), albedoStagingTexture, width, height, albedoRgb);
+        if (!albedoRgb.empty())
+            oidnOptions.AlbedoRgb = albedoRgb.data();
+    }
+    if (normalStagingTexture != nullptr)
+    {
+        ReadRGBA16Float3Staging(GetDevice(), normalStagingTexture, width, height, normalRgb);
+        if (!normalRgb.empty())
+            oidnOptions.NormalRgb = normalRgb.data();
+    }
+
+    if (m_oidnDenoiser == nullptr)
+        m_oidnDenoiser = std::make_unique<OidnDenoiser>();
+
+    std::vector<float> outputRgb;
+    const bool success = m_oidnDenoiser->Denoise(inputRgb.data(), width, height, oidnOptions, outputRgb);
+
+    m_commandList->open();
+
+    if (!success)
+    {
+        donut::log::warning("OIDN reference denoiser failed: %s", m_oidnDenoiser->GetLastError().c_str());
+        m_oidnDenoiserFailed = true;
+        return;
+    }
+
+    std::vector<float16_t4> outputHalf(size_t(width) * size_t(height));
+    constexpr float maxHalf = 65504.0f;
+    for (size_t pixel = 0; pixel < outputHalf.size(); pixel++)
+    {
+        const size_t rgbOffset = pixel * 3;
+        const float r = std::clamp(std::isfinite(outputRgb[rgbOffset + 0]) ? outputRgb[rgbOffset + 0] : 0.0f, 0.0f, maxHalf);
+        const float g = std::clamp(std::isfinite(outputRgb[rgbOffset + 1]) ? outputRgb[rgbOffset + 1] : 0.0f, 0.0f, maxHalf);
+        const float b = std::clamp(std::isfinite(outputRgb[rgbOffset + 2]) ? outputRgb[rgbOffset + 2] : 0.0f, 0.0f, maxHalf);
+        outputHalf[pixel] = Float32ToFloat16x4(float4(r, g, b, 1.0f));
+    }
+
+    m_commandList->writeTexture(m_oidnDenoisedOutput, 0, 0, outputHalf.data(), size_t(width) * sizeof(float16_t4));
+    m_commandList->copyTexture(m_renderTargets->ProcessedOutputColor, nvrhi::TextureSlice(), m_oidnDenoisedOutput, nvrhi::TextureSlice());
+    m_oidnDenoisedOutputValid = true;
+
+    donut::log::info("OIDN reference denoiser completed on %s for %ux%u image.",
+        m_oidnDenoiser->GetDeviceDescription().c_str(), width, height);
+#else
+    if (!m_oidnDenoiserFailed)
+    {
+        donut::log::warning("OIDN reference denoiser requested, but RTXPT_WITH_OIDN is disabled in this build.");
+        m_oidnDenoiserFailed = true;
+    }
+#endif
+}
+
 void Sample::DenoisedScreenshot(nvrhi::ITexture * framebufferTexture) const
 {
     std::string noisyImagePath = (app::GetDirectoryWithExecutable( ) / "photo.bmp").string();
@@ -2788,18 +3048,20 @@ void Sample::DenoisedScreenshot(nvrhi::ITexture * framebufferTexture) const
 	    const auto p1 = std::chrono::system_clock::now();
 		const std::string timestamp = std::to_string(std::chrono::duration_cast<std::chrono::seconds>(p1.time_since_epoch()).count());
 
-		const std::string fileName = "photo-denoised_" + dn + "_" + timestamp + ".bmp";
+        const std::string fileName = "photo-denoised_" + dn + "_" + timestamp + ".bmp";
 
         std::string denoisedImagePath = (app::GetDirectoryWithExecutable() / fileName).string();
-        std::string denoiserPath = GetLocalPath("Support/denoiser_"+dn).string();
-        if (denoiserPath == "")
-        { assert(false); return; }
-        denoiserPath += "/denoiser.exe";
+        std::filesystem::path denoiserPath = GetLocalPath("Support/denoiser_"+dn) / "denoiser.exe";
+        if (!std::filesystem::exists(denoiserPath))
+        {
+            donut::log::warning("External %s denoiser not found at '%s'.", dn.c_str(), denoiserPath.string().c_str());
+            return;
+        }
 
         if (!SaveTextureToFile(GetDevice(), m_CommonPasses.get(), framebufferTexture, nvrhi::ResourceStates::Common, noisyImagePath.c_str()))
         { assert(false); return; }
 
-        std::string startCmd = "\"" + denoiserPath + "\"" + " -hdr 0 -i \"" + noisyImagePath + "\"" " -o \"" + denoisedImagePath + "\"";
+        std::string startCmd = "\"" + denoiserPath.string() + "\"" + " -hdr 0 -i \"" + noisyImagePath + "\"" " -o \"" + denoisedImagePath + "\"";
         auto [resNum, resString, errorString] =  SystemShell(startCmd.c_str());
         if (resString!="")
             donut::log::info("result: %s", resString.c_str());
