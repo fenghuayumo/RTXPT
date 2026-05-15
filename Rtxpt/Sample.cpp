@@ -423,12 +423,14 @@ void Sample::Init(const std::string& preferredScene,
 
     // Get all scenes in "assets" folder
     const std::string mediaExt = ".scene.json";
+    const std::string jsonExt = ".json";
     for (const auto& file : std::filesystem::directory_iterator(GetLocalPath(c_AssetsFolder)))
     {
         if (!file.is_regular_file()) continue;
         std::string fileName = file.path().filename().string();
         std::string longExt = (fileName.size()<=mediaExt.length())?(""):(fileName.substr(fileName.length()-mediaExt.length()));
-        if ( longExt == mediaExt )
+        std::string shortExt = (fileName.size() <= jsonExt.length()) ? ("") : (fileName.substr(fileName.length() - jsonExt.length()));
+        if ( longExt == mediaExt || shortExt == jsonExt )
             m_sceneFilesAvailable.push_back( file.path().filename().string() );
     }
 

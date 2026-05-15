@@ -59,6 +59,73 @@ const static ImVec4 categoryColor = { 0.5f,1.0f,0.7f,1 };
 
 namespace
 {
+    bool IsMeshInstanceNode(donut::engine::SceneGraphNode* node)
+    {
+        return node != nullptr && std::dynamic_pointer_cast<donut::engine::MeshInstance>(node->GetLeaf()) != nullptr;
+    }
+
+    bool HasHierarchyEntity(donut::engine::SceneGraphNode* node)
+    {
+        if (IsMeshInstanceNode(node))
+            return true;
+
+        if (node == nullptr)
+            return false;
+
+        for (size_t i = 0; i < node->GetNumChildren(); i++)
+            if (HasHierarchyEntity(node->GetChild(i)))
+                return true;
+
+        return false;
+    }
+
+    void BuildHierarchyNodeUI(SampleUIData& ui, donut::engine::SceneGraphNode* node)
+    {
+        if (!HasHierarchyEntity(node))
+            return;
+
+        const bool isMeshNode = IsMeshInstanceNode(node);
+        bool hasVisibleChildren = false;
+        for (size_t i = 0; i < node->GetNumChildren(); i++)
+        {
+            if (HasHierarchyEntity(node->GetChild(i)))
+            {
+                hasVisibleChildren = true;
+                break;
+            }
+        }
+
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+        if (!hasVisibleChildren)
+            flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+        if (ui.SelectedNode.get() == node)
+            flags |= ImGuiTreeNodeFlags_Selected;
+
+        std::string nodeName = node->GetName().empty() ? "<unnamed>" : node->GetName();
+        std::string label = isMeshNode ? "[Mesh] " + nodeName : "[Group] " + nodeName;
+        if (isMeshNode)
+        {
+            auto meshInstance = std::dynamic_pointer_cast<donut::engine::MeshInstance>(node->GetLeaf());
+            if (meshInstance && meshInstance->GetMesh())
+                label += "  (" + meshInstance->GetMesh()->name + ")";
+        }
+
+        const bool open = ImGui::TreeNodeEx(node, flags, "%s", label.c_str());
+
+        if (isMeshNode && ImGui::IsItemClicked())
+            ui.SelectedNode = node->shared_from_this();
+
+        if (isMeshNode && ImGui::IsItemHovered())
+            ImGui::SetTooltip("Mesh instance. Click to open it in Inspector.");
+
+        if (open && hasVisibleChildren)
+        {
+            for (size_t i = 0; i < node->GetNumChildren(); i++)
+                BuildHierarchyNodeUI(ui, node->GetChild(i));
+            ImGui::TreePop();
+        }
+    }
+
     float WrapDegrees(float degrees)
     {
         degrees = std::fmod(degrees, 360.0f);
@@ -2174,6 +2241,48 @@ void SampleUI::buildUI(void)
             }
         }
         
+    }
+
+    {
+        ImGui::SetNextWindowPos(ImVec2(20.f + defWindowWidth, 10.f), ImGuiCond_Appearing);
+        ImGui::SetNextWindowSize(ImVec2(defWindowWidth, scaledHeight * 0.45f), ImGuiCond_Appearing);
+        RAII_SCOPE(ImGui::Begin("Hierarchy", nullptr, ImGuiWindowFlags_None);, ImGui::End(););
+
+        auto scene = m_app.GetScene();
+        auto sceneGraph = scene ? scene->GetSceneGraph() : nullptr;
+        auto rootNode = sceneGraph ? sceneGraph->GetRootNode() : nullptr;
+
+        const uint32_t splatEntityCount = m_ui.GaussianSplatCount > 0 ? 1u : 0u;
+        if (sceneGraph && rootNode)
+        {
+            ImGui::Text("Objects: %zu mesh, %u 3DGS", sceneGraph->GetMeshInstances().size(), splatEntityCount);
+            ImGui::Separator();
+
+            if (ImGui::TreeNodeEx("Scene", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth))
+            {
+                BuildHierarchyNodeUI(m_ui, rootNode.get());
+                ImGui::TreePop();
+            }
+        }
+        else
+        {
+            ImGui::TextDisabled("No scene loaded.");
+        }
+
+        if (ImGui::TreeNodeEx("3D Gaussian Splats", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth))
+        {
+            if (m_ui.GaussianSplatCount > 0)
+            {
+                const std::filesystem::path splatPath(m_ui.GaussianSplatFileName);
+                const std::string splatName = splatPath.filename().empty() ? m_ui.GaussianSplatFileName : splatPath.filename().string();
+                ImGui::BulletText("[3DGS] %s (%u splats)", splatName.c_str(), m_ui.GaussianSplatCount);
+            }
+            else
+            {
+                ImGui::TextDisabled("No 3DGS object loaded.");
+            }
+            ImGui::TreePop();
+        }
     }
 
     if ( m_app.GetGame() != nullptr && m_app.GetGame()->IsInitialized() )

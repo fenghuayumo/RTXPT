@@ -66,7 +66,7 @@ SampleBaseApp::InitReturnCodes SampleBaseApp::Init(int argc, const char* const* 
 {
     donut::app::DeviceCreationParameters deviceParams = GetDefaultDeviceParams();
 
-    std::string preferredScene = "bistro-programmer-art.scene.json"; // "kitchen.scene.json"; 
+    std::string preferredScene = "default.json";
     LocalConfig::PreferredSceneOverride(preferredScene);
 
     // Process command line arguments
