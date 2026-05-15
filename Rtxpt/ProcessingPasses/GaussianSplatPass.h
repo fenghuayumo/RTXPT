@@ -33,7 +33,7 @@ struct GaussianSplatRenderSettings
 {
     bool enabled = true;
     bool depthTest = true;
-    bool shadowsEnabled = true;
+    bool shadowsEnabled = false;
     float splatScale = 1.0f;
     float alphaScale = 1.0f;
     float brightness = 1.0f;
@@ -57,6 +57,7 @@ public:
 
     void CreatePipeline(const RenderTargets& renderTargets);
     void BuildAccelerationStructures(nvrhi::ICommandList* commandList);
+    void ReleaseAccelerationStructures();
 
     void Render(
         nvrhi::ICommandList* commandList,
@@ -90,19 +91,24 @@ private:
     nvrhi::BufferHandle m_sortControlBuffer;
     nvrhi::BufferHandle m_splatAabbBuffer;
 
-    nvrhi::BindingLayoutHandle m_renderBindingLayout;
+    nvrhi::BindingLayoutHandle m_rasterRenderBindingLayout;
+    nvrhi::BindingLayoutHandle m_hybridRenderBindingLayout;
     nvrhi::BindingLayoutHandle m_sortKeyBindingLayout;
-    nvrhi::BindingSetHandle m_renderBindingSet;
+    nvrhi::BindingSetHandle m_rasterRenderBindingSet;
+    nvrhi::BindingSetHandle m_hybridRenderBindingSet;
     nvrhi::BindingSetHandle m_sortKeyBindingSet;
 
-    nvrhi::ShaderHandle m_vertexShader;
-    nvrhi::ShaderHandle m_pixelShader;
+    nvrhi::ShaderHandle m_rasterVertexShader;
+    nvrhi::ShaderHandle m_rasterPixelShader;
+    nvrhi::ShaderHandle m_hybridVertexShader;
+    nvrhi::ShaderHandle m_hybridPixelShader;
     nvrhi::ShaderHandle m_sortKeyShader;
-    nvrhi::GraphicsPipelineHandle m_renderPipeline;
+    nvrhi::GraphicsPipelineHandle m_rasterRenderPipeline;
+    nvrhi::GraphicsPipelineHandle m_hybridRenderPipeline;
     nvrhi::ComputePipelineHandle m_sortKeyPipeline;
     nvrhi::rt::AccelStructHandle m_splatBottomLevelAS;
     nvrhi::rt::AccelStructHandle m_splatTopLevelAS;
-    nvrhi::rt::IAccelStruct* m_renderMeshTopLevelAS = nullptr;
+    nvrhi::rt::IAccelStruct* m_hybridRenderMeshTopLevelAS = nullptr;
 
     std::vector<GaussianSplatData> m_splats;
     std::vector<donut::math::float4> m_shCoefficients;

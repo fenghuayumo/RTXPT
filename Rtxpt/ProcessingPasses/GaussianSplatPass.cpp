@@ -773,17 +773,20 @@ GaussianSplatPass::GaussianSplatPass(
 {
     m_constantBuffer = m_device->createBuffer(nvrhi::utils::CreateVolatileConstantBufferDesc(sizeof(GaussianSplatConstants), "GaussianSplatConstants", 16));
 
-    nvrhi::BindingLayoutDesc renderLayoutDesc;
-    renderLayoutDesc.visibility = nvrhi::ShaderType::Vertex | nvrhi::ShaderType::Pixel;
-    renderLayoutDesc.bindings = {
+    nvrhi::BindingLayoutDesc rasterRenderLayoutDesc;
+    rasterRenderLayoutDesc.visibility = nvrhi::ShaderType::Vertex | nvrhi::ShaderType::Pixel;
+    rasterRenderLayoutDesc.bindings = {
         nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),
         nvrhi::BindingLayoutItem::StructuredBuffer_SRV(0),
         nvrhi::BindingLayoutItem::TypedBuffer_SRV(1),
         nvrhi::BindingLayoutItem::StructuredBuffer_SRV(2),
-        nvrhi::BindingLayoutItem::Texture_SRV(3),
-        nvrhi::BindingLayoutItem::RayTracingAccelStruct(4)
+        nvrhi::BindingLayoutItem::Texture_SRV(3)
     };
-    m_renderBindingLayout = m_device->createBindingLayout(renderLayoutDesc);
+    m_rasterRenderBindingLayout = m_device->createBindingLayout(rasterRenderLayoutDesc);
+
+    nvrhi::BindingLayoutDesc hybridRenderLayoutDesc = rasterRenderLayoutDesc;
+    hybridRenderLayoutDesc.bindings.push_back(nvrhi::BindingLayoutItem::RayTracingAccelStruct(4));
+    m_hybridRenderBindingLayout = m_device->createBindingLayout(hybridRenderLayoutDesc);
 
     nvrhi::BindingLayoutDesc sortLayoutDesc;
     sortLayoutDesc.visibility = nvrhi::ShaderType::Compute;
@@ -881,10 +884,12 @@ bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool
     aabbBufferDesc.keepInitialState = true;
     m_splatAabbBuffer = m_device->createBuffer(aabbBufferDesc);
 
-    m_renderBindingSet = nullptr;
+    m_rasterRenderBindingSet = nullptr;
+    m_hybridRenderBindingSet = nullptr;
     m_sortKeyBindingSet = nullptr;
     m_splatBottomLevelAS = nullptr;
     m_splatTopLevelAS = nullptr;
+    m_hybridRenderMeshTopLevelAS = nullptr;
     m_sourceFileName = fileName.string();
     m_splatUploadPending = true;
     m_accelStructBuildPending = true;
@@ -947,22 +952,40 @@ void GaussianSplatPass::BuildAccelerationStructures(nvrhi::ICommandList* command
     m_accelStructBuildPending = false;
 }
 
+void GaussianSplatPass::ReleaseAccelerationStructures()
+{
+    m_splatBottomLevelAS = nullptr;
+    m_splatTopLevelAS = nullptr;
+    m_accelStructBuildPending = HasSplats();
+}
+
 void GaussianSplatPass::CreateBindingSets(const RenderTargets& renderTargets, nvrhi::rt::IAccelStruct* meshTopLevelAS)
 {
-    if (!m_splatBuffer || !m_shBuffer || !m_indexBuffer || !m_sortKeyBuffer || meshTopLevelAS == nullptr)
+    if (!m_splatBuffer || !m_shBuffer || !m_indexBuffer || !m_sortKeyBuffer)
         return;
 
-    nvrhi::BindingSetDesc renderBindingSetDesc;
-    renderBindingSetDesc.bindings = {
+    nvrhi::BindingSetDesc rasterRenderBindingSetDesc;
+    rasterRenderBindingSetDesc.bindings = {
         nvrhi::BindingSetItem::ConstantBuffer(0, m_constantBuffer),
         nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_splatBuffer),
         nvrhi::BindingSetItem::TypedBuffer_SRV(1, m_indexBuffer, nvrhi::Format::R32_UINT),
         nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_shBuffer),
-        nvrhi::BindingSetItem::Texture_SRV(3, renderTargets.Depth),
-        nvrhi::BindingSetItem::RayTracingAccelStruct(4, meshTopLevelAS)
+        nvrhi::BindingSetItem::Texture_SRV(3, renderTargets.Depth)
     };
-    m_renderBindingSet = m_device->createBindingSet(renderBindingSetDesc, m_renderBindingLayout);
-    m_renderMeshTopLevelAS = meshTopLevelAS;
+    m_rasterRenderBindingSet = m_device->createBindingSet(rasterRenderBindingSetDesc, m_rasterRenderBindingLayout);
+
+    if (meshTopLevelAS != nullptr)
+    {
+        nvrhi::BindingSetDesc hybridRenderBindingSetDesc = rasterRenderBindingSetDesc;
+        hybridRenderBindingSetDesc.bindings.push_back(nvrhi::BindingSetItem::RayTracingAccelStruct(4, meshTopLevelAS));
+        m_hybridRenderBindingSet = m_device->createBindingSet(hybridRenderBindingSetDesc, m_hybridRenderBindingLayout);
+        m_hybridRenderMeshTopLevelAS = meshTopLevelAS;
+    }
+    else
+    {
+        m_hybridRenderBindingSet = nullptr;
+        m_hybridRenderMeshTopLevelAS = nullptr;
+    }
 
     nvrhi::BindingSetDesc sortKeyBindingSetDesc;
     sortKeyBindingSetDesc.bindings = {
@@ -978,8 +1001,17 @@ void GaussianSplatPass::CreatePipeline(const RenderTargets& renderTargets)
     if (!HasSplats())
         return;
 
-    m_vertexShader = m_shaderFactory->CreateShader("app/ProcessingPasses/GaussianSplatRaster.hlsl", "vs_main", nullptr, nvrhi::ShaderType::Vertex);
-    m_pixelShader = m_shaderFactory->CreateShader("app/ProcessingPasses/GaussianSplatRaster.hlsl", "ps_main", nullptr, nvrhi::ShaderType::Pixel);
+    std::vector<donut::engine::ShaderMacro> rasterShadowMacros = {
+        donut::engine::ShaderMacro({ "GAUSSIAN_SPLAT_HYBRID_SHADOWS", "0" })
+    };
+    m_rasterVertexShader = m_shaderFactory->CreateShader("app/ProcessingPasses/GaussianSplatRaster.hlsl", "vs_main", &rasterShadowMacros, nvrhi::ShaderType::Vertex);
+    m_rasterPixelShader = m_shaderFactory->CreateShader("app/ProcessingPasses/GaussianSplatRaster.hlsl", "ps_main", &rasterShadowMacros, nvrhi::ShaderType::Pixel);
+
+    std::vector<donut::engine::ShaderMacro> hybridShadowMacros = {
+        donut::engine::ShaderMacro({ "GAUSSIAN_SPLAT_HYBRID_SHADOWS", "1" })
+    };
+    m_hybridVertexShader = m_shaderFactory->CreateShader("app/ProcessingPasses/GaussianSplatRaster.hlsl", "vs_main", &hybridShadowMacros, nvrhi::ShaderType::Vertex);
+    m_hybridPixelShader = m_shaderFactory->CreateShader("app/ProcessingPasses/GaussianSplatRaster.hlsl", "ps_main", &hybridShadowMacros, nvrhi::ShaderType::Pixel);
 
     std::vector<donut::engine::ShaderMacro> sortKeyMacros = {
         donut::engine::ShaderMacro({ "GAUSSIAN_SPLAT_SORT_KEYS", "1" })
@@ -987,9 +1019,9 @@ void GaussianSplatPass::CreatePipeline(const RenderTargets& renderTargets)
     m_sortKeyShader = m_shaderFactory->CreateShader("app/ProcessingPasses/GaussianSplatRaster.hlsl", "cs_sort_keys", &sortKeyMacros, nvrhi::ShaderType::Compute);
 
     nvrhi::GraphicsPipelineDesc pipelineDesc;
-    pipelineDesc.bindingLayouts = { m_renderBindingLayout };
-    pipelineDesc.VS = m_vertexShader;
-    pipelineDesc.PS = m_pixelShader;
+    pipelineDesc.bindingLayouts = { m_rasterRenderBindingLayout };
+    pipelineDesc.VS = m_rasterVertexShader;
+    pipelineDesc.PS = m_rasterPixelShader;
     pipelineDesc.primType = nvrhi::PrimitiveType::TriangleList;
     pipelineDesc.renderState.rasterState.cullMode = nvrhi::RasterCullMode::None;
     pipelineDesc.renderState.rasterState.depthClipEnable = true;
@@ -1004,7 +1036,14 @@ void GaussianSplatPass::CreatePipeline(const RenderTargets& renderTargets)
     alphaBlend.destBlendAlpha = nvrhi::BlendFactor::One;
     pipelineDesc.renderState.blendState.targets[0] = alphaBlend;
 
-    m_renderPipeline = m_device->createGraphicsPipeline(
+    m_rasterRenderPipeline = m_device->createGraphicsPipeline(
+        pipelineDesc,
+        renderTargets.ProcessedOutputFramebuffer->GetFramebuffer(nvrhi::AllSubresources));
+
+    pipelineDesc.bindingLayouts = { m_hybridRenderBindingLayout };
+    pipelineDesc.VS = m_hybridVertexShader;
+    pipelineDesc.PS = m_hybridPixelShader;
+    m_hybridRenderPipeline = m_device->createGraphicsPipeline(
         pipelineDesc,
         renderTargets.ProcessedOutputFramebuffer->GetFramebuffer(nvrhi::AllSubresources));
 
@@ -1013,8 +1052,9 @@ void GaussianSplatPass::CreatePipeline(const RenderTargets& renderTargets)
     computePipelineDesc.CS = m_sortKeyShader;
     m_sortKeyPipeline = m_device->createComputePipeline(computePipelineDesc);
 
-    m_renderBindingSet = nullptr;
-    m_renderMeshTopLevelAS = nullptr;
+    m_rasterRenderBindingSet = nullptr;
+    m_hybridRenderBindingSet = nullptr;
+    m_hybridRenderMeshTopLevelAS = nullptr;
 }
 
 void GaussianSplatPass::UploadSplatDataIfNeeded(nvrhi::ICommandList* commandList)
@@ -1068,17 +1108,20 @@ void GaussianSplatPass::Render(
     const RenderTargets& renderTargets,
     const GaussianSplatRenderSettings& settings)
 {
-    if (!settings.enabled || !HasSplats() || !m_renderPipeline || !m_gpuSort || meshTopLevelAS == nullptr)
+    if (!settings.enabled || !HasSplats() || !m_rasterRenderPipeline || !m_gpuSort)
         return;
 
     commandList->beginMarker("GaussianSplats");
 
     UploadSplatDataIfNeeded(commandList);
 
-    if (!m_renderBindingSet || m_renderMeshTopLevelAS != meshTopLevelAS)
-        CreateBindingSets(renderTargets, meshTopLevelAS);
+    const bool useHybridShadows = settings.shadowsEnabled && meshTopLevelAS != nullptr && m_hybridRenderPipeline;
 
-    if (!m_renderBindingSet)
+    if (!m_rasterRenderBindingSet || (useHybridShadows && (!m_hybridRenderBindingSet || m_hybridRenderMeshTopLevelAS != meshTopLevelAS)))
+        CreateBindingSets(renderTargets, useHybridShadows ? meshTopLevelAS : nullptr);
+
+    nvrhi::BindingSetHandle renderBindingSet = useHybridShadows ? m_hybridRenderBindingSet : m_rasterRenderBindingSet;
+    if (!renderBindingSet)
     {
         commandList->endMarker();
         return;
@@ -1099,7 +1142,7 @@ void GaussianSplatPass::Render(
     constants.alphaCullThreshold = settings.alphaCullThreshold;
     constants.shDegree = m_shDegree;
     constants.depthTest = settings.depthTest ? 1u : 0u;
-    constants.shadowsEnabled = settings.shadowsEnabled ? 1u : 0u;
+    constants.shadowsEnabled = useHybridShadows ? 1u : 0u;
     float3 shadowDir = settings.shadowDirectionToLight;
     if (length(shadowDir) < 1e-4f)
         shadowDir = float3(0.0f, 1.0f, 0.0f);
@@ -1117,8 +1160,8 @@ void GaussianSplatPass::Render(
     commandList->commitBarriers();
 
     nvrhi::GraphicsState state;
-    state.pipeline = m_renderPipeline;
-    state.bindings = { m_renderBindingSet };
+    state.pipeline = useHybridShadows ? m_hybridRenderPipeline : m_rasterRenderPipeline;
+    state.bindings = { renderBindingSet };
     state.framebuffer = renderTargets.ProcessedOutputFramebuffer->GetFramebuffer(nvrhi::AllSubresources);
     state.viewport = view.GetViewportState();
     commandList->setGraphicsState(state);

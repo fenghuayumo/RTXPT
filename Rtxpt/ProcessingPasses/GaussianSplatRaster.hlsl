@@ -12,6 +12,14 @@
 
 #include "../Shaders/SampleConstantBuffer.h"
 
+#ifndef GAUSSIAN_SPLAT_SORT_KEYS
+#define GAUSSIAN_SPLAT_SORT_KEYS 0
+#endif
+
+#ifndef GAUSSIAN_SPLAT_HYBRID_SHADOWS
+#define GAUSSIAN_SPLAT_HYBRID_SHADOWS 0
+#endif
+
 ConstantBuffer<GaussianSplatConstants> g_Const : register(b0);
 StructuredBuffer<GaussianSplatData> t_Splats : register(t0);
 
@@ -42,16 +50,21 @@ void cs_sort_keys(uint splatIndex : SV_DispatchThreadID)
 Buffer<uint> t_SplatIndices : register(t1);
 StructuredBuffer<float4> t_SplatSH : register(t2);
 Texture2D<float> t_Depth : register(t3);
+
+#if GAUSSIAN_SPLAT_HYBRID_SHADOWS
 RaytracingAccelerationStructure t_MeshBVH : register(t4);
 
 #include "../Shaders/HybridGaussianShadow.hlsli"
+#endif
 
 struct VertexOutput
 {
     float4 position : SV_Position;
     float2 fragPos : TEXCOORD0;
     nointerpolation float4 color : COLOR0;
+#if GAUSSIAN_SPLAT_HYBRID_SHADOWS
     nointerpolation float3 worldCenter : TEXCOORD1;
+#endif
 };
 
 static const float kSqrt8 = 2.8284271247461903f;
@@ -270,7 +283,9 @@ VertexOutput vs_main(uint vertexId : SV_VertexID)
     output.position = float4(ndcCenter.xy + ndcOffset, ndcCenter.z, 1.0f);
     output.fragPos = corner * kSqrt8;
     output.color = float4(SrgbToLinear(displayColor) * g_Const.brightness, splat.centerOpacity.w);
+#if GAUSSIAN_SPLAT_HYBRID_SHADOWS
     output.worldCenter = worldCenter.xyz;
+#endif
 
     return output;
 }
@@ -300,6 +315,7 @@ float4 ps_main(VertexOutput input) : SV_Target0
         }
     }
 
+#if GAUSSIAN_SPLAT_HYBRID_SHADOWS
     float shadow = 1.0f;
     if (g_Const.shadowsEnabled != 0 && g_Const.shadowStrength > 0.0f)
     {
@@ -314,6 +330,9 @@ float4 ps_main(VertexOutput input) : SV_Target0
     }
 
     return float4(input.color.rgb * shadow, saturate(opacity));
+#else
+    return float4(input.color.rgb, saturate(opacity));
+#endif
 }
 
 #endif

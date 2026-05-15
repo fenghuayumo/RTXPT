@@ -321,7 +321,7 @@ struct SampleUIData
 
     bool                                EnableGaussianSplats = true;
     bool                                GaussianSplatDepthTest = true;
-    bool                                GaussianSplatShadows = true;
+    bool                                GaussianSplatShadows = false;
     float                               GaussianSplatScale = 1.0f;
     float                               GaussianSplatAlphaScale = 1.0f;
     float                               GaussianSplatBrightness = 1.0f;

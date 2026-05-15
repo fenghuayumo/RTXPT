@@ -59,6 +59,18 @@ const static ImVec4 categoryColor = { 0.5f,1.0f,0.7f,1 };
 
 namespace
 {
+    bool GaussianSplatModeCombo(SampleUIData& ui)
+    {
+        int renderingMode = ui.GaussianSplatShadows ? 1 : 0;
+        if (!ImGui::Combo("Rendering Mode", &renderingMode, "Raster 3DGS (VS)\0Hybrid 3DGS + 3DGRT\0\0"))
+            return false;
+
+        ui.GaussianSplatShadows = renderingMode == 1;
+        ui.AccelerationStructRebuildRequested = true;
+        ui.ResetAccumulation = true;
+        return true;
+    }
+
     bool IsMeshInstanceNode(donut::engine::SceneGraphNode* node)
     {
         return node != nullptr && std::dynamic_pointer_cast<donut::engine::MeshInstance>(node->GetLeaf()) != nullptr;
@@ -702,16 +714,8 @@ void SampleUI::buildUI(void)
             {
                 RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
 
-                ImGui::TextWrapped("Source: %s", m_ui.GaussianSplatFileName.c_str());
-                ImGui::Text("Splats: %u", m_ui.GaussianSplatCount);
-                RESET_ON_CHANGE(ImGui::Checkbox("Enabled", &m_ui.EnableGaussianSplats));
                 RESET_ON_CHANGE(ImGui::Checkbox("Mesh Depth Test", &m_ui.GaussianSplatDepthTest));
-                RESET_ON_CHANGE(ImGui::Checkbox("Hybrid Shadows", &m_ui.GaussianSplatShadows));
-                RESET_ON_CHANGE(ImGui::DragFloat("Scale", &m_ui.GaussianSplatScale, 0.01f, 0.01f, 10.0f, "%.2f"));
-                RESET_ON_CHANGE(ImGui::DragFloat("Alpha", &m_ui.GaussianSplatAlphaScale, 0.01f, 0.0f, 4.0f, "%.2f"));
-                RESET_ON_CHANGE(ImGui::DragFloat("Brightness", &m_ui.GaussianSplatBrightness, 0.01f, 0.0f, 16.0f, "%.2f"));
-                RESET_ON_CHANGE(ImGui::DragFloat("Alpha Cull", &m_ui.GaussianSplatAlphaCullThreshold, 0.001f, 0.0f, 0.25f, "%.3f"));
-                RESET_ON_CHANGE(ImGui::DragFloat("Shadow Strength", &m_ui.GaussianSplatShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f"));
+                GaussianSplatModeCombo(m_ui);
             }
 
             if (ImGui::CollapsingHeader("Environment Map"))
@@ -2033,13 +2037,12 @@ void SampleUI::buildUI(void)
         if (ImGui::CollapsingHeader("Properties", ImGuiTreeNodeFlags_DefaultOpen))
         {
             RESET_ON_CHANGE(ImGui::Checkbox("Enabled", &m_ui.EnableGaussianSplats));
-            RESET_ON_CHANGE(ImGui::Checkbox("Mesh Depth Test", &m_ui.GaussianSplatDepthTest));
-            RESET_ON_CHANGE(ImGui::Checkbox("Hybrid Shadows", &m_ui.GaussianSplatShadows));
             RESET_ON_CHANGE(ImGui::DragFloat("Footprint Scale", &m_ui.GaussianSplatScale, 0.01f, 0.01f, 10.0f, "%.2f"));
             RESET_ON_CHANGE(ImGui::DragFloat("Alpha", &m_ui.GaussianSplatAlphaScale, 0.01f, 0.0f, 4.0f, "%.2f"));
             RESET_ON_CHANGE(ImGui::DragFloat("Brightness", &m_ui.GaussianSplatBrightness, 0.01f, 0.0f, 16.0f, "%.2f"));
             RESET_ON_CHANGE(ImGui::DragFloat("Alpha Cull", &m_ui.GaussianSplatAlphaCullThreshold, 0.001f, 0.0f, 0.25f, "%.3f"));
-            RESET_ON_CHANGE(ImGui::DragFloat("Shadow Strength", &m_ui.GaussianSplatShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f"));
+            if (m_ui.GaussianSplatShadows)
+                RESET_ON_CHANGE(ImGui::DragFloat("Shadow Strength", &m_ui.GaussianSplatShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f"));
         }
 
         ImGui::PopItemWidth();

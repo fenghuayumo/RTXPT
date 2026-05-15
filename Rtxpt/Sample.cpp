@@ -1254,7 +1254,12 @@ void Sample::CreateAccelStructs(nvrhi::ICommandList* commandList)
     CreateBlases(commandList);
     CreateTlas(commandList);
     if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->HasSplats())
-        m_gaussianSplatPass->BuildAccelerationStructures(commandList);
+    {
+        if (m_ui.GaussianSplatShadows)
+            m_gaussianSplatPass->BuildAccelerationStructures(commandList);
+        else
+            m_gaussianSplatPass->ReleaseAccelerationStructures();
+    }
 }
 
 void Sample::RecreateAccelStructs(nvrhi::ICommandList* commandList)
@@ -2330,10 +2335,10 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
     {
         UpdatePathTracerConstants(constants.ptConsts, cameraData);
         constants.MaterialCount = m_materialsBaker->GetMaterialDataCount(); // m_scene->GetSceneGraph()->GetMaterials().size();
-        constants.GaussianSplatShadowCount = (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->GetTopLevelAS() != nullptr)
+        constants.GaussianSplatShadowCount = (m_ui.EnableGaussianSplats && m_ui.GaussianSplatShadows && m_gaussianSplatPass != nullptr && m_gaussianSplatPass->GetTopLevelAS() != nullptr)
             ? m_gaussianSplatPass->GetSplatCount()
             : 0;
-        constants.GaussianSplatShadowsEnabled = (m_ui.GaussianSplatShadows && constants.GaussianSplatShadowCount > 0) ? 1u : 0u;
+        constants.GaussianSplatShadowsEnabled = constants.GaussianSplatShadowCount > 0 ? 1u : 0u;
         constants.GaussianSplatShadowScale = m_ui.GaussianSplatScale;
         constants.GaussianSplatShadowAlphaThreshold = m_ui.GaussianSplatAlphaCullThreshold;
         constants._padding0 = 0.0f;
