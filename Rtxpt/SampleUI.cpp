@@ -578,6 +578,20 @@ void SampleUI::buildUI(void)
                 }
             }
 
+            if (m_ui.GaussianSplatCount > 0 && ImGui::CollapsingHeader("3D Gaussian Splats"))
+            {
+                RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
+
+                ImGui::TextWrapped("Source: %s", m_ui.GaussianSplatFileName.c_str());
+                ImGui::Text("Splats: %u", m_ui.GaussianSplatCount);
+                RESET_ON_CHANGE(ImGui::Checkbox("Enabled", &m_ui.EnableGaussianSplats));
+                RESET_ON_CHANGE(ImGui::Checkbox("Mesh Depth Test", &m_ui.GaussianSplatDepthTest));
+                RESET_ON_CHANGE(ImGui::DragFloat("Scale", &m_ui.GaussianSplatScale, 0.01f, 0.01f, 10.0f, "%.2f"));
+                RESET_ON_CHANGE(ImGui::DragFloat("Alpha", &m_ui.GaussianSplatAlphaScale, 0.01f, 0.0f, 4.0f, "%.2f"));
+                RESET_ON_CHANGE(ImGui::DragFloat("Brightness", &m_ui.GaussianSplatBrightness, 0.01f, 0.0f, 16.0f, "%.2f"));
+                RESET_ON_CHANGE(ImGui::DragFloat("Alpha Cull", &m_ui.GaussianSplatAlphaCullThreshold, 0.001f, 0.0f, 0.25f, "%.3f"));
+            }
+
             if (ImGui::CollapsingHeader("Environment Map"))
             {
                 RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );

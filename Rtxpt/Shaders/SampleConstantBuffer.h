@@ -24,6 +24,8 @@ using namespace donut::math;
 #include "PathTracer/Lighting/LightingTypes.hlsli"
 #include "PathTracer/Lighting/EnvMap.hlsli"
 
+#define GAUSSIAN_SPLAT_SH_FLOAT4_COUNT 12
+
 
 struct SimpleViewConstants
 {
@@ -68,6 +70,31 @@ struct SampleMiniConstants
     uint4 params1;
     uint4 params2;
     uint4 params3;
+};
+
+struct GaussianSplatConstants
+{
+    SimpleViewConstants view;
+
+    float4 cameraPosition;
+
+    float splatScale;
+    float alphaScale;
+    float brightness;
+    uint splatCount;
+
+    float alphaCullThreshold;
+    uint shDegree;
+    uint depthTest;
+    uint unused0;
+};
+
+struct GaussianSplatData
+{
+    float4 centerOpacity; // xyz = center, w = opacity after sigmoid
+    float4 covariance0;   // xx, xy, xz, yy
+    float4 covariance1;   // yz, zz, unused, unused
+    float4 color;         // rgb = SH degree 0 color, a unused
 };
 
 #endif // __SAMPLE_CONSTANT_BUFFER_H__

@@ -48,6 +48,7 @@ class ComputePipelineBaker;
 class ComputeShaderVariant;
 class OidnDenoiser;
 class PythonScripting;
+class GaussianSplatPass;
 
 class Sample : public donut::app::ApplicationBase
 {
@@ -93,6 +94,9 @@ public:
 
     void                                    Init(const std::string& preferredScene, const std::shared_ptr<donut::engine::ShaderFactory>& shaderFactory);
     void                                    SetCurrentScene(const std::string& sceneName, bool forceReload = false);
+    bool                                    LoadGaussianSplatFile(const std::filesystem::path& fileName, bool convertRdfToDonut = true);
+    uint32_t                                GetGaussianSplatCount() const;
+    const std::string&                      GetGaussianSplatFileName() const;
 
     virtual void                            SceneUnloading() override;
     virtual bool                            LoadScene(std::shared_ptr<donut::vfs::IFileSystem> fs, const std::filesystem::path& sceneFileName) override;
@@ -229,6 +233,7 @@ private:
     void                                    ApplyReferenceOIDN();
     void                                    PostProcessPreToneMapping(nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView);
     void                                    PostProcessPostToneMapping(nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView);
+    void                                    RenderGaussianSplats();
 
 private:
     std::shared_ptr<donut::vfs::RootFileSystem> m_RootFS;
@@ -278,6 +283,7 @@ private:
 
     // utility
     std::shared_ptr<class GPUSort>              m_gpuSort;
+    std::unique_ptr<GaussianSplatPass>          m_gaussianSplatPass;
 
     // raytracing basics
     nvrhi::rt::AccelStructHandle                m_topLevelAS;

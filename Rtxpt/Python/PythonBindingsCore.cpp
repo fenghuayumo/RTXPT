@@ -417,6 +417,15 @@ void RegisterCoreBindings(nb::module_& m)
         .def_rw("bloom_intensity",               &SampleUIData::BloomIntensity)
         .def_rw("bloom_radius",                  &SampleUIData::BloomRadius)
 
+        .def_rw("enable_gaussian_splats",        &SampleUIData::EnableGaussianSplats)
+        .def_rw("gaussian_splat_depth_test",     &SampleUIData::GaussianSplatDepthTest)
+        .def_rw("gaussian_splat_scale",          &SampleUIData::GaussianSplatScale)
+        .def_rw("gaussian_splat_alpha_scale",    &SampleUIData::GaussianSplatAlphaScale)
+        .def_rw("gaussian_splat_brightness",     &SampleUIData::GaussianSplatBrightness)
+        .def_rw("gaussian_splat_alpha_cull_threshold", &SampleUIData::GaussianSplatAlphaCullThreshold)
+        .def_ro("gaussian_splat_count",          &SampleUIData::GaussianSplatCount)
+        .def_ro("gaussian_splat_file_name",      &SampleUIData::GaussianSplatFileName)
+
         // --- AA / DLSS / DLSS-RR / DLSS-G / Reflex (realtime only) -------
         .def_rw("realtime_aa",                   &SampleUIData::RealtimeAA,
                 "Realtime AA mode (rtxpt.RealtimeAA enum):\n"
@@ -512,6 +521,16 @@ void RegisterCoreBindings(nb::module_& m)
             nb::arg("scene_name"), nb::arg("force_reload") = false,
             "Switch to a different scene file from rtxpt.Sample.available_scenes.")
 
+        .def("load_gaussian_splats", [](Sample& self, const std::string& fileName, bool convertRdfToDonut)
+            {
+                return self.LoadGaussianSplatFile(fileName, convertRdfToDonut);
+            },
+            nb::arg("file_name"), nb::arg("convert_rdf_to_donut") = true,
+            "Load a 3DGS .ply file and rasterize it over the current scene.")
+
+        .def_prop_ro("gaussian_splat_count", [](Sample& self) { return self.GetGaussianSplatCount(); })
+        .def_prop_ro("gaussian_splat_file_name", [](Sample& self) { return self.GetGaussianSplatFileName(); })
+
         .def("get_materials", [](Sample& self) {
                 std::vector<std::shared_ptr<PTMaterial>> result;
                 if (!self.GetScene())
@@ -572,7 +591,7 @@ void RegisterCoreBindings(nb::module_& m)
                 return self.SetCurrentCameraPosDirUp(v);
             }, nb::arg("pos_dir_up"))
 
-        .def("set_camera_fov", [](Sample& self, float fov) { self.SetCameraVerticalFOV(fov); },
+        .def("set_camera_fov", [](Sample& self, float fov) { self.SetCameraVerticalFOV(donut::math::radians(fov)); },
             nb::arg("vertical_fov_degrees"))
 
         .def("get_camera_fov", [](Sample& self) { return self.GetCameraVerticalFOV(); })

@@ -99,6 +99,7 @@ public:
     donut::math::uint2 DisplaySize; // size of render targets post-DLSS
 
     // Framebuffers are used by the bloom and tone mapping passes
+    std::shared_ptr<donut::engine::FramebufferFactory> OutputFramebuffer;
     std::shared_ptr<donut::engine::FramebufferFactory> ProcessedOutputFramebuffer;
     std::shared_ptr<donut::engine::FramebufferFactory> LdrFramebuffer;
 

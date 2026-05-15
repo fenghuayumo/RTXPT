@@ -49,6 +49,7 @@
 
 #include "ProcessingPasses/DenoisingGuidesBaker.h"
 #include "ProcessingPasses/OidnDenoiser.h"
+#include "ProcessingPasses/GaussianSplatPass.h"
 
 #include "SampleGame/GameScene.h"
 
@@ -162,6 +163,15 @@ void Sample::Init(const std::string& preferredScene,
 
     m_CommonPasses = std::make_shared<engine::CommonRenderPasses>(GetDevice(), m_shaderFactory);
     m_bindingCache = std::make_unique<engine::BindingCache>(GetDevice());
+
+    m_ui.EnableGaussianSplats = !m_cmdLine.GaussianSplatFileName.empty();
+    m_ui.GaussianSplatDepthTest = m_cmdLine.GaussianSplatDepthTest;
+    m_ui.GaussianSplatScale = m_cmdLine.GaussianSplatScale;
+    m_ui.GaussianSplatAlphaScale = m_cmdLine.GaussianSplatAlphaScale;
+    m_ui.GaussianSplatBrightness = m_cmdLine.GaussianSplatBrightness;
+    m_ui.GaussianSplatAlphaCullThreshold = m_cmdLine.GaussianSplatAlphaCullThreshold;
+    if (!m_cmdLine.GaussianSplatFileName.empty())
+        LoadGaussianSplatFile(m_cmdLine.GaussianSplatFileName, m_cmdLine.GaussianSplatConvertRdfToDonut);
     
     m_sampleGame = std::make_unique<GameScene>(*this, m_cmdLine);
     m_progressLoading.Set(95);
@@ -411,7 +421,10 @@ void Sample::Init(const std::string& preferredScene,
             m_sceneFilesAvailable.push_back( file.path().filename().string() );
     }
 
-    std::string scene = FindPreferredScene(m_sceneFilesAvailable, preferredScene);
+    std::filesystem::path preferredScenePath(preferredScene);
+    std::string scene = (!preferredScene.empty() && (preferredScenePath.is_absolute() || std::filesystem::exists(preferredScenePath)))
+        ? preferredScene
+        : FindPreferredScene(m_sceneFilesAvailable, preferredScene);
 
     // Select initial scene
     SetCurrentScene(scene);
@@ -424,7 +437,9 @@ void Sample::SetCurrentScene( const std::string & sceneName, bool forceReload )
     m_currentSceneName = sceneName;
     m_ui.ResetAccumulation = true;
     SetAsynchronousLoadingEnabled( false );
-    std::filesystem::path scenePath = GetLocalPath(c_AssetsFolder) / sceneName;
+    std::filesystem::path scenePath(sceneName);
+    if (!scenePath.is_absolute() && !std::filesystem::exists(scenePath))
+        scenePath = GetLocalPath(c_AssetsFolder) / scenePath;
     m_currentScenePath = scenePath;
     m_progressLoading.Stop();
     m_progressLoading.Start("Loading scene...");
@@ -436,6 +451,52 @@ void Sample::SetCurrentScene( const std::string & sceneName, bool forceReload )
         m_progressLoading.Stop();
         return;
     }
+}
+
+bool Sample::LoadGaussianSplatFile(const std::filesystem::path& fileName, bool convertRdfToDonut)
+{
+    if (!m_shaderFactory)
+    {
+        log::error("Cannot load Gaussian splats before the shader factory is initialized.");
+        return false;
+    }
+
+    std::filesystem::path splatPath = fileName;
+    if (!splatPath.is_absolute())
+        splatPath = std::filesystem::absolute(splatPath);
+
+    if (m_gaussianSplatPass == nullptr)
+        m_gaussianSplatPass = std::make_unique<GaussianSplatPass>(GetDevice(), m_shaderFactory);
+
+    if (!m_gaussianSplatPass->LoadFromFile(splatPath, convertRdfToDonut))
+        return false;
+
+    m_ui.GaussianSplatFileName = splatPath.string();
+    m_ui.GaussianSplatCount = m_gaussianSplatPass->GetSplatCount();
+    m_ui.EnableGaussianSplats = true;
+    m_ui.ResetAccumulation = true;
+
+    if (m_renderTargets != nullptr && m_shaderDebug != nullptr)
+    {
+        if (m_gpuSort == nullptr)
+            m_gpuSort = std::make_shared<GPUSort>(GetDevice(), m_shaderFactory);
+        m_gpuSort->CreateRenderPasses(m_CommonPasses, m_shaderDebug);
+        m_gaussianSplatPass->SetGpuSort(m_gpuSort);
+        m_gaussianSplatPass->CreatePipeline(*m_renderTargets);
+    }
+
+    return true;
+}
+
+uint32_t Sample::GetGaussianSplatCount() const
+{
+    return m_gaussianSplatPass ? m_gaussianSplatPass->GetSplatCount() : 0;
+}
+
+const std::string& Sample::GetGaussianSplatFileName() const
+{
+    static const std::string empty;
+    return m_gaussianSplatPass ? m_gaussianSplatPass->GetSourceFileName() : empty;
 }
 
 void Sample::SceneUnloading( )
@@ -1132,6 +1193,8 @@ void Sample::CreateBlases(nvrhi::ICommandList* commandList)
 void Sample::UploadSubInstanceData(nvrhi::ICommandList* commandList)
 {
     assert(m_subInstanceCount == m_subInstanceData.size());
+    if (m_subInstanceData.empty())
+        return;
     // upload data to GPU buffer
     commandList->writeBuffer(m_subInstanceBuffer, m_subInstanceData.data(), m_subInstanceData.size() * sizeof(SubInstanceData));
 }
@@ -1140,7 +1203,7 @@ void Sample::CreateTlas(nvrhi::ICommandList* commandList)
 {
     nvrhi::rt::AccelStructDesc tlasDesc;
     tlasDesc.isTopLevel = true;
-    tlasDesc.topLevelMaxInstances = m_scene->GetSceneGraph()->GetMeshInstances().size();
+    tlasDesc.topLevelMaxInstances = std::max<size_t>(1, m_scene->GetSceneGraph()->GetMeshInstances().size());
     tlasDesc.buildFlags = nvrhi::rt::AccelStructBuildFlags::PreferFastTrace;
     assert( tlasDesc.topLevelMaxInstances < (1 << 15) ); // we can only hold 16 bits for the identifier in the HitInfo - see GeometryInstanceID in SceneTypes.hlsli
     m_topLevelAS = GetDevice()->createAccelStruct(tlasDesc);
@@ -1153,7 +1216,7 @@ void Sample::CreateTlas(nvrhi::ICommandList* commandList)
             m_subInstanceCount += (uint)instance->GetMesh()->geometries.size();
         // create GPU buffer
         nvrhi::BufferDesc bufferDesc;
-        bufferDesc.byteSize = sizeof(SubInstanceData) * m_subInstanceCount;
+        bufferDesc.byteSize = sizeof(SubInstanceData) * std::max(1u, m_subInstanceCount);
         bufferDesc.debugName = "Instances";
         bufferDesc.structStride = sizeof(SubInstanceData);
         bufferDesc.canHaveRawViews = false;
@@ -1375,11 +1438,14 @@ void Sample::CreateRenderPasses( bool& exposureResetRequired, nvrhi::CommandList
     m_envMapBaker->GenerateBRDFLUT(initializeCommandList.Get(), *m_bindingCache);  // One-time BRDF LUT generation
     m_lightsBaker->CreateRenderPasses(m_shaderFactory, m_bindlessLayout, m_CommonPasses, m_shaderDebug, screenResolution, m_envMapBaker->GetImportanceSampling()->GetImportanceMapResolution());
 
-#if 0 // enable if needed
-    if (m_gpuSort == nullptr)
-        m_gpuSort = std::make_shared<GPUSort>(GetDevice(), m_shaderFactory);
-    m_gpuSort->CreateRenderPasses(m_CommonPasses, m_shaderDebug);
-#endif
+    if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->HasSplats())
+    {
+        if (m_gpuSort == nullptr)
+            m_gpuSort = std::make_shared<GPUSort>(GetDevice(), m_shaderFactory);
+        m_gpuSort->CreateRenderPasses(m_CommonPasses, m_shaderDebug);
+        m_gaussianSplatPass->SetGpuSort(m_gpuSort);
+        m_gaussianSplatPass->CreatePipeline(*m_renderTargets);
+    }
 
     m_denoisingGuidesBaker = std::make_shared<DenoisingGuidesBaker>(GetDevice(), m_shaderFactory, m_renderTargets, m_shaderDebug, m_bindingLayout);
 }
@@ -1946,6 +2012,22 @@ void Sample::PostProcessPostToneMapping(nvrhi::ICommandList* commandList, const 
     }
 }
 
+void Sample::RenderGaussianSplats()
+{
+    if (m_gaussianSplatPass == nullptr || !m_gaussianSplatPass->HasSplats())
+        return;
+
+    GaussianSplatRenderSettings settings;
+    settings.enabled = m_ui.EnableGaussianSplats;
+    settings.depthTest = m_ui.GaussianSplatDepthTest;
+    settings.splatScale = m_ui.GaussianSplatScale;
+    settings.alphaScale = m_ui.GaussianSplatAlphaScale;
+    settings.brightness = m_ui.GaussianSplatBrightness;
+    settings.alphaCullThreshold = m_ui.GaussianSplatAlphaCullThreshold;
+
+    m_gaussianSplatPass->Render(m_commandList, *m_view, *m_renderTargets, settings);
+}
+
 void Sample::Render(nvrhi::IFramebuffer* framebuffer)
 {
     const auto& fbinfo = framebuffer->getFramebufferInfo();
@@ -2242,6 +2324,7 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
         m_commandList->writeBuffer(m_constantBuffer, &constants, sizeof(constants));
 
         SampleRenderCode(framebuffer, m_commandList, constants);
+        RenderGaussianSplats();
 
         PostProcessAA(framebuffer, needNewPasses || m_ui.ResetRealtimeCaches);
         ApplyReferenceOIDN();

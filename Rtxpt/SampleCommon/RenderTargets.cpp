@@ -329,6 +329,9 @@ void RenderTargets::Init(
         SSRBlurMipChain = device->createTexture(ssrDesc);
     }
 
+    OutputFramebuffer = std::make_shared<donut::engine::FramebufferFactory>(device);
+    OutputFramebuffer->RenderTargets = { OutputColor };
+
     ProcessedOutputFramebuffer = std::make_shared<donut::engine::FramebufferFactory>(device);
     ProcessedOutputFramebuffer->RenderTargets = { ProcessedOutputColor };
 

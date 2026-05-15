@@ -238,6 +238,13 @@ RenderSession::RenderSession(const Config& cfg)
     m_cmdLine.RealtimeAA = 0; // no DLSS unless caller explicitly requests it
     m_cmdLine.UseReSTIRDI = false;
     m_cmdLine.UseReSTIRGI = false;
+    m_cmdLine.GaussianSplatFileName = cfg.gaussianSplatFile;
+    m_cmdLine.GaussianSplatConvertRdfToDonut = cfg.gaussianSplatConvertRdfToDonut;
+    m_cmdLine.GaussianSplatDepthTest = cfg.gaussianSplatDepthTest;
+    m_cmdLine.GaussianSplatScale = cfg.gaussianSplatScale;
+    m_cmdLine.GaussianSplatAlphaScale = cfg.gaussianSplatAlphaScale;
+    m_cmdLine.GaussianSplatBrightness = cfg.gaussianSplatBrightness;
+    m_cmdLine.GaussianSplatAlphaCullThreshold = cfg.gaussianSplatAlphaCullThreshold;
 
     if (cfg.nonInteractive)
     {
@@ -512,7 +519,7 @@ bool RenderSession::SetCamera(const donut::math::float3& pos,
 void RenderSession::SetCameraFOV(float verticalFovDegrees)
 {
     if (m_renderer)
-        m_renderer->SetCameraVerticalFOV(verticalFovDegrees);
+        m_renderer->SetCameraVerticalFOV(donut::math::radians(verticalFovDegrees));
 }
 
 #endif // RTXPT_WITH_PYTHON

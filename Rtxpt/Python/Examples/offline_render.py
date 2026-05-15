@@ -43,6 +43,12 @@ def render(args):
         adapter_index=args.adapter_index,
         scene=args.scene,
         accumulation_target=args.spp,
+        gaussian_splat_file=args.gaussian_splat or "",
+        gaussian_splat_convert_rdf_to_donut=args.gaussian_splat_convert_rdf_to_donut,
+        gaussian_splat_depth_test=args.gaussian_splat_depth_test,
+        gaussian_splat_scale=args.gaussian_splat_scale,
+        gaussian_splat_alpha_scale=args.gaussian_splat_alpha_scale,
+        gaussian_splat_brightness=args.gaussian_splat_brightness,
     )
 
     print(f"[rtxpt] Loaded scene: {renderer.app.scene_name}")
@@ -60,6 +66,9 @@ def render(args):
     s.realtime_aa = 0                        # disable DLSS for offline
     s.use_restir_di = False
     s.use_restir_gi = False
+    if args.gaussian_splat:
+        s.enable_gaussian_splats = True
+        s.gaussian_splat_alpha_cull_threshold = args.gaussian_splat_alpha_cull
     s.oidn_enabled = args.oidn
     s.oidn_use_gpu = args.oidn_gpu
     s.oidn_quality = args.oidn_quality
@@ -143,6 +152,16 @@ def main():
                         dest="material_overrides", action="append", nargs=4,
                         metavar=("NAME","R","G","B"),
                         help="Override a material's base color, e.g. --material-override Floor 0.8 0.6 0.4")
+    parser.add_argument("--gaussian-splat", default=None,
+                        help="3DGS .ply file to rasterize over the scene.")
+    parser.add_argument("--gaussian-splat-convert-rdf-to-donut",
+                        action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--gaussian-splat-depth-test",
+                        action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--gaussian-splat-scale", type=float, default=1.0)
+    parser.add_argument("--gaussian-splat-alpha-scale", type=float, default=1.0)
+    parser.add_argument("--gaussian-splat-brightness", type=float, default=1.0)
+    parser.add_argument("--gaussian-splat-alpha-cull", type=float, default=1.0 / 255.0)
     args = parser.parse_args()
 
     if args.material_overrides:

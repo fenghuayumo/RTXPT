@@ -61,6 +61,13 @@ public:
         std::string scene;                        // optional initial scene
         bool        realtimeMode      = false;    // start in reference (accumulation) mode
         int         accumulationTarget = 64;      // SPP target in reference mode
+        std::string gaussianSplatFile;             // optional 3DGS .ply overlay
+        bool        gaussianSplatConvertRdfToDonut = true;
+        bool        gaussianSplatDepthTest = true;
+        float       gaussianSplatScale = 1.0f;
+        float       gaussianSplatAlphaScale = 1.0f;
+        float       gaussianSplatBrightness = 1.0f;
+        float       gaussianSplatAlphaCullThreshold = 1.0f / 255.0f;
     };
 
     explicit RenderSession(const Config& cfg);

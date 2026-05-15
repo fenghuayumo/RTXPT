@@ -313,6 +313,15 @@ struct SampleUIData
     float                               BloomRadius = 8.0f;
     float                               BloomIntensity = 0.004f;
 
+    bool                                EnableGaussianSplats = true;
+    bool                                GaussianSplatDepthTest = true;
+    float                               GaussianSplatScale = 1.0f;
+    float                               GaussianSplatAlphaScale = 1.0f;
+    float                               GaussianSplatBrightness = 1.0f;
+    float                               GaussianSplatAlphaCullThreshold = 1.0f / 255.0f;
+    uint32_t                            GaussianSplatCount = 0;
+    std::string                         GaussianSplatFileName;
+
     bool                                DbgFreezeRealtimeNoiseSeed = false;               // stops noise from changing at real-time - useful for reproducing rare bugs
     bool                                DbgDisableSERTerminationHint = false;
 

@@ -62,7 +62,14 @@ class PyRenderer
 public:
     PyRenderer(int width, int height, bool headless, bool useVulkan,
                int adapterIndex, bool debug, const std::string& scene,
-               bool realtimeMode, int accumulationTarget)
+               bool realtimeMode, int accumulationTarget,
+               const std::string& gaussianSplatFile,
+               bool gaussianSplatConvertRdfToDonut,
+               bool gaussianSplatDepthTest,
+               float gaussianSplatScale,
+               float gaussianSplatAlphaScale,
+               float gaussianSplatBrightness,
+               float gaussianSplatAlphaCullThreshold)
     {
         RenderSession::Config cfg;
         cfg.width              = width;
@@ -75,6 +82,13 @@ public:
         cfg.scene              = scene;
         cfg.realtimeMode       = realtimeMode;
         cfg.accumulationTarget = accumulationTarget;
+        cfg.gaussianSplatFile = gaussianSplatFile;
+        cfg.gaussianSplatConvertRdfToDonut = gaussianSplatConvertRdfToDonut;
+        cfg.gaussianSplatDepthTest = gaussianSplatDepthTest;
+        cfg.gaussianSplatScale = gaussianSplatScale;
+        cfg.gaussianSplatAlphaScale = gaussianSplatAlphaScale;
+        cfg.gaussianSplatBrightness = gaussianSplatBrightness;
+        cfg.gaussianSplatAlphaCullThreshold = gaussianSplatAlphaCullThreshold;
 
         m_session = std::make_unique<RenderSession>(cfg);
         m_owned   = m_session->GetSample() != nullptr;
@@ -101,6 +115,12 @@ public:
 
     bool LoadScene(const std::string& sceneName, bool wait) {
         return m_session ? m_session->LoadScene(sceneName, wait) : false;
+    }
+
+    bool LoadGaussianSplats(const std::string& fileName, bool convertRdfToDonut) {
+        return m_session && m_session->GetSample()
+            ? m_session->GetSample()->LoadGaussianSplatFile(fileName, convertRdfToDonut)
+            : false;
     }
 
     bool Step(float dt) {
@@ -157,7 +177,8 @@ NB_MODULE(rtxpt, m)
         "    r.step_until_accumulated()\n"
         "    r.save_screenshot('frame.png')\n"
         "    r.close()")
-        .def(nb::init<int, int, bool, bool, int, bool, const std::string&, bool, int>(),
+        .def(nb::init<int, int, bool, bool, int, bool, const std::string&, bool, int,
+                      const std::string&, bool, bool, float, float, float, float>(),
              nb::arg("width") = 1920,
              nb::arg("height") = 1080,
              nb::arg("headless") = true,
@@ -166,7 +187,14 @@ NB_MODULE(rtxpt, m)
              nb::arg("debug") = false,
              nb::arg("scene") = std::string(),
              nb::arg("realtime") = false,
-             nb::arg("accumulation_target") = 64)
+             nb::arg("accumulation_target") = 64,
+             nb::arg("gaussian_splat_file") = std::string(),
+             nb::arg("gaussian_splat_convert_rdf_to_donut") = true,
+             nb::arg("gaussian_splat_depth_test") = true,
+             nb::arg("gaussian_splat_scale") = 1.0f,
+             nb::arg("gaussian_splat_alpha_scale") = 1.0f,
+             nb::arg("gaussian_splat_brightness") = 1.0f,
+             nb::arg("gaussian_splat_alpha_cull_threshold") = 1.0f / 255.0f)
 
         .def("close", &PyRenderer::Close,
              "Tear down the GPU device, scene and back buffer.  Called automatically\n"
@@ -177,6 +205,13 @@ NB_MODULE(rtxpt, m)
              [](PyRenderer& self, const std::string& name, bool wait) { return self.LoadScene(name, wait); },
              nb::arg("scene_name"), nb::arg("wait_until_ready") = true,
              "Load a scene by name (relative to the Assets folder).")
+
+        .def("load_gaussian_splats",
+             [](PyRenderer& self, const std::string& fileName, bool convertRdfToDonut) {
+                 return self.LoadGaussianSplats(fileName, convertRdfToDonut);
+             },
+             nb::arg("file_name"), nb::arg("convert_rdf_to_donut") = true,
+             "Load a 3DGS .ply file and rasterize it over the scene.")
 
         .def("step", &PyRenderer::Step,
              nb::arg("dt") = -1.0f,
