@@ -346,6 +346,17 @@ namespace
         return ret;
     }
 
+    bool MatrixEquals(const float4x4& a, const float4x4& b)
+    {
+        for (int index = 0; index < 16; ++index)
+        {
+            if (a.m_data[index] != b.m_data[index])
+                return false;
+        }
+
+        return true;
+    }
+
     GaussianSplatData ConvertToGpuSplat(const RawGaussianSplat& raw, bool convertRdfToDonut)
     {
         float rotation[4] = { raw.rotation[0], raw.rotation[1], raw.rotation[2], raw.rotation[3] };
@@ -756,6 +767,19 @@ void GaussianSplatPass::SetGpuSort(std::shared_ptr<GPUSort> gpuSort)
     m_gpuSort = std::move(gpuSort);
 }
 
+void GaussianSplatPass::InvalidateSortCache()
+{
+    m_sortCacheValid = false;
+    m_cachedSortSplatCount = 0;
+}
+
+bool GaussianSplatPass::CanReuseSort(const SimpleViewConstants& viewConstants) const
+{
+    return m_sortCacheValid
+        && m_cachedSortSplatCount == m_splatCount
+        && MatrixEquals(m_cachedSortWorldToClipNoOffset, viewConstants.matWorldToClipNoOffset);
+}
+
 bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool convertRdfToDonut)
 {
     const std::string extension = ToLower(fileName.extension().string());
@@ -819,6 +843,7 @@ bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool
     m_sortKeyBindingSet = nullptr;
     m_sourceFileName = fileName.string();
     m_splatUploadPending = true;
+    InvalidateSortCache();
 
     return true;
 }
@@ -900,9 +925,12 @@ void GaussianSplatPass::UploadSplatDataIfNeeded(nvrhi::ICommandList* commandList
     m_splatUploadPending = false;
 }
 
-void GaussianSplatPass::SortSplats(nvrhi::ICommandList* commandList)
+void GaussianSplatPass::SortSplats(nvrhi::ICommandList* commandList, const SimpleViewConstants& viewConstants)
 {
     if (!m_gpuSort || !m_sortKeyBindingSet || !m_sortKeyPipeline || !m_sortControlBuffer)
+        return;
+
+    if (CanReuseSort(viewConstants))
         return;
 
     {
@@ -924,6 +952,10 @@ void GaussianSplatPass::SortSplats(nvrhi::ICommandList* commandList)
     commandList->commitBarriers();
 
     m_gpuSort->Sort(commandList, m_sortControlBuffer, 0, m_sortKeyBuffer, m_indexBuffer, m_splatCount, true);
+
+    m_cachedSortWorldToClipNoOffset = viewConstants.matWorldToClipNoOffset;
+    m_cachedSortSplatCount = m_splatCount;
+    m_sortCacheValid = true;
 }
 
 void GaussianSplatPass::Render(
@@ -955,7 +987,7 @@ void GaussianSplatPass::Render(
     constants.depthTest = settings.depthTest ? 1u : 0u;
     commandList->writeBuffer(m_constantBuffer, &constants, sizeof(constants));
 
-    SortSplats(commandList);
+    SortSplats(commandList, constants.view);
 
     commandList->setBufferState(m_indexBuffer, nvrhi::ResourceStates::ShaderResource);
     commandList->setTextureState(renderTargets.Depth, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);

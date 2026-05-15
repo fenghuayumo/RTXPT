@@ -418,6 +418,10 @@ bool RenderSession::Step(float dt)
     if (!m_initialized || !m_deviceManager)
         return false;
 
+    auto window = m_deviceManager->GetWindow();
+    if (window && glfwWindowShouldClose(window))
+        return false;
+
     if (dt < 0.0f)
     {
         // Negative dt -> use real-time elapsed since last call.
@@ -425,7 +429,11 @@ bool RenderSession::Step(float dt)
         // simply forward to RunSingleFrame() and let it compute the delta.
     }
 
-    return m_deviceManager->RunSingleFrame();
+    if (!m_deviceManager->RunSingleFrame())
+        return false;
+
+    window = m_deviceManager->GetWindow();
+    return !window || !glfwWindowShouldClose(window);
 }
 
 bool RenderSession::StepN(int frames)

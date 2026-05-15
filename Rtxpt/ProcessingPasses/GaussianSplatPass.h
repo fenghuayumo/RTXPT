@@ -65,7 +65,9 @@ public:
 private:
     void CreateBindingSets(const RenderTargets& renderTargets);
     void UploadSplatDataIfNeeded(nvrhi::ICommandList* commandList);
-    void SortSplats(nvrhi::ICommandList* commandList);
+    void SortSplats(nvrhi::ICommandList* commandList, const SimpleViewConstants& viewConstants);
+    [[nodiscard]] bool CanReuseSort(const SimpleViewConstants& viewConstants) const;
+    void InvalidateSortCache();
 
     nvrhi::DeviceHandle m_device;
     std::shared_ptr<donut::engine::ShaderFactory> m_shaderFactory;
@@ -94,5 +96,8 @@ private:
     uint32_t m_splatCount = 0;
     uint32_t m_shDegree = 0;
     bool m_splatUploadPending = false;
+    bool m_sortCacheValid = false;
+    uint32_t m_cachedSortSplatCount = 0;
+    donut::math::float4x4 m_cachedSortWorldToClipNoOffset = donut::math::float4x4::identity();
     std::string m_sourceFileName;
 };

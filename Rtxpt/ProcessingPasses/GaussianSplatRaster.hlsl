@@ -26,7 +26,8 @@ void cs_sort_keys(uint splatIndex : SV_DispatchThreadID)
         return;
 
     GaussianSplatData splat = t_Splats[splatIndex];
-    float4 clipCenter = mul(float4(splat.centerOpacity.xyz, 1.0f), g_Const.view.matWorldToClip);
+    // Depth sorting ignores sub-pixel jitter so the sorted index buffer can be reused.
+    float4 clipCenter = mul(float4(splat.centerOpacity.xyz, 1.0f), g_Const.view.matWorldToClipNoOffset);
 
     float reverseZ = 0.0f;
     if (clipCenter.w > 0.0f)
