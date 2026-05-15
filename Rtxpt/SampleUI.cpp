@@ -1938,7 +1938,7 @@ void SampleUI::buildUI(void)
     // Inspector panel: instance Transform + mesh name (right-click pick)
     if (m_ui.SelectedNode != nullptr && m_ui.ShowInspector)
     {
-        ImGui::SetNextWindowPos(ImVec2(float(scaledWidth) - 10.f, 10.f), 0, ImVec2(1.f, 0.f));
+        ImGui::SetNextWindowPos(ImVec2(float(scaledWidth) - 10.f, 10.f), ImGuiCond_Appearing, ImVec2(1.f, 0.f));
         ImGui::SetNextWindowSize(ImVec2(defWindowWidth, 0), ImGuiCond_Appearing);
         ImGui::Begin("Inspector");
         ImGui::PushItemWidth(defItemWidth);
@@ -2009,7 +2009,7 @@ void SampleUI::buildUI(void)
     std::shared_ptr<PTMaterial> material = PTMaterial::SafeCast(m_ui.SelectedMaterial);
     if (material != nullptr && m_app.GetMaterialsBaker() != nullptr && m_ui.ShowMaterialEditor)
     {
-        ImGui::SetNextWindowPos(ImVec2(float(scaledWidth) - 10.f, (m_ui.SelectedNode != nullptr && m_ui.ShowInspector) ? 350.f : 10.f), 0, ImVec2(1.f, 0.f));
+        ImGui::SetNextWindowPos(ImVec2(float(scaledWidth) - 10.f, (m_ui.SelectedNode != nullptr && m_ui.ShowInspector) ? 350.f : 10.f), ImGuiCond_Appearing, ImVec2(1.f, 0.f));
         ImGui::SetNextWindowSize(ImVec2(defWindowWidth, 0), ImGuiCond_Appearing);
         ImGui::Begin("Material Editor");
         ImGui::PushItemWidth(defItemWidth);
