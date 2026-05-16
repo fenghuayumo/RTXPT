@@ -1030,13 +1030,27 @@ bool Bridge::traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pa
     bool visibilityResult = rayQuery.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
     if (visibilityResult && g_Const.GaussianSplatShadowsEnabled != 0)
     {
-        visibilityResult = !HybridGaussian_TraceGaussianShadow(
+        uint gaussianShadowSeed = HybridGaussian_MakeShadowSeed(
+            ray,
+            uint2(asuint(ray.Origin.x) ^ asuint(ray.Origin.y), asuint(ray.Origin.z)),
+            Bridge::getSampleIndex(),
+            uint(pathVertexIndex));
+        visibilityResult = !HybridGaussian_TraceGaussianShadowMode(
             GaussianSplatBVH,
             t_GaussianShadowSplats,
             g_Const.GaussianSplatShadowCount,
             ray,
             g_Const.GaussianSplatShadowScale,
-            g_Const.GaussianSplatShadowAlphaThreshold);
+            g_Const.GaussianSplatShadowAlphaThreshold,
+            g_Const.GaussianSplatShadowAlphaClamp,
+            g_Const.GaussianSplatShadowKernelMinResponse,
+            g_Const.GaussianSplatShadowKernelDegree,
+            g_Const.GaussianSplatShadowUseTLASInstances,
+            g_Const.GaussianSplatShadowPrimitiveCountPerSplat,
+            g_Const.GaussianSplatShadowMode,
+            g_Const.GaussianSplatShadowSoftRadius,
+            g_Const.GaussianSplatShadowRayOffset,
+            gaussianShadowSeed);
     }
 
     return visibilityResult;

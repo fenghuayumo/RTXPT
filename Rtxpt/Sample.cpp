@@ -88,6 +88,27 @@ extern "C"
 }
 #endif
 
+namespace
+{
+    constexpr float kGaussianSplatKernelMinResponse = 0.0113f;
+
+    uint32_t ResolveGaussianSplatShadowMode(const SampleUIData& ui)
+    {
+        if (!ui.GaussianSplatShadows && ui.GaussianSplatShadowsMode == GAUSSIAN_SPLAT_SHADOWS_DISABLED)
+            return GAUSSIAN_SPLAT_SHADOWS_DISABLED;
+
+        const int requestedMode = ui.GaussianSplatShadowsMode == GAUSSIAN_SPLAT_SHADOWS_DISABLED
+            ? GAUSSIAN_SPLAT_SHADOWS_HARD
+            : ui.GaussianSplatShadowsMode;
+        return uint32_t(std::clamp(requestedMode, GAUSSIAN_SPLAT_SHADOWS_HARD, GAUSSIAN_SPLAT_SHADOWS_SOFT));
+    }
+
+    uint32_t ClampGaussianSplatSoftShadowSamples(int sampleCount)
+    {
+        return uint32_t(std::clamp(sampleCount, 1, 16));
+    }
+}
+
 #if defined(RTXPT_D3D_AGILITY_SDK_VERSION)
 // Required for Agility SDK on Windows 10. Setup 1.c. 2.a.
 // https://devblogs.microsoft.com/directx/gettingstarted-dx12agility/
@@ -489,6 +510,7 @@ bool Sample::LoadGaussianSplatFile(const std::filesystem::path& fileName, bool c
     m_ui.EnableGaussianSplats = true;
     m_ui.AccelerationStructRebuildRequested = true;
     m_ui.ResetAccumulation = true;
+    m_gaussianSplatTemporalReset = true;
 
     if (m_renderTargets != nullptr && m_shaderDebug != nullptr)
     {
@@ -525,6 +547,7 @@ void Sample::SceneUnloading( )
     m_ui.SelectedMaterial = nullptr;
     m_ui.SelectedNode = nullptr;
     m_ui.SelectedGaussianSplat = false;
+    m_gaussianSplatTemporalReset = true;
     m_ui.EnvironmentMapParams = EnvironmentMapRuntimeParameters();
     m_envMapBaker = nullptr;
     m_lightsBaker = nullptr;
@@ -967,6 +990,7 @@ void Sample::Animate(float fElapsedTimeSeconds)
         m_lastCamUp = camUp;
         if( !m_ui.RealtimeMode )
             m_ui.ResetAccumulation = true;
+        m_gaussianSplatTemporalReset = true;
     }
 
     m_captureScriptManager->PostAnim();
@@ -1255,8 +1279,15 @@ void Sample::CreateAccelStructs(nvrhi::ICommandList* commandList)
     CreateTlas(commandList);
     if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->HasSplats())
     {
-        if (m_ui.GaussianSplatShadows)
-            m_gaussianSplatPass->BuildAccelerationStructures(commandList);
+        if (ResolveGaussianSplatShadowMode(m_ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED)
+            m_gaussianSplatPass->BuildAccelerationStructures(
+                commandList,
+                m_ui.GaussianSplatUseAABBs,
+                m_ui.GaussianSplatUseTLASInstances,
+                m_ui.GaussianSplatBlasCompaction,
+                m_ui.GaussianSplatScale,
+                uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5)),
+                m_ui.GaussianSplatRtxAdaptiveClamp);
         else
             m_gaussianSplatPass->ReleaseAccelerationStructures();
     }
@@ -1430,6 +1461,32 @@ void Sample::CreateRenderPasses( bool& exposureResetRequired, nvrhi::CommandList
     m_accumulationPass = std::make_unique<AccumulationPass>(GetDevice(), m_shaderFactory);
     m_accumulationPass->CreatePipeline();
     m_accumulationPass->CreateBindingSet(m_renderTargets->OutputColor, m_renderTargets->AccumulatedRadiance, m_renderTargets->ProcessedOutputColor);
+
+    {
+        nvrhi::TextureDesc gaussianCurrentDesc = m_renderTargets->ProcessedOutputColor->getDesc();
+        gaussianCurrentDesc.debugName = "GaussianSplatTemporalCurrentColor";
+        gaussianCurrentDesc.isUAV = false;
+        gaussianCurrentDesc.isRenderTarget = false;
+        gaussianCurrentDesc.useClearValue = false;
+        gaussianCurrentDesc.clearValue = nvrhi::Color(0.0f);
+        gaussianCurrentDesc.initialState = nvrhi::ResourceStates::ShaderResource;
+        gaussianCurrentDesc.keepInitialState = true;
+        m_gaussianSplatCurrentColor = GetDevice()->createTexture(gaussianCurrentDesc);
+
+        nvrhi::TextureDesc gaussianAccumDesc = m_renderTargets->ProcessedOutputColor->getDesc();
+        gaussianAccumDesc.debugName = "GaussianSplatTemporalAccumulatedColor";
+        gaussianAccumDesc.format = nvrhi::Format::RGBA32_FLOAT;
+        gaussianAccumDesc.isUAV = true;
+        gaussianAccumDesc.isRenderTarget = true;
+        gaussianAccumDesc.initialState = nvrhi::ResourceStates::UnorderedAccess;
+        gaussianAccumDesc.keepInitialState = true;
+        m_gaussianSplatAccumulatedColor = GetDevice()->createTexture(gaussianAccumDesc);
+
+        m_gaussianSplatAccumulationPass = std::make_unique<AccumulationPass>(GetDevice(), m_shaderFactory);
+        m_gaussianSplatAccumulationPass->CreatePipeline();
+        m_gaussianSplatAccumulationPass->CreateBindingSet(m_gaussianSplatCurrentColor, m_gaussianSplatAccumulatedColor, m_renderTargets->ProcessedOutputColor);
+        m_gaussianSplatTemporalReset = true;
+    }
 
     // these get re-created every time intentionally, to pick up changes after at-runtime shader recompile
     m_toneMappingPass = std::make_unique<ToneMappingPass>(GetDevice(), m_shaderFactory, m_CommonPasses, m_renderTargets->LdrFramebuffer, *m_view, m_renderTargets->OutputColor);
@@ -2041,15 +2098,49 @@ void Sample::RenderGaussianSplats()
     if (m_gaussianSplatPass == nullptr || !m_gaussianSplatPass->HasSplats())
         return;
 
+    const bool stochasticSplats = m_ui.EnableGaussianSplats && m_ui.GaussianSplatSortingMode == 1;
+    const int temporalSamplingCount = dm::clamp(m_ui.GaussianSplatTemporalSamplingCount, 0, 1024 * 1024);
+    if (!stochasticSplats || temporalSamplingCount == 0)
+    {
+        m_gaussianSplatTemporalSampleIndex = 0;
+        m_gaussianSplatTemporalReset = true;
+    }
+    else if (m_ui.ResetAccumulation || m_ui.ResetRealtimeCaches || m_gaussianSplatTemporalReset)
+    {
+        m_gaussianSplatTemporalSampleIndex = 0;
+        m_gaussianSplatTemporalReset = false;
+    }
+
+    const uint32_t gaussianSplatShadowMode = ResolveGaussianSplatShadowMode(m_ui);
     GaussianSplatRenderSettings settings;
     settings.enabled = m_ui.EnableGaussianSplats;
     settings.depthTest = m_ui.GaussianSplatDepthTest;
+    settings.sortingMode = m_ui.GaussianSplatSortingMode == 1 ? GaussianSplatSortMode::StochasticSplats : GaussianSplatSortMode::GpuSort;
+    settings.frustumCulling = static_cast<GaussianSplatFrustumCulling>(dm::clamp(m_ui.GaussianSplatFrustumCulling, 0, 2));
+    settings.projectionMethod = GaussianSplatProjectionMethod::Eigen;
+    settings.shFormat = static_cast<GaussianSplatStorageFormat>(dm::clamp(m_ui.GaussianSplatSHFormat, 0, 2));
+    settings.rgbaFormat = static_cast<GaussianSplatStorageFormat>(dm::clamp(m_ui.GaussianSplatRGBAFormat, 0, 2));
+    settings.screenSizeCulling = m_ui.GaussianSplatScreenSizeCulling;
+    settings.mipSplattingAntialiasing = m_ui.GaussianSplatMipAntialiasing;
+    settings.useAABBs = m_ui.GaussianSplatUseAABBs;
+    settings.useTLASInstances = m_ui.GaussianSplatUseTLASInstances;
+    settings.blasCompaction = m_ui.GaussianSplatBlasCompaction;
     settings.splatScale = m_ui.GaussianSplatScale;
     settings.alphaScale = m_ui.GaussianSplatAlphaScale;
     settings.brightness = m_ui.GaussianSplatBrightness;
     settings.alphaCullThreshold = m_ui.GaussianSplatAlphaCullThreshold;
-    settings.shadowsEnabled = m_ui.GaussianSplatShadows;
+    settings.shadowsEnabled = gaussianSplatShadowMode != GAUSSIAN_SPLAT_SHADOWS_DISABLED;
+    settings.shadowMode = gaussianSplatShadowMode;
     settings.shadowStrength = m_ui.GaussianSplatShadowStrength;
+    settings.shadowRayOffset = m_ui.GaussianSplatRtxParticleShadowOffset;
+    settings.shadowSoftRadius = m_ui.GaussianSplatShadowSoftRadius;
+    settings.shadowSoftSampleCount = ClampGaussianSplatSoftShadowSamples(m_ui.GaussianSplatShadowSoftSampleCount);
+    settings.shadowFrameIndex = uint32_t(m_frameIndex & 0xffffffffu);
+    settings.frustumDilation = m_ui.GaussianSplatFrustumDilation;
+    settings.minPixelCoverage = m_ui.GaussianSplatMinPixelCoverage;
+    settings.stochasticFrameIndex = stochasticSplats && temporalSamplingCount > 0
+        ? uint32_t(std::min(m_gaussianSplatTemporalSampleIndex, temporalSamplingCount - 1))
+        : uint32_t(m_frameIndex & 0xffffffffu);
     {
         constexpr float deg2rad = 3.14159265358979323846f / 180.0f;
         const dm::float3 eulerRadians = m_ui.GaussianSplatRotationEulerDeg * deg2rad;
@@ -2077,6 +2168,40 @@ void Sample::RenderGaussianSplats()
     splatView.UpdateCache();
 
     m_gaussianSplatPass->Render(m_commandList, splatView, m_topLevelAS.Get(), *m_renderTargets, settings);
+
+    if (stochasticSplats && temporalSamplingCount > 0)
+        AccumulateGaussianSplats(splatView, temporalSamplingCount);
+}
+
+void Sample::AccumulateGaussianSplats(const donut::engine::IView& splatView, int temporalSamplingCount)
+{
+    if (m_gaussianSplatAccumulationPass == nullptr || m_renderTargets == nullptr || m_gaussianSplatCurrentColor == nullptr || m_gaussianSplatAccumulatedColor == nullptr)
+        return;
+
+    temporalSamplingCount = std::max(1, temporalSamplingCount);
+
+    const bool stillSampling = m_gaussianSplatTemporalSampleIndex < temporalSamplingCount;
+    const float accumulationWeight = stillSampling
+        ? 1.0f / float(m_gaussianSplatTemporalSampleIndex + 1)
+        : 0.0f;
+
+    if (stillSampling)
+    {
+        m_commandList->setTextureState(m_renderTargets->ProcessedOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::CopySource);
+        m_commandList->setTextureState(m_gaussianSplatCurrentColor, nvrhi::AllSubresources, nvrhi::ResourceStates::CopyDest);
+        m_commandList->commitBarriers();
+        m_commandList->copyTexture(m_gaussianSplatCurrentColor, nvrhi::TextureSlice(), m_renderTargets->ProcessedOutputColor, nvrhi::TextureSlice());
+    }
+
+    m_commandList->setTextureState(m_gaussianSplatCurrentColor, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);
+    m_commandList->setTextureState(m_gaussianSplatAccumulatedColor, nvrhi::AllSubresources, nvrhi::ResourceStates::UnorderedAccess);
+    m_commandList->setTextureState(m_renderTargets->ProcessedOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::UnorderedAccess);
+    m_commandList->commitBarriers();
+
+    m_gaussianSplatAccumulationPass->Render(m_commandList, splatView, splatView, accumulationWeight);
+
+    if (stillSampling)
+        m_gaussianSplatTemporalSampleIndex = std::min(m_gaussianSplatTemporalSampleIndex + 1, temporalSamplingCount);
 }
 
 void Sample::Render(nvrhi::IFramebuffer* framebuffer)
@@ -2335,15 +2460,31 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
     {
         UpdatePathTracerConstants(constants.ptConsts, cameraData);
         constants.MaterialCount = m_materialsBaker->GetMaterialDataCount(); // m_scene->GetSceneGraph()->GetMaterials().size();
-        constants.GaussianSplatShadowCount = (m_ui.EnableGaussianSplats && m_ui.GaussianSplatShadows && m_gaussianSplatPass != nullptr && m_gaussianSplatPass->GetTopLevelAS() != nullptr)
+        const uint32_t gaussianSplatShadowMode = ResolveGaussianSplatShadowMode(m_ui);
+        constants.GaussianSplatShadowCount = (m_ui.EnableGaussianSplats
+                && gaussianSplatShadowMode != GAUSSIAN_SPLAT_SHADOWS_DISABLED
+                && m_gaussianSplatPass != nullptr
+                && m_gaussianSplatPass->GetTopLevelAS() != nullptr)
             ? m_gaussianSplatPass->GetSplatCount()
             : 0;
         constants.GaussianSplatShadowsEnabled = constants.GaussianSplatShadowCount > 0 ? 1u : 0u;
         constants.GaussianSplatShadowScale = m_ui.GaussianSplatScale;
         constants.GaussianSplatShadowAlphaThreshold = m_ui.GaussianSplatAlphaCullThreshold;
-        constants._padding0 = 0.0f;
-        constants._padding1 = 0.0f;
-        constants._padding2 = 0;
+        constants.GaussianSplatShadowUseTLASInstances =
+            (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->GetShadowUsesTLASInstances()) ? 1u : 0u;
+        constants.GaussianSplatShadowPrimitiveCountPerSplat =
+            m_gaussianSplatPass != nullptr ? m_gaussianSplatPass->GetShadowPrimitiveCountPerSplat() : 1u;
+        constants.GaussianSplatShadowMode = constants.GaussianSplatShadowsEnabled != 0
+            ? gaussianSplatShadowMode
+            : GAUSSIAN_SPLAT_SHADOWS_DISABLED;
+        constants.GaussianSplatShadowSoftRadius = m_ui.GaussianSplatShadowSoftRadius;
+        constants.GaussianSplatShadowSoftSampleCount = ClampGaussianSplatSoftShadowSamples(m_ui.GaussianSplatShadowSoftSampleCount);
+        constants.GaussianSplatShadowFrameIndex = uint32_t(m_frameIndex & 0xffffffffu);
+        constants.GaussianSplatShadowRayOffset = m_ui.GaussianSplatRtxParticleShadowOffset;
+        constants.GaussianSplatShadowAlphaClamp = m_ui.GaussianSplatRtxAlphaClamp;
+        constants.GaussianSplatShadowKernelMinResponse = kGaussianSplatKernelMinResponse;
+        constants.GaussianSplatShadowKernelDegree = uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5));
+        constants.GaussianSplatShadowAdaptiveClamp = m_ui.GaussianSplatRtxAdaptiveClamp ? 1u : 0u;
 
         constants.envMapSceneParams = m_envMapSceneParams;
         constants.envMapImportanceSamplingParams = m_envMapBaker->GetImportanceSampling()->GetShaderParams();

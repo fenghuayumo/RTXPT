@@ -48,11 +48,12 @@ void cs_sort_keys(uint splatIndex : SV_DispatchThreadID)
 #else
 
 Buffer<uint> t_SplatIndices : register(t1);
-StructuredBuffer<float4> t_SplatSH : register(t2);
-Texture2D<float> t_Depth : register(t3);
+ByteAddressBuffer t_SplatRGBA : register(t2);
+ByteAddressBuffer t_SplatSH : register(t3);
+Texture2D<float> t_Depth : register(t4);
 
 #if GAUSSIAN_SPLAT_HYBRID_SHADOWS
-RaytracingAccelerationStructure t_MeshBVH : register(t4);
+RaytracingAccelerationStructure t_MeshBVH : register(t5);
 
 #include "../Shaders/HybridGaussianShadow.hlsli"
 #endif
@@ -61,14 +62,22 @@ struct VertexOutput
 {
     float4 position : SV_Position;
     float2 fragPos : TEXCOORD0;
+    nointerpolation float3 conic : TEXCOORD1;
     nointerpolation float4 color : COLOR0;
 #if GAUSSIAN_SPLAT_HYBRID_SHADOWS
-    nointerpolation float3 worldCenter : TEXCOORD1;
+    nointerpolation float3 worldCenter : TEXCOORD2;
 #endif
 };
 
 static const float kSqrt8 = 2.8284271247461903f;
 static const float kFragmentAlphaCullThreshold = 1.0f / 16.0f;
+static const uint kGaussianSplatFormatFloat32 = 0;
+static const uint kGaussianSplatFormatFloat16 = 1;
+static const uint kGaussianSplatFormatUint8 = 2;
+static const uint kGaussianSplatProjectionEigen = 0;
+static const uint kGaussianSplatProjectionConic = 1;
+static const uint kGaussianSplatSortRandom = 1;
+static const uint kGaussianSplatShScalarStride = 45;
 
 float SrgbToLinear(float srgb)
 {
@@ -78,6 +87,56 @@ float SrgbToLinear(float srgb)
 float3 SrgbToLinear(float3 srgb)
 {
     return float3(SrgbToLinear(srgb.r), SrgbToLinear(srgb.g), SrgbToLinear(srgb.b));
+}
+
+uint GaussianSplatFormatSize(uint format)
+{
+    return format == kGaussianSplatFormatFloat32 ? 4u : (format == kGaussianSplatFormatFloat16 ? 2u : 1u);
+}
+
+float LoadFormattedScalar(ByteAddressBuffer buffer, uint scalarIndex, uint format, bool signedRange)
+{
+    uint byteOffset = scalarIndex * GaussianSplatFormatSize(format);
+
+    if (format == kGaussianSplatFormatFloat32)
+        return asfloat(buffer.Load(byteOffset));
+
+    if (format == kGaussianSplatFormatFloat16)
+    {
+        uint packed = buffer.Load(byteOffset & ~3u);
+        uint halfBits = (packed >> ((byteOffset & 2u) * 8u)) & 0xffffu;
+        return f16tof32(halfBits);
+    }
+
+    uint packed = buffer.Load(byteOffset & ~3u);
+    float value = float((packed >> ((byteOffset & 3u) * 8u)) & 0xffu) / 255.0f;
+    return signedRange ? value * 2.0f - 1.0f : value;
+}
+
+float4 LoadRGBA(uint splatIndex)
+{
+    uint base = splatIndex * 4u;
+    return float4(
+        LoadFormattedScalar(t_SplatRGBA, base + 0u, g_Const.rgbaFormat, false),
+        LoadFormattedScalar(t_SplatRGBA, base + 1u, g_Const.rgbaFormat, false),
+        LoadFormattedScalar(t_SplatRGBA, base + 2u, g_Const.rgbaFormat, false),
+        LoadFormattedScalar(t_SplatRGBA, base + 3u, g_Const.rgbaFormat, false));
+}
+
+uint GaussianSplatHash32(uint value)
+{
+    value ^= value >> 16;
+    value *= 0x7feb352du;
+    value ^= value >> 15;
+    value *= 0x846ca68bu;
+    value ^= value >> 16;
+    return value;
+}
+
+float Random01(uint3 seed)
+{
+    uint value = GaussianSplatHash32(seed.x ^ GaussianSplatHash32(seed.y ^ GaussianSplatHash32(seed.z)));
+    return float(value & 0x00ffffffu) * (1.0f / 16777216.0f);
 }
 
 float2 GetQuadCorner(uint vertexInSplat)
@@ -123,8 +182,10 @@ float3 ProjectCovariance(float3x3 cov3D, float4 viewCenter)
     return float3(cov2D[0][0], cov2D[0][1], cov2D[1][1]);
 }
 
-bool ComputeProjectedBasis(float3 cov2D, out float2 basis1, out float2 basis2)
+bool ComputeProjectedBasis(float3 cov2D, inout float opacity, out float2 basis1, out float2 basis2, out float3 conic)
 {
+    float detOrig = max(cov2D.x * cov2D.z - cov2D.y * cov2D.y, 1e-12f);
+
     cov2D.x += 0.3f;
     cov2D.z += 0.3f;
 
@@ -141,7 +202,21 @@ bool ComputeProjectedBasis(float3 cov2D, out float2 basis1, out float2 basis2)
     {
         basis1 = 0.0f;
         basis2 = 0.0f;
+        conic = 0.0f;
         return false;
+    }
+
+    if (g_Const.mipSplattingAntialiasing != 0)
+        opacity *= sqrt(max(detOrig / max(det, 1e-12f), 0.0f));
+
+    conic = float3(d, -b, a) / max(det, 1e-12f);
+
+    if (g_Const.projectionMethod == kGaussianSplatProjectionConic)
+    {
+        float radius = g_Const.splatScale * min(kSqrt8 * sqrt(eigenValue1), 2048.0f);
+        basis1 = float2(radius, 0.0f);
+        basis2 = float2(0.0f, radius);
+        return true;
     }
 
     float2 eigenVector1 = normalize(float2(abs(b) < 0.001f ? 1.0f : b, eigenValue1 - a));
@@ -149,23 +224,18 @@ bool ComputeProjectedBasis(float3 cov2D, out float2 basis1, out float2 basis2)
 
     basis1 = eigenVector1 * g_Const.splatScale * min(kSqrt8 * sqrt(eigenValue1), 2048.0f);
     basis2 = eigenVector2 * g_Const.splatScale * min(kSqrt8 * sqrt(eigenValue2), 2048.0f);
+    conic = float3(1.0f, 0.0f, 1.0f);
 
     return true;
 }
 
 float3 LoadSH(uint splatIndex, uint coeff)
 {
-    uint base = splatIndex * GAUSSIAN_SPLAT_SH_FLOAT4_COUNT;
-    uint scalarIndex = coeff * 3;
-
-    float4 a = t_SplatSH[base + scalarIndex / 4];
-    float4 b = t_SplatSH[base + (scalarIndex + 1) / 4];
-    float4 c = t_SplatSH[base + (scalarIndex + 2) / 4];
-
+    uint base = splatIndex * kGaussianSplatShScalarStride + coeff * 3u;
     return float3(
-        a[scalarIndex & 3],
-        b[(scalarIndex + 1) & 3],
-        c[(scalarIndex + 2) & 3]);
+        LoadFormattedScalar(t_SplatSH, base + 0u, g_Const.shFormat, true),
+        LoadFormattedScalar(t_SplatSH, base + 1u, g_Const.shFormat, true),
+        LoadFormattedScalar(t_SplatSH, base + 2u, g_Const.shFormat, true));
 }
 
 float3 FetchViewDependentRadiance(uint splatIndex, float3 worldViewDir)
@@ -236,8 +306,9 @@ VertexOutput vs_main(uint vertexId : SV_VertexID)
 
     uint sourceSplatIndex = t_SplatIndices[splatListIndex];
     GaussianSplatData splat = t_Splats[sourceSplatIndex];
+    float4 splatColorOpacity = LoadRGBA(sourceSplatIndex);
 
-    if (splat.centerOpacity.w < g_Const.alphaCullThreshold)
+    if (splatColorOpacity.a < g_Const.alphaCullThreshold)
     {
         output.position = float4(0.0f, 0.0f, 2.0f, 1.0f);
         return output;
@@ -253,25 +324,40 @@ VertexOutput vs_main(uint vertexId : SV_VertexID)
         return output;
     }
 
-    float clipLimit = 1.25f * clipCenter.w;
-    if (abs(clipCenter.x) > clipLimit || abs(clipCenter.y) > clipLimit || clipCenter.z < 0.0f || clipCenter.z > clipCenter.w)
+    if (g_Const.frustumCulling != 0)
+    {
+        float clipLimit = (1.0f + max(g_Const.frustumDilation, 0.0f)) * clipCenter.w;
+        if (abs(clipCenter.x) > clipLimit || abs(clipCenter.y) > clipLimit || clipCenter.z < 0.0f || clipCenter.z > clipCenter.w)
+        {
+            output.position = float4(0.0f, 0.0f, 2.0f, 1.0f);
+            return output;
+        }
+    }
+
+    float2 basis1;
+    float2 basis2;
+    float3 conic;
+    float opacity = splatColorOpacity.a;
+    if (!ComputeProjectedBasis(ProjectCovariance(LoadCovariance(splat), viewCenter), opacity, basis1, basis2, conic))
     {
         output.position = float4(0.0f, 0.0f, 2.0f, 1.0f);
         return output;
     }
 
-    float2 basis1;
-    float2 basis2;
-    if (!ComputeProjectedBasis(ProjectCovariance(LoadCovariance(splat), viewCenter), basis1, basis2))
+    if (g_Const.screenSizeCulling != 0)
     {
-        output.position = float4(0.0f, 0.0f, 2.0f, 1.0f);
-        return output;
+        float pixelCoverage = 2.0f * max(length(basis1), length(basis2));
+        if (pixelCoverage < max(g_Const.minPixelCoverage, 0.0f))
+        {
+            output.position = float4(0.0f, 0.0f, 2.0f, 1.0f);
+            return output;
+        }
     }
 
     float3 ndcCenter = clipCenter.xyz / clipCenter.w;
     float2 ndcOffset = (corner.x * basis1 + corner.y * basis2) * g_Const.view.viewportSizeInv * 2.0f;
 
-    float3 color = splat.color.rgb;
+    float3 color = splatColorOpacity.rgb;
     if (g_Const.shDegree > 0)
     {
         float3 worldViewDir = normalize(worldCenter.xyz - g_Const.cameraPosition.xyz);
@@ -281,8 +367,11 @@ VertexOutput vs_main(uint vertexId : SV_VertexID)
     float3 displayColor = max(color, 0.0f);
 
     output.position = float4(ndcCenter.xy + ndcOffset, ndcCenter.z, 1.0f);
-    output.fragPos = corner * kSqrt8;
-    output.color = float4(SrgbToLinear(displayColor) * g_Const.brightness, splat.centerOpacity.w);
+    output.fragPos = g_Const.projectionMethod == kGaussianSplatProjectionConic
+        ? corner.x * basis1 + corner.y * basis2
+        : corner * kSqrt8;
+    output.conic = conic;
+    output.color = float4(SrgbToLinear(displayColor) * g_Const.brightness, opacity);
 #if GAUSSIAN_SPLAT_HYBRID_SHADOWS
     output.worldCenter = worldCenter.xyz;
 #endif
@@ -290,15 +379,31 @@ VertexOutput vs_main(uint vertexId : SV_VertexID)
     return output;
 }
 
-float4 ps_main(VertexOutput input) : SV_Target0
+float4 ps_main(VertexOutput input, uint primitiveId : SV_PrimitiveID) : SV_Target0
 {
-    float A = dot(input.fragPos, input.fragPos);
+    float A = input.conic.x * input.fragPos.x * input.fragPos.x
+        + 2.0f * input.conic.y * input.fragPos.x * input.fragPos.y
+        + input.conic.z * input.fragPos.y * input.fragPos.y;
     if (A > 8.0f)
         discard;
 
     float opacity = exp(-0.5f * A) * input.color.a * g_Const.alphaScale;
     if (opacity <= max(g_Const.alphaCullThreshold, kFragmentAlphaCullThreshold))
         discard;
+
+    if (g_Const.sortMode == kGaussianSplatSortRandom)
+    {
+        uint2 pixel = uint2(input.position.xy);
+        uint sourceSplatIndex = t_SplatIndices[primitiveId / 2u];
+        float randomValue = Random01(uint3(
+            GaussianSplatHash32(pixel.x) ^ GaussianSplatHash32(pixel.y),
+            sourceSplatIndex,
+            g_Const.stochasticFrameIndex));
+        if (randomValue >= saturate(opacity))
+            discard;
+
+        opacity = 1.0f;
+    }
 
     if (g_Const.depthTest != 0)
     {
@@ -320,13 +425,25 @@ float4 ps_main(VertexOutput input) : SV_Target0
     if (g_Const.shadowsEnabled != 0 && g_Const.shadowStrength > 0.0f)
     {
         RayDesc shadowRay;
-        shadowRay.Origin = input.worldCenter + g_Const.shadowDirectionToLight.xyz * 0.01f;
+        shadowRay.Origin = input.worldCenter + g_Const.shadowDirectionToLight.xyz * max(g_Const.shadowDirectionToLight.w, 0.001f);
         shadowRay.Direction = g_Const.shadowDirectionToLight.xyz;
         shadowRay.TMin = 0.0f;
         shadowRay.TMax = g_Const.shadowRayTMax;
 
-        if (HybridGaussian_TraceMeshShadow(t_MeshBVH, shadowRay))
-            shadow = 1.0f - saturate(g_Const.shadowStrength);
+        uint2 pixel = uint2(input.position.xy);
+        uint shadowSeed = HybridGaussian_MakeShadowSeed(
+            shadowRay,
+            pixel,
+            g_Const.shadowFrameIndex,
+            primitiveId);
+        float visibility = HybridGaussian_TraceMeshShadowVisibility(
+            t_MeshBVH,
+            shadowRay,
+            g_Const.shadowMode,
+            g_Const.shadowSoftRadius,
+            g_Const.shadowSoftSampleCount,
+            shadowSeed);
+        shadow = lerp(1.0f - saturate(g_Const.shadowStrength), 1.0f, visibility);
     }
 
     return float4(input.color.rgb * shadow, saturate(opacity));

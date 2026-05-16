@@ -22,6 +22,7 @@
 
 namespace donut::engine
 {
+    class FramebufferFactory;
     class IView;
     class ShaderFactory;
 }
@@ -29,17 +30,61 @@ namespace donut::engine
 class GPUSort;
 class RenderTargets;
 
+enum class GaussianSplatSortMode : uint32_t
+{
+    GpuSort = 0,
+    StochasticSplats = 1
+};
+
+enum class GaussianSplatFrustumCulling : uint32_t
+{
+    Disabled = 0,
+    AtDistanceStage = 1,
+    AtRasterStage = 2
+};
+
+enum class GaussianSplatStorageFormat : uint32_t
+{
+    Float32 = 0,
+    Float16 = 1,
+    Uint8 = 2
+};
+
+enum class GaussianSplatProjectionMethod : uint32_t
+{
+    Eigen = 0,
+    Conic = 1
+};
+
 struct GaussianSplatRenderSettings
 {
     bool enabled = true;
     bool depthTest = true;
     bool shadowsEnabled = false;
+    GaussianSplatSortMode sortingMode = GaussianSplatSortMode::GpuSort;
+    GaussianSplatFrustumCulling frustumCulling = GaussianSplatFrustumCulling::AtRasterStage;
+    GaussianSplatProjectionMethod projectionMethod = GaussianSplatProjectionMethod::Eigen;
+    GaussianSplatStorageFormat shFormat = GaussianSplatStorageFormat::Uint8;
+    GaussianSplatStorageFormat rgbaFormat = GaussianSplatStorageFormat::Uint8;
+    bool screenSizeCulling = false;
+    bool mipSplattingAntialiasing = false;
+    bool useAABBs = false;
+    bool useTLASInstances = true;
+    bool blasCompaction = true;
     float splatScale = 1.0f;
     float alphaScale = 1.0f;
     float brightness = 1.0f;
     float alphaCullThreshold = 1.0f / 255.0f;
     float shadowStrength = 0.75f;
     float shadowRayTMax = 100000.0f;
+    float shadowRayOffset = 0.20f;
+    uint32_t shadowMode = GAUSSIAN_SPLAT_SHADOWS_DISABLED;
+    float shadowSoftRadius = 0.08f;
+    uint32_t shadowSoftSampleCount = 1;
+    uint32_t shadowFrameIndex = 0;
+    float frustumDilation = 0.20f;
+    float minPixelCoverage = 1.0f;
+    uint32_t stochasticFrameIndex = 0;
     donut::math::float3 shadowDirectionToLight = donut::math::float3(0.0f, 1.0f, 0.0f);
     donut::math::float4x4 objectToWorld = donut::math::float4x4::identity();
 };
@@ -56,7 +101,14 @@ public:
     bool LoadFromFile(const std::filesystem::path& fileName, bool convertRdfToDonut);
 
     void CreatePipeline(const RenderTargets& renderTargets);
-    void BuildAccelerationStructures(nvrhi::ICommandList* commandList);
+    void BuildAccelerationStructures(
+        nvrhi::ICommandList* commandList,
+        bool useAABBs,
+        bool useTLASInstances,
+        bool allowBlasCompaction,
+        float splatScale,
+        uint32_t kernelDegree,
+        bool adaptiveClamp);
     void ReleaseAccelerationStructures();
 
     void Render(
@@ -71,11 +123,16 @@ public:
     [[nodiscard]] const std::string& GetSourceFileName() const { return m_sourceFileName; }
     [[nodiscard]] nvrhi::rt::IAccelStruct* GetTopLevelAS() const { return m_splatTopLevelAS.Get(); }
     [[nodiscard]] nvrhi::IBuffer* GetSplatBuffer() const { return m_splatBuffer.Get(); }
+    [[nodiscard]] uint32_t GetShadowPrimitiveCountPerSplat() const { return m_shadowPrimitiveCountPerSplat; }
+    [[nodiscard]] bool GetShadowUsesTLASInstances() const { return m_lastAsUseTLASInstances; }
 
 private:
     void CreateBindingSets(const RenderTargets& renderTargets, nvrhi::rt::IAccelStruct* meshTopLevelAS);
+    void CreateStochasticFramebuffer(const RenderTargets& renderTargets);
     void UploadSplatDataIfNeeded(nvrhi::ICommandList* commandList);
-    void SortSplats(nvrhi::ICommandList* commandList, const GaussianSplatConstants& constants);
+    void UploadFormatDataIfNeeded(nvrhi::ICommandList* commandList, GaussianSplatStorageFormat shFormat, GaussianSplatStorageFormat rgbaFormat);
+    void UpdateSplatIndices(nvrhi::ICommandList* commandList, const GaussianSplatConstants& constants, GaussianSplatSortMode sortMode);
+    void UploadStochasticSplatIndices(nvrhi::ICommandList* commandList);
     [[nodiscard]] bool CanReuseSort(const GaussianSplatConstants& constants) const;
     void InvalidateSortCache();
 
@@ -85,11 +142,15 @@ private:
 
     nvrhi::BufferHandle m_constantBuffer;
     nvrhi::BufferHandle m_splatBuffer;
+    nvrhi::BufferHandle m_colorBuffer;
     nvrhi::BufferHandle m_shBuffer;
     nvrhi::BufferHandle m_indexBuffer;
     nvrhi::BufferHandle m_sortKeyBuffer;
     nvrhi::BufferHandle m_sortControlBuffer;
     nvrhi::BufferHandle m_splatAabbBuffer;
+    nvrhi::BufferHandle m_splatTriangleVertexBuffer;
+    nvrhi::BufferHandle m_splatTriangleIndexBuffer;
+    nvrhi::TextureHandle m_stochasticDepthBuffer;
 
     nvrhi::BindingLayoutHandle m_rasterRenderBindingLayout;
     nvrhi::BindingLayoutHandle m_hybridRenderBindingLayout;
@@ -105,20 +166,39 @@ private:
     nvrhi::ShaderHandle m_sortKeyShader;
     nvrhi::GraphicsPipelineHandle m_rasterRenderPipeline;
     nvrhi::GraphicsPipelineHandle m_hybridRenderPipeline;
+    nvrhi::GraphicsPipelineHandle m_stochasticRasterRenderPipeline;
+    nvrhi::GraphicsPipelineHandle m_stochasticHybridRenderPipeline;
     nvrhi::ComputePipelineHandle m_sortKeyPipeline;
     nvrhi::rt::AccelStructHandle m_splatBottomLevelAS;
     nvrhi::rt::AccelStructHandle m_splatTopLevelAS;
     nvrhi::rt::IAccelStruct* m_hybridRenderMeshTopLevelAS = nullptr;
+    std::shared_ptr<donut::engine::FramebufferFactory> m_stochasticFramebuffer;
 
     std::vector<GaussianSplatData> m_splats;
+    std::vector<donut::math::float4> m_colorOpacity;
     std::vector<donut::math::float4> m_shCoefficients;
+    std::vector<uint8_t> m_packedColorOpacity;
+    std::vector<uint8_t> m_packedShCoefficients;
     uint32_t m_splatCount = 0;
     uint32_t m_shDegree = 0;
     bool m_splatUploadPending = false;
+    bool m_formatUploadPending = true;
     bool m_accelStructBuildPending = false;
+    bool m_randomIndexUploadPending = true;
+    bool m_lastBlasCompaction = false;
+    bool m_lastAsUseAABBs = true;
+    bool m_lastAsUseTLASInstances = false;
+    float m_lastAsSplatScale = 1.0f;
+    uint32_t m_lastAsKernelDegree = 2;
+    bool m_lastAsAdaptiveClamp = true;
+    uint32_t m_shadowPrimitiveCountPerSplat = 1;
     bool m_sortCacheValid = false;
     uint32_t m_cachedSortSplatCount = 0;
+    GaussianSplatSortMode m_cachedSortMode = GaussianSplatSortMode::GpuSort;
+    GaussianSplatStorageFormat m_currentShFormat = GaussianSplatStorageFormat::Float32;
+    GaussianSplatStorageFormat m_currentRgbaFormat = GaussianSplatStorageFormat::Float32;
     donut::math::float4x4 m_cachedSortWorldToClipNoOffset = donut::math::float4x4::identity();
     donut::math::float4x4 m_cachedSortObjectToWorld = donut::math::float4x4::identity();
+    std::vector<uint32_t> m_randomIndices;
     std::string m_sourceFileName;
 };

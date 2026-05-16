@@ -178,7 +178,7 @@ void AnyHit(inout RayPayload payload : SV_RayPayload, in RayAttributes attrib : 
 }
 #endif
 
-RayHitInfo TraceVisibilityRay(RaytracingAccelerationStructure accelStruct, RayDesc ray)
+RayHitInfo TraceVisibilityRay(RaytracingAccelerationStructure accelStruct, RayDesc ray, bool includeGaussianSplatShadows)
 {
 #if USE_RAY_QUERY
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS> rayQuery;
@@ -208,25 +208,38 @@ RayHitInfo TraceVisibilityRay(RaytracingAccelerationStructure accelStruct, RayDe
         outHitInfo.InitTriangleHit(rayQuery.CommittedInstanceID(), rayQuery.CommittedGeometryIndex(), rayQuery.CommittedPrimitiveIndex(), rayQuery.CommittedTriangleBarycentrics());
         return outHitInfo;
     }
-    else if (g_Const.GaussianSplatShadowsEnabled != 0
-        && HybridGaussian_TraceGaussianShadow(
+    else if (includeGaussianSplatShadows && g_Const.GaussianSplatShadowsEnabled != 0)
+    {
+        uint gaussianShadowSeed = HybridGaussian_MakeShadowSeed(
+            ray,
+            uint2(g_Const.ptConsts.frameIndex, g_Const.ptConsts.sampleBaseIndex),
+            g_Const.ptConsts.sampleBaseIndex,
+            0x2c1b3c6d);
+        if (HybridGaussian_TraceGaussianShadowMode(
             GaussianSplatBVH,
             t_GaussianShadowSplats,
             g_Const.GaussianSplatShadowCount,
             ray,
             g_Const.GaussianSplatShadowScale,
-            g_Const.GaussianSplatShadowAlphaThreshold))
-    {
-        RayHitInfo outHitInfo;
-        outHitInfo.InitTriangleHit(0, 0, 0, 0.0f);
-        return outHitInfo;
+            g_Const.GaussianSplatShadowAlphaThreshold,
+            g_Const.GaussianSplatShadowAlphaClamp,
+            g_Const.GaussianSplatShadowKernelMinResponse,
+            g_Const.GaussianSplatShadowKernelDegree,
+            g_Const.GaussianSplatShadowUseTLASInstances,
+            g_Const.GaussianSplatShadowPrimitiveCountPerSplat,
+            g_Const.GaussianSplatShadowMode,
+            g_Const.GaussianSplatShadowSoftRadius,
+            g_Const.GaussianSplatShadowRayOffset,
+            gaussianShadowSeed))
+        {
+            RayHitInfo outHitInfo;
+            outHitInfo.InitTriangleHit(0, 0, 0, 0.0f);
+            return outHitInfo;
+        }
     }
-    else
-    {
-        RayHitInfo outHitInfo;
-        outHitInfo.InitNoHit();
-        return outHitInfo;
-    }
+    RayHitInfo outHitInfo;
+    outHitInfo.InitNoHit();
+    return outHitInfo;
 #else
     RayPayload payload = (RayPayload)0;
     payload.instanceIndex = ~0u;
@@ -592,7 +605,7 @@ RayDesc setupVisibilityRay(RAB_Surface surface, float3 samplePosition, float off
 
 bool GetConservativeVisibility(RaytracingAccelerationStructure accelStruct, RayDesc ray)
 {
-    const RayHitInfo res = TraceVisibilityRay(accelStruct, ray);
+    const RayHitInfo res = TraceVisibilityRay(accelStruct, ray, false);
 
     const bool visible = res.hitType == RayHitType::NoHit;
 
@@ -605,7 +618,7 @@ bool GetConservativeVisibility(RaytracingAccelerationStructure accelStruct, RayD
 // Uses the RTXPT Bridge alpha test
 bool GetFinalVisibility(RaytracingAccelerationStructure accelStruct, RayDesc ray)
 {
-    const RayHitInfo res = TraceVisibilityRay(accelStruct, ray);
+    const RayHitInfo res = TraceVisibilityRay(accelStruct, ray, true);
 
     const bool visible = res.hitType == RayHitType::NoHit;
 

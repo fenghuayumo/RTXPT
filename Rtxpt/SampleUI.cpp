@@ -59,16 +59,146 @@ const static ImVec4 categoryColor = { 0.5f,1.0f,0.7f,1 };
 
 namespace
 {
+    int ResolveGaussianSplatShadowMode(const SampleUIData& ui)
+    {
+        if (!ui.GaussianSplatShadows && ui.GaussianSplatShadowsMode == GAUSSIAN_SPLAT_SHADOWS_DISABLED)
+            return GAUSSIAN_SPLAT_SHADOWS_DISABLED;
+
+        const int requestedMode = ui.GaussianSplatShadowsMode == GAUSSIAN_SPLAT_SHADOWS_DISABLED
+            ? GAUSSIAN_SPLAT_SHADOWS_HARD
+            : ui.GaussianSplatShadowsMode;
+        return dm::clamp(requestedMode, GAUSSIAN_SPLAT_SHADOWS_HARD, GAUSSIAN_SPLAT_SHADOWS_SOFT);
+    }
+
     bool GaussianSplatModeCombo(SampleUIData& ui)
     {
-        int renderingMode = ui.GaussianSplatShadows ? 1 : 0;
+        int renderingMode = ResolveGaussianSplatShadowMode(ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED ? 1 : 0;
         if (!ImGui::Combo("Rendering Mode", &renderingMode, "Raster 3DGS (VS)\0Hybrid 3DGS + 3DGRT\0\0"))
             return false;
 
-        ui.GaussianSplatShadows = renderingMode == 1;
+        if (renderingMode == 1)
+        {
+            ui.GaussianSplatShadows = true;
+            if (ui.GaussianSplatShadowsMode == GAUSSIAN_SPLAT_SHADOWS_DISABLED)
+                ui.GaussianSplatShadowsMode = GAUSSIAN_SPLAT_SHADOWS_HARD;
+        }
+        else
+        {
+            ui.GaussianSplatShadows = false;
+            ui.GaussianSplatShadowsMode = GAUSSIAN_SPLAT_SHADOWS_DISABLED;
+        }
         ui.AccelerationStructRebuildRequested = true;
         ui.ResetAccumulation = true;
         return true;
+    }
+
+    bool GaussianSplatShadowsModeCombo(SampleUIData& ui)
+    {
+        const bool wasEnabled = ResolveGaussianSplatShadowMode(ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED;
+        int shadowMode = ResolveGaussianSplatShadowMode(ui);
+
+        ui.GaussianSplatShadowsMode = shadowMode;
+        ui.GaussianSplatShadows = shadowMode != GAUSSIAN_SPLAT_SHADOWS_DISABLED;
+
+        if (!ImGui::Combo("Shadows Mode", &shadowMode, "Shadows off\0Hard shadows\0Soft shadows\0\0"))
+            return false;
+
+        shadowMode = dm::clamp(shadowMode, GAUSSIAN_SPLAT_SHADOWS_DISABLED, GAUSSIAN_SPLAT_SHADOWS_SOFT);
+        ui.GaussianSplatShadowsMode = shadowMode;
+        ui.GaussianSplatShadows = shadowMode != GAUSSIAN_SPLAT_SHADOWS_DISABLED;
+
+        if (wasEnabled != ui.GaussianSplatShadows)
+            ui.AccelerationStructRebuildRequested = true;
+        ui.ResetAccumulation = true;
+        return true;
+    }
+
+    bool GaussianSplatSortingCombo(SampleUIData& ui)
+    {
+        const bool changed = ImGui::Combo("Sorting Method", &ui.GaussianSplatSortingMode, "GPU sort\0Stachostic Splats\0\0");
+        ui.GaussianSplatSortingMode = dm::clamp(ui.GaussianSplatSortingMode, 0, 1);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("GPU sort uses the existing radix-sort path. Stochastic splats uses stable randomized order plus stochastic opacity accept/reject.");
+        return changed;
+    }
+
+    bool GaussianSplatFormatCombo(const char* label, int* value)
+    {
+        const bool changed = ImGui::Combo(label, value, "Float32\0Float16\0Uint8\0\0");
+        *value = dm::clamp(*value, 0, 2);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Storage format used by the 3DGS raster color/alpha and SH buffers in VRAM.");
+        return changed;
+    }
+
+    bool GaussianSplatFTBCombo(SampleUIData& ui)
+    {
+        const bool changed = ImGui::Combo("FTB Sync Mode", &ui.GaussianSplatFTBSyncMode, "Disabled (fast)\0Interlock\0\0");
+        ui.GaussianSplatFTBSyncMode = dm::clamp(ui.GaussianSplatFTBSyncMode, 0, 1);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Front-to-back depth synchronization mode. The current RTXPT overlay path does not write a 3DGS depth iso buffer yet.");
+        return changed;
+    }
+
+    bool GaussianSplatRtxKernelDegreeCombo(SampleUIData& ui)
+    {
+        const bool changed = ImGui::Combo("Kernel degree", &ui.GaussianSplatRtxKernelDegree,
+            "0 (Linear)\0"
+            "1 (Laplacian)\0"
+            "2 (Quadratic)\0"
+            "3 (Cubic)\0"
+            "4 (Tesseractic)\0"
+            "5 (Quintic)\0\0");
+        ui.GaussianSplatRtxKernelDegree = dm::clamp(ui.GaussianSplatRtxKernelDegree, 0, 5);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Kernel degree for the 3DGRT particle intersection shape. Changing it rebuilds Gaussian BLAS proxies.");
+        return changed;
+    }
+
+    bool GaussianSplatRtxParticleFormatCombo(SampleUIData& ui)
+    {
+        int particleFormat = ui.GaussianSplatUseAABBs ? 1 : 0;
+        const bool changed = ImGui::Combo("Particles format", &particleFormat, "Icosahedron\0AABB + parametric\0\0");
+        if (changed)
+        {
+            ui.GaussianSplatUseAABBs = particleFormat == 1;
+            if (ui.GaussianSplatUseAABBs)
+                ui.GaussianSplatUseTLASInstances = true;
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Shortcut for the 3DGS RTX acceleration proxy format. AABB + parametric forces TLAS instances.");
+        return changed;
+    }
+
+    bool GaussianSplatRtxTraceStrategyCombo(SampleUIData& ui)
+    {
+        const bool changed = ImGui::Combo("Trace strategy", &ui.GaussianSplatRtxTraceStrategy,
+            "All pass\0Stochastic pass\0Stochastic any-hit\0\0");
+        ui.GaussianSplatRtxTraceStrategy = dm::clamp(ui.GaussianSplatRtxTraceStrategy, 0, 2);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Ray tracing strategy for Gaussian particle hits.");
+        return changed;
+    }
+
+    bool GaussianSplatRtxParticleSamplesCombo(const char* label, int* value)
+    {
+        static constexpr int values[] = { 128, 64, 32, 20, 18, 16, 12, 8, 4, 2, 1 };
+        static const char* labels[] = { "128", "64", "32", "20", "18", "16", "12", "8", "4", "2", "1" };
+
+        int currentIndex = 4;
+        for (int i = 0; i < int(sizeof(values) / sizeof(values[0])); ++i)
+        {
+            if (*value == values[i])
+            {
+                currentIndex = i;
+                break;
+            }
+        }
+
+        const bool changed = ImGui::Combo(label, &currentIndex, labels, int(sizeof(labels) / sizeof(labels[0])));
+        if (changed)
+            *value = values[currentIndex];
+        return changed;
     }
 
     bool IsMeshInstanceNode(donut::engine::SceneGraphNode* node)
@@ -716,6 +846,88 @@ void SampleUI::buildUI(void)
 
                 RESET_ON_CHANGE(ImGui::Checkbox("Mesh Depth Test", &m_ui.GaussianSplatDepthTest));
                 GaussianSplatModeCombo(m_ui);
+                GaussianSplatShadowsModeCombo(m_ui);
+
+                if (ImGui::CollapsingHeader("Rasterization", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
+
+                    RESET_ON_CHANGE(GaussianSplatSortingCombo(m_ui));
+                    ImGui::BeginDisabled(m_ui.GaussianSplatSortingMode != 1);
+                    RESET_ON_CHANGE(ImGui::InputInt("Temporal Sampling Count", &m_ui.GaussianSplatTemporalSamplingCount, 1, 10));
+                    ImGui::EndDisabled();
+                    m_ui.GaussianSplatTemporalSamplingCount = dm::clamp(m_ui.GaussianSplatTemporalSamplingCount, 0, 1024 * 1024);
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                        ImGui::SetTooltip("Number of stochastic splat frames accumulated before temporal sampling stops. 0 disables stochastic temporal accumulation.");
+                    RESET_ON_CHANGE(ImGui::Checkbox("Mip splatting antialiasing", &m_ui.GaussianSplatMipAntialiasing));
+                    RESET_ON_CHANGE(ImGui::Checkbox("Quantize Normals", &m_ui.GaussianSplatQuantizeNormals));
+                    RESET_ON_CHANGE(GaussianSplatFTBCombo(m_ui));
+                    RESET_ON_CHANGE(ImGui::DragFloat("Depth Iso Threshold", &m_ui.GaussianSplatDepthIsoThreshold, 0.01f, 0.0f, 1.0f, "%.2f"));
+                    RESET_ON_CHANGE(ImGui::Checkbox("Fragment shader barycentric", &m_ui.GaussianSplatFragmentShaderBarycentric));
+
+                    ImGui::SeparatorText("Culling");
+                    bool cullingChanged = false;
+                    cullingChanged |= ImGui::RadioButton("Disabled", &m_ui.GaussianSplatFrustumCulling, 0);
+                    cullingChanged |= ImGui::RadioButton("At distance stage", &m_ui.GaussianSplatFrustumCulling, 1);
+                    cullingChanged |= ImGui::RadioButton("At raster stage", &m_ui.GaussianSplatFrustumCulling, 2);
+                    RESET_ON_CHANGE(cullingChanged);
+                    RESET_ON_CHANGE(ImGui::DragFloat("Frustum dilation", &m_ui.GaussianSplatFrustumDilation, 0.01f, 0.0f, 1.0f, "%.2f"));
+                    RESET_ON_CHANGE(ImGui::Checkbox("Screen size culling", &m_ui.GaussianSplatScreenSizeCulling));
+                    ImGui::BeginDisabled(!m_ui.GaussianSplatScreenSizeCulling);
+                    RESET_ON_CHANGE(ImGui::DragFloat("Min pixel coverage", &m_ui.GaussianSplatMinPixelCoverage, 0.1f, 0.1f, 20.0f, "%.2f"));
+                    ImGui::EndDisabled();
+                }
+
+                if (ResolveGaussianSplatShadowMode(m_ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED
+                    && ImGui::CollapsingHeader("Ray Tracing", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
+
+                    bool asChanged = false;
+                    asChanged |= GaussianSplatRtxKernelDegreeCombo(m_ui);
+                    asChanged |= GaussianSplatRtxParticleFormatCombo(m_ui);
+                    asChanged |= ImGui::Checkbox("Adaptive clamp", &m_ui.GaussianSplatRtxAdaptiveClamp);
+                    if (asChanged)
+                    {
+                        m_ui.AccelerationStructRebuildRequested = true;
+                        m_ui.ResetAccumulation = true;
+                    }
+
+                    RESET_ON_CHANGE(ImGui::DragFloat("Alpha clamp", &m_ui.GaussianSplatRtxAlphaClamp, 0.01f, 0.0f, 3.0f, "%.2f"));
+                    RESET_ON_CHANGE(ImGui::DragFloat("Minimum transmittance", &m_ui.GaussianSplatRtxMinimumTransmittance, 0.01f, 0.0f, 1.0f, "%.2f"));
+                    RESET_ON_CHANGE(GaussianSplatRtxTraceStrategyCombo(m_ui));
+                    if (ResolveGaussianSplatShadowMode(m_ui) == GAUSSIAN_SPLAT_SHADOWS_SOFT)
+                    {
+                        RESET_ON_CHANGE(ImGui::DragFloat("Soft shadow radius", &m_ui.GaussianSplatShadowSoftRadius, 0.01f, 0.0f, 0.5f, "%.2f"));
+                        RESET_ON_CHANGE(ImGui::InputInt("Soft shadow samples", &m_ui.GaussianSplatShadowSoftSampleCount, 1, 4));
+                        m_ui.GaussianSplatShadowSoftSampleCount = dm::clamp(m_ui.GaussianSplatShadowSoftSampleCount, 1, 16);
+                    }
+
+                    const bool stochasticAnyHit = m_ui.GaussianSplatRtxTraceStrategy == 2;
+                    int displaySpp = stochasticAnyHit ? 1 : m_ui.GaussianSplatRtxParticleSamplesPerPass;
+                    ImGui::BeginDisabled(stochasticAnyHit);
+                    if (GaussianSplatRtxParticleSamplesCombo("Particle samples per pass", &displaySpp))
+                    {
+                        m_ui.GaussianSplatRtxParticleSamplesPerPass = displaySpp;
+                        m_ui.ResetAccumulation = true;
+                    }
+                    ImGui::EndDisabled();
+                    m_ui.GaussianSplatRtxParticleSamplesPerPass = dm::clamp(m_ui.GaussianSplatRtxParticleSamplesPerPass, 1, 128);
+
+                    RESET_ON_CHANGE(ImGui::InputInt("Maximum pass count", &m_ui.GaussianSplatRtxMaximumPassCount, 1, 100));
+                    m_ui.GaussianSplatRtxMaximumPassCount = dm::clamp(m_ui.GaussianSplatRtxMaximumPassCount, 1, 1000);
+
+                    int maximumAnyHitPerPixel = (stochasticAnyHit ? 1 : m_ui.GaussianSplatRtxParticleSamplesPerPass) * m_ui.GaussianSplatRtxMaximumPassCount;
+                    ImGui::BeginDisabled();
+                    ImGui::InputInt("Maximum anyhit/pixel", &maximumAnyHitPerPixel);
+                    ImGui::EndDisabled();
+
+                    RESET_ON_CHANGE(ImGui::DragFloat("Particle shadow offset", &m_ui.GaussianSplatRtxParticleShadowOffset, 0.01f, 0.0f, 1.0f, "%.2f"));
+                    RESET_ON_CHANGE(ImGui::DragFloat("Particle shadow threshold", &m_ui.GaussianSplatRtxParticleShadowThreshold, 0.01f, 0.0f, 0.99f, "%.2f"));
+                    RESET_ON_CHANGE(ImGui::DragFloat("Colored shadow strength", &m_ui.GaussianSplatRtxColoredShadowStrength, 0.01f, 0.0f, 5.0f, "%.2f"));
+                    RESET_ON_CHANGE(ImGui::DragFloat("Mesh composite threshold", &m_ui.GaussianSplatRtxMeshCompositeThreshold, 0.01f, 0.0f, 1.0f, "%.2f"));
+                    RESET_ON_CHANGE(ImGui::DragFloat("Depth Iso Threshold", &m_ui.GaussianSplatRtxDepthIsoThreshold, 0.01f, 0.0f, 1.0f, "%.2f"));
+                }
             }
 
             if (ImGui::CollapsingHeader("Environment Map"))
@@ -2037,12 +2249,69 @@ void SampleUI::buildUI(void)
         if (ImGui::CollapsingHeader("Properties", ImGuiTreeNodeFlags_DefaultOpen))
         {
             RESET_ON_CHANGE(ImGui::Checkbox("Enabled", &m_ui.EnableGaussianSplats));
-            RESET_ON_CHANGE(ImGui::DragFloat("Footprint Scale", &m_ui.GaussianSplatScale, 0.01f, 0.01f, 10.0f, "%.2f"));
+            if (ImGui::DragFloat("Footprint Scale", &m_ui.GaussianSplatScale, 0.01f, 0.01f, 10.0f, "%.2f"))
+            {
+                if (ResolveGaussianSplatShadowMode(m_ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED)
+                    m_ui.AccelerationStructRebuildRequested = true;
+                m_ui.ResetAccumulation = true;
+            }
             RESET_ON_CHANGE(ImGui::DragFloat("Alpha", &m_ui.GaussianSplatAlphaScale, 0.01f, 0.0f, 4.0f, "%.2f"));
             RESET_ON_CHANGE(ImGui::DragFloat("Brightness", &m_ui.GaussianSplatBrightness, 0.01f, 0.0f, 16.0f, "%.2f"));
             RESET_ON_CHANGE(ImGui::DragFloat("Alpha Cull", &m_ui.GaussianSplatAlphaCullThreshold, 0.001f, 0.0f, 0.25f, "%.3f"));
-            if (m_ui.GaussianSplatShadows)
+            if (ResolveGaussianSplatShadowMode(m_ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED)
                 RESET_ON_CHANGE(ImGui::DragFloat("Shadow Strength", &m_ui.GaussianSplatShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f"));
+        }
+
+        if (ImGui::CollapsingHeader("Splat Set Format in VRAM", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            if (ImGui::Button("Reset##GaussianFormat"))
+            {
+                m_ui.GaussianSplatSHFormat = 2;
+                m_ui.GaussianSplatRGBAFormat = 2;
+                m_ui.ResetAccumulation = true;
+            }
+            RESET_ON_CHANGE(GaussianSplatFormatCombo("SH format", &m_ui.GaussianSplatSHFormat));
+            RESET_ON_CHANGE(GaussianSplatFormatCombo("RGBA format", &m_ui.GaussianSplatRGBAFormat));
+        }
+
+        if (ImGui::CollapsingHeader("RTX acceleration structures", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            if (ImGui::Button("Reset##GaussianRTX"))
+            {
+                m_ui.GaussianSplatUseAABBs = false;
+                m_ui.GaussianSplatUseTLASInstances = true;
+                m_ui.GaussianSplatBlasCompaction = true;
+                m_ui.AccelerationStructRebuildRequested = true;
+                m_ui.ResetAccumulation = true;
+            }
+
+            bool asChanged = ImGui::Checkbox("Use AABBs", &m_ui.GaussianSplatUseAABBs);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Use procedural AABB primitives. When disabled, a non-opaque icosahedron triangle BLAS is used as the acceleration proxy.");
+            if (m_ui.GaussianSplatUseAABBs && !m_ui.GaussianSplatUseTLASInstances)
+            {
+                m_ui.GaussianSplatUseTLASInstances = true;
+                asChanged = true;
+            }
+            ImGui::BeginDisabled(m_ui.GaussianSplatUseAABBs);
+            asChanged |= ImGui::Checkbox("Use TLAS instances", &m_ui.GaussianSplatUseTLASInstances);
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Use one TLAS instance per splat with a shared unit proxy BLAS. When disabled, all splat proxies are built into one BLAS.");
+            if (asChanged)
+            {
+                m_ui.AccelerationStructRebuildRequested = true;
+                m_ui.ResetAccumulation = true;
+            }
+
+            bool blasCompactionChanged = ImGui::Checkbox("BLAS Compaction", &m_ui.GaussianSplatBlasCompaction);
+            if (blasCompactionChanged)
+            {
+                m_ui.AccelerationStructRebuildRequested = true;
+                m_ui.ResetAccumulation = true;
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Requests NVRHI BLAS compaction on the next Gaussian shadow acceleration-structure rebuild.");
         }
 
         ImGui::PopItemWidth();

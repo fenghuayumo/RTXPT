@@ -26,6 +26,10 @@ using namespace donut::math;
 
 #define GAUSSIAN_SPLAT_SH_FLOAT4_COUNT 12
 
+#define GAUSSIAN_SPLAT_SHADOWS_DISABLED 0
+#define GAUSSIAN_SPLAT_SHADOWS_HARD 1
+#define GAUSSIAN_SPLAT_SHADOWS_SOFT 2
+
 
 struct SimpleViewConstants
 {
@@ -61,9 +65,19 @@ struct SampleConstants
     float GaussianSplatShadowScale;
 
     float GaussianSplatShadowAlphaThreshold;
-    float _padding0;
-    float _padding1;
-    float _padding2;
+    uint GaussianSplatShadowUseTLASInstances;
+    uint GaussianSplatShadowPrimitiveCountPerSplat;
+    uint GaussianSplatShadowMode;
+
+    float GaussianSplatShadowSoftRadius;
+    uint GaussianSplatShadowSoftSampleCount;
+    uint GaussianSplatShadowFrameIndex;
+    float GaussianSplatShadowRayOffset;
+
+    float GaussianSplatShadowAlphaClamp;
+    float GaussianSplatShadowKernelMinResponse;
+    uint GaussianSplatShadowKernelDegree;
+    uint GaussianSplatShadowAdaptiveClamp;
 };
 
 // Used in a couple of places like multipass postprocess where you want to keep SampleConstants the same for all passes, but send just a few additional per-pass parameters 
@@ -98,8 +112,23 @@ struct GaussianSplatConstants
 
     float shadowStrength;
     float shadowRayTMax;
-    uint unused0;
-    uint unused1;
+    uint shadowMode;
+    uint shadowSoftSampleCount;
+
+    float shadowSoftRadius;
+    uint shadowFrameIndex;
+    uint sortMode;
+    uint frustumCulling;
+
+    float frustumDilation;
+    float minPixelCoverage;
+    uint screenSizeCulling;
+    uint mipSplattingAntialiasing;
+
+    uint shFormat;
+    uint rgbaFormat;
+    uint projectionMethod;
+    uint stochasticFrameIndex;
 };
 
 struct GaussianSplatData

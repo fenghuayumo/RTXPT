@@ -25,8 +25,11 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <limits>
+#include <numeric>
+#include <random>
 #include <sstream>
 #include <utility>
 
@@ -36,8 +39,8 @@ using namespace donut::math;
 namespace
 {
     constexpr float kSH_C0 = 0.28209479177387814f;
-    constexpr float kGaussianSplatAsMaxUiScale = 10.0f;
     constexpr float kGaussianSplatAsRadius = 2.8284271247461903f;
+    constexpr float kGaussianSplatKernelMinResponse = 0.0113f;
     constexpr std::array<float, 15> kRdfToRubShFlip = {
         -1.0f, -1.0f, 1.0f, -1.0f, 1.0f,
          1.0f, -1.0f, 1.0f, -1.0f, 1.0f,
@@ -88,35 +91,112 @@ namespace
         float alpha = 1.0f;
     };
 
-    std::vector<nvrhi::rt::GeometryAABB> BuildGaussianAabbs(const std::vector<GaussianSplatData>& splats)
+    float GaussianKernelScale(float density, float kernelMinResponse, uint32_t kernelDegree, bool adaptiveClamping)
+    {
+        const float responseModulation = adaptiveClamping ? std::max(density, 1e-6f) : 1.0f;
+        const float minResponse = std::min(kernelMinResponse / responseModulation, 0.97f);
+
+        if (kernelDegree == 0)
+            return std::abs((minResponse - 1.0f) / -0.329630334487f);
+
+        const float b = std::max(float(kernelDegree), 1.0f);
+        const float a = -4.5f / std::pow(3.0f, b);
+        return std::pow(std::log(minResponse) / a, 1.0f / b);
+    }
+
+    float3 GaussianAabbExtent(const GaussianSplatData& splat, float splatScale, uint32_t kernelDegree, bool adaptiveClamp)
+    {
+        const float3 variance = float3(
+            std::max(splat.covariance0.x, 1e-8f),
+            std::max(splat.covariance0.w, 1e-8f),
+            std::max(splat.covariance1.y, 1e-8f));
+        const float kernelScale = GaussianKernelScale(
+            splat.centerOpacity.w,
+            kGaussianSplatKernelMinResponse,
+            kernelDegree,
+            adaptiveClamp);
+        return float3(
+            std::sqrt(variance.x),
+            std::sqrt(variance.y),
+            std::sqrt(variance.z)) * (std::max(splatScale, 1e-4f) * std::max(kernelScale, 1e-3f));
+    }
+
+    nvrhi::rt::GeometryAABB GaussianAabbFromSplat(const GaussianSplatData& splat, float splatScale, uint32_t kernelDegree, bool adaptiveClamp)
+    {
+        const float3 center = splat.centerOpacity.xyz();
+        const float3 extent = GaussianAabbExtent(splat, splatScale, kernelDegree, adaptiveClamp);
+
+        nvrhi::rt::GeometryAABB aabb = {};
+        aabb.minX = center.x - extent.x;
+        aabb.minY = center.y - extent.y;
+        aabb.minZ = center.z - extent.z;
+        aabb.maxX = center.x + extent.x;
+        aabb.maxY = center.y + extent.y;
+        aabb.maxZ = center.z + extent.z;
+        return aabb;
+    }
+
+    std::vector<nvrhi::rt::GeometryAABB> BuildGaussianAabbs(
+        const std::vector<GaussianSplatData>& splats,
+        float splatScale,
+        uint32_t kernelDegree,
+        bool adaptiveClamp)
     {
         std::vector<nvrhi::rt::GeometryAABB> aabbs;
         aabbs.reserve(splats.size());
 
         for (const GaussianSplatData& splat : splats)
-        {
-            const float3 center = splat.centerOpacity.xyz();
-            const float3 variance = float3(
-                std::max(splat.covariance0.x, 1e-8f),
-                std::max(splat.covariance0.w, 1e-8f),
-                std::max(splat.covariance1.y, 1e-8f));
-            const float3 extent = float3(
-                std::sqrt(variance.x),
-                std::sqrt(variance.y),
-                std::sqrt(variance.z)) * (kGaussianSplatAsRadius * kGaussianSplatAsMaxUiScale);
-
-            nvrhi::rt::GeometryAABB aabb = {};
-            aabb.minX = center.x - extent.x;
-            aabb.minY = center.y - extent.y;
-            aabb.minZ = center.z - extent.z;
-            aabb.maxX = center.x + extent.x;
-            aabb.maxY = center.y + extent.y;
-            aabb.maxZ = center.z + extent.z;
-            aabbs.push_back(aabb);
-        }
+            aabbs.push_back(GaussianAabbFromSplat(splat, splatScale, kernelDegree, adaptiveClamp));
 
         return aabbs;
     }
+
+    void FillScaleTranslateTransform(nvrhi::rt::AffineTransform& transform, const float3& center, const float3& extent)
+    {
+        transform[0] = extent.x; transform[1] = 0.0f;     transform[2] = 0.0f;     transform[3] = center.x;
+        transform[4] = 0.0f;     transform[5] = extent.y; transform[6] = 0.0f;     transform[7] = center.y;
+        transform[8] = 0.0f;     transform[9] = 0.0f;     transform[10] = extent.z; transform[11] = center.z;
+    }
+
+    constexpr float kIcosahedronInvPhi = 0.61803398875f;
+
+    const std::array<float3, 12> kUnitIcosahedronVertices = {
+        float3(-kIcosahedronInvPhi,  1.0f, 0.0f),
+        float3( kIcosahedronInvPhi,  1.0f, 0.0f),
+        float3(-kIcosahedronInvPhi, -1.0f, 0.0f),
+        float3( kIcosahedronInvPhi, -1.0f, 0.0f),
+        float3(0.0f, -kIcosahedronInvPhi,  1.0f),
+        float3(0.0f,  kIcosahedronInvPhi,  1.0f),
+        float3(0.0f, -kIcosahedronInvPhi, -1.0f),
+        float3(0.0f,  kIcosahedronInvPhi, -1.0f),
+        float3( 1.0f, 0.0f, -kIcosahedronInvPhi),
+        float3( 1.0f, 0.0f,  kIcosahedronInvPhi),
+        float3(-1.0f, 0.0f, -kIcosahedronInvPhi),
+        float3(-1.0f, 0.0f,  kIcosahedronInvPhi)
+    };
+
+    const std::array<uint32_t, 60> kUnitIcosahedronIndices = {
+        0, 11, 5,
+        0, 5, 1,
+        0, 1, 7,
+        0, 7, 10,
+        0, 10, 11,
+        1, 5, 9,
+        5, 11, 4,
+        11, 10, 2,
+        10, 7, 6,
+        7, 1, 8,
+        3, 9, 4,
+        3, 4, 2,
+        3, 2, 6,
+        3, 6, 8,
+        3, 8, 9,
+        4, 9, 5,
+        2, 4, 11,
+        6, 2, 10,
+        8, 6, 7,
+        9, 8, 1
+    };
 
     std::string ToLower(std::string value)
     {
@@ -387,6 +467,80 @@ namespace
         }
 
         return true;
+    }
+
+    uint32_t FormatElementSize(GaussianSplatStorageFormat format)
+    {
+        switch (format)
+        {
+        case GaussianSplatStorageFormat::Float32:
+            return sizeof(float);
+        case GaussianSplatStorageFormat::Float16:
+            return sizeof(uint16_t);
+        case GaussianSplatStorageFormat::Uint8:
+            return sizeof(uint8_t);
+        default:
+            return sizeof(float);
+        }
+    }
+
+    uint8_t QuantizeUnorm8(float value)
+    {
+        return uint8_t(std::clamp(std::round(Clamp01(value) * 255.0f), 0.0f, 255.0f));
+    }
+
+    uint8_t QuantizeSnormRange8(float value, float minValue, float maxValue)
+    {
+        const float normalized = std::clamp((value - minValue) / (maxValue - minValue), 0.0f, 1.0f);
+        return uint8_t(std::clamp(std::round(normalized * 255.0f), 0.0f, 255.0f));
+    }
+
+    void StoreFormattedScalar(std::vector<uint8_t>& data, uint64_t scalarIndex, GaussianSplatStorageFormat format, float value, bool signedRange)
+    {
+        const uint64_t byteOffset = scalarIndex * FormatElementSize(format);
+        switch (format)
+        {
+        case GaussianSplatStorageFormat::Float32:
+        {
+            std::memcpy(data.data() + byteOffset, &value, sizeof(value));
+            break;
+        }
+        case GaussianSplatStorageFormat::Float16:
+        {
+            const float16_t halfValue = Float32ToFloat16(value);
+            std::memcpy(data.data() + byteOffset, &halfValue.bits, sizeof(halfValue.bits));
+            break;
+        }
+        case GaussianSplatStorageFormat::Uint8:
+        {
+            const uint8_t quantized = signedRange
+                ? QuantizeSnormRange8(value, -1.0f, 1.0f)
+                : QuantizeUnorm8(value);
+            data[byteOffset] = quantized;
+            break;
+        }
+        }
+    }
+
+    float ShCoefficientAt(const std::vector<float4>& packedCoefficients, uint32_t splatIndex, uint32_t scalarIndex)
+    {
+        const uint32_t float4Index = splatIndex * GAUSSIAN_SPLAT_SH_FLOAT4_COUNT + scalarIndex / 4u;
+        if (float4Index >= packedCoefficients.size())
+            return 0.0f;
+
+        const float4 value = packedCoefficients[float4Index];
+        switch (scalarIndex & 3u)
+        {
+        case 0: return value.x;
+        case 1: return value.y;
+        case 2: return value.z;
+        default: return value.w;
+        }
+    }
+
+    uint64_t AlignRawBufferSize(uint64_t size)
+    {
+        return std::max<uint64_t>(4, (size + 3u) & ~uint64_t(3u));
     }
 
     GaussianSplatData ConvertToGpuSplat(const RawGaussianSplat& raw, bool convertRdfToDonut)
@@ -779,13 +933,14 @@ GaussianSplatPass::GaussianSplatPass(
         nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),
         nvrhi::BindingLayoutItem::StructuredBuffer_SRV(0),
         nvrhi::BindingLayoutItem::TypedBuffer_SRV(1),
-        nvrhi::BindingLayoutItem::StructuredBuffer_SRV(2),
-        nvrhi::BindingLayoutItem::Texture_SRV(3)
+        nvrhi::BindingLayoutItem::RawBuffer_SRV(2),
+        nvrhi::BindingLayoutItem::RawBuffer_SRV(3),
+        nvrhi::BindingLayoutItem::Texture_SRV(4)
     };
     m_rasterRenderBindingLayout = m_device->createBindingLayout(rasterRenderLayoutDesc);
 
     nvrhi::BindingLayoutDesc hybridRenderLayoutDesc = rasterRenderLayoutDesc;
-    hybridRenderLayoutDesc.bindings.push_back(nvrhi::BindingLayoutItem::RayTracingAccelStruct(4));
+    hybridRenderLayoutDesc.bindings.push_back(nvrhi::BindingLayoutItem::RayTracingAccelStruct(5));
     m_hybridRenderBindingLayout = m_device->createBindingLayout(hybridRenderLayoutDesc);
 
     nvrhi::BindingLayoutDesc sortLayoutDesc;
@@ -836,6 +991,10 @@ bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool
     m_shCoefficients = std::move(loadedShCoefficients);
     m_splatCount = uint32_t(m_splats.size());
     m_shDegree = loadedShDegree;
+    m_colorOpacity.clear();
+    m_colorOpacity.reserve(m_splats.size());
+    for (const GaussianSplatData& splat : m_splats)
+        m_colorOpacity.push_back(float4(splat.color.x, splat.color.y, splat.color.z, splat.centerOpacity.w));
 
     if (m_shCoefficients.empty())
         m_shCoefficients.push_back(float4(0.0f, 0.0f, 0.0f, 0.0f));
@@ -848,13 +1007,8 @@ bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool
     splatBufferDesc.keepInitialState = true;
     m_splatBuffer = m_device->createBuffer(splatBufferDesc);
 
-    nvrhi::BufferDesc shBufferDesc;
-    shBufferDesc.byteSize = uint64_t(m_shCoefficients.size()) * sizeof(float4);
-    shBufferDesc.structStride = sizeof(float4);
-    shBufferDesc.debugName = "GaussianSplatSHBuffer";
-    shBufferDesc.initialState = nvrhi::ResourceStates::ShaderResource;
-    shBufferDesc.keepInitialState = true;
-    m_shBuffer = m_device->createBuffer(shBufferDesc);
+    m_colorBuffer = nullptr;
+    m_shBuffer = nullptr;
 
     nvrhi::BufferDesc uintBufferDesc;
     uintBufferDesc.byteSize = uint64_t(m_splatCount) * sizeof(uint32_t);
@@ -884,6 +1038,8 @@ bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool
     aabbBufferDesc.keepInitialState = true;
     m_splatAabbBuffer = m_device->createBuffer(aabbBufferDesc);
 
+    m_splatTriangleVertexBuffer = nullptr;
+    m_splatTriangleIndexBuffer = nullptr;
     m_rasterRenderBindingSet = nullptr;
     m_hybridRenderBindingSet = nullptr;
     m_sortKeyBindingSet = nullptr;
@@ -892,37 +1048,146 @@ bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool
     m_hybridRenderMeshTopLevelAS = nullptr;
     m_sourceFileName = fileName.string();
     m_splatUploadPending = true;
+    m_formatUploadPending = true;
     m_accelStructBuildPending = true;
+    m_lastBlasCompaction = false;
+    m_lastAsUseAABBs = true;
+    m_lastAsUseTLASInstances = false;
+    m_lastAsSplatScale = 1.0f;
+    m_lastAsKernelDegree = 2;
+    m_lastAsAdaptiveClamp = true;
+    m_shadowPrimitiveCountPerSplat = 1;
+    m_randomIndices.clear();
+    m_randomIndexUploadPending = true;
     InvalidateSortCache();
 
     return true;
 }
 
-void GaussianSplatPass::BuildAccelerationStructures(nvrhi::ICommandList* commandList)
+void GaussianSplatPass::BuildAccelerationStructures(
+    nvrhi::ICommandList* commandList,
+    bool useAABBs,
+    bool useTLASInstances,
+    bool allowBlasCompaction,
+    float splatScale,
+    uint32_t kernelDegree,
+    bool adaptiveClamp)
 {
     if (!HasSplats() || !m_splatAabbBuffer)
         return;
 
+    if (!m_accelStructBuildPending
+        && m_lastBlasCompaction == allowBlasCompaction
+        && m_lastAsUseAABBs == useAABBs
+        && m_lastAsUseTLASInstances == useTLASInstances
+        && std::abs(m_lastAsSplatScale - splatScale) < 1e-4f
+        && m_lastAsKernelDegree == kernelDegree
+        && m_lastAsAdaptiveClamp == adaptiveClamp
+        && m_splatBottomLevelAS
+        && m_splatTopLevelAS)
+    {
+        return;
+    }
+
     UploadSplatDataIfNeeded(commandList);
 
-    std::vector<nvrhi::rt::GeometryAABB> aabbs = BuildGaussianAabbs(m_splats);
-    commandList->writeBuffer(m_splatAabbBuffer, aabbs.data(), aabbs.size() * sizeof(nvrhi::rt::GeometryAABB));
-    commandList->setBufferState(m_splatAabbBuffer, nvrhi::ResourceStates::AccelStructBuildInput);
-    commandList->commitBarriers();
-
     nvrhi::rt::GeometryDesc geometryDesc;
-    nvrhi::rt::GeometryAABBs aabbGeometry;
-    aabbGeometry.buffer = m_splatAabbBuffer;
-    aabbGeometry.offset = 0;
-    aabbGeometry.count = m_splatCount;
-    aabbGeometry.stride = sizeof(nvrhi::rt::GeometryAABB);
-    geometryDesc.setAABBs(aabbGeometry);
-    geometryDesc.flags = nvrhi::rt::GeometryFlags::NoDuplicateAnyHitInvocation;
+    m_shadowPrimitiveCountPerSplat = useAABBs ? 1u : uint32_t(kUnitIcosahedronIndices.size() / 3u);
+
+    if (useAABBs)
+    {
+        std::vector<nvrhi::rt::GeometryAABB> aabbs;
+        if (useTLASInstances)
+        {
+            aabbs.push_back({ -1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f });
+        }
+        else
+        {
+            aabbs = BuildGaussianAabbs(m_splats, splatScale, kernelDegree, adaptiveClamp);
+        }
+
+        commandList->writeBuffer(m_splatAabbBuffer, aabbs.data(), aabbs.size() * sizeof(nvrhi::rt::GeometryAABB));
+        commandList->setBufferState(m_splatAabbBuffer, nvrhi::ResourceStates::AccelStructBuildInput);
+        commandList->commitBarriers();
+
+        nvrhi::rt::GeometryAABBs aabbGeometry;
+        aabbGeometry.buffer = m_splatAabbBuffer;
+        aabbGeometry.offset = 0;
+        aabbGeometry.count = uint32_t(aabbs.size());
+        aabbGeometry.stride = sizeof(nvrhi::rt::GeometryAABB);
+        geometryDesc.setAABBs(aabbGeometry);
+        geometryDesc.flags = nvrhi::rt::GeometryFlags::NoDuplicateAnyHitInvocation;
+    }
+    else
+    {
+        std::vector<float3> vertices;
+        std::vector<uint32_t> indices;
+        if (useTLASInstances)
+        {
+            vertices.assign(kUnitIcosahedronVertices.begin(), kUnitIcosahedronVertices.end());
+            indices.assign(kUnitIcosahedronIndices.begin(), kUnitIcosahedronIndices.end());
+        }
+        else
+        {
+            vertices.reserve(size_t(m_splatCount) * kUnitIcosahedronVertices.size());
+            indices.reserve(size_t(m_splatCount) * kUnitIcosahedronIndices.size());
+            for (uint32_t splatIndex = 0; splatIndex < m_splatCount; ++splatIndex)
+            {
+                const GaussianSplatData& splat = m_splats[splatIndex];
+                const float3 center = splat.centerOpacity.xyz();
+                const float3 extent = GaussianAabbExtent(splat, splatScale, kernelDegree, adaptiveClamp);
+                const uint32_t vertexBase = uint32_t(vertices.size());
+                for (const float3& unitVertex : kUnitIcosahedronVertices)
+                    vertices.push_back(center + unitVertex * extent);
+                for (uint32_t index : kUnitIcosahedronIndices)
+                    indices.push_back(vertexBase + index);
+            }
+        }
+
+        nvrhi::BufferDesc vertexDesc;
+        vertexDesc.byteSize = uint64_t(vertices.size()) * sizeof(float3);
+        vertexDesc.structStride = sizeof(float3);
+        vertexDesc.format = nvrhi::Format::RGB32_FLOAT;
+        vertexDesc.isVertexBuffer = true;
+        vertexDesc.isAccelStructBuildInput = true;
+        vertexDesc.initialState = nvrhi::ResourceStates::AccelStructBuildInput;
+        vertexDesc.keepInitialState = true;
+        vertexDesc.debugName = "GaussianSplatIcosahedronVertexBuffer";
+        m_splatTriangleVertexBuffer = m_device->createBuffer(vertexDesc);
+
+        nvrhi::BufferDesc indexDesc;
+        indexDesc.byteSize = uint64_t(indices.size()) * sizeof(uint32_t);
+        indexDesc.format = nvrhi::Format::R32_UINT;
+        indexDesc.isIndexBuffer = true;
+        indexDesc.isAccelStructBuildInput = true;
+        indexDesc.initialState = nvrhi::ResourceStates::AccelStructBuildInput;
+        indexDesc.keepInitialState = true;
+        indexDesc.debugName = "GaussianSplatIcosahedronIndexBuffer";
+        m_splatTriangleIndexBuffer = m_device->createBuffer(indexDesc);
+
+        commandList->writeBuffer(m_splatTriangleVertexBuffer, vertices.data(), vertices.size() * sizeof(float3));
+        commandList->writeBuffer(m_splatTriangleIndexBuffer, indices.data(), indices.size() * sizeof(uint32_t));
+        commandList->setBufferState(m_splatTriangleVertexBuffer, nvrhi::ResourceStates::AccelStructBuildInput);
+        commandList->setBufferState(m_splatTriangleIndexBuffer, nvrhi::ResourceStates::AccelStructBuildInput);
+        commandList->commitBarriers();
+
+        nvrhi::rt::GeometryTriangles triangles;
+        triangles.vertexBuffer = m_splatTriangleVertexBuffer;
+        triangles.indexBuffer = m_splatTriangleIndexBuffer;
+        triangles.vertexFormat = nvrhi::Format::RGB32_FLOAT;
+        triangles.indexFormat = nvrhi::Format::R32_UINT;
+        triangles.vertexStride = sizeof(float3);
+        triangles.vertexCount = uint32_t(vertices.size());
+        triangles.indexCount = uint32_t(indices.size());
+        geometryDesc.setTriangles(triangles);
+        geometryDesc.flags = nvrhi::rt::GeometryFlags::None;
+    }
 
     nvrhi::rt::AccelStructDesc blasDesc;
     blasDesc.isTopLevel = false;
-    blasDesc.debugName = "GaussianSplatAabbBLAS";
-    blasDesc.buildFlags = nvrhi::rt::AccelStructBuildFlags::PreferFastTrace | nvrhi::rt::AccelStructBuildFlags::AllowUpdate;
+    blasDesc.debugName = useAABBs ? "GaussianSplatAabbBLAS" : "GaussianSplatIcosahedronBLAS";
+    blasDesc.buildFlags = nvrhi::rt::AccelStructBuildFlags::PreferFastTrace
+        | (allowBlasCompaction ? nvrhi::rt::AccelStructBuildFlags::AllowCompaction : nvrhi::rt::AccelStructBuildFlags::AllowUpdate);
     blasDesc.bottomLevelGeometries.push_back(geometryDesc);
 
     m_splatBottomLevelAS = m_device->createAccelStruct(blasDesc);
@@ -931,25 +1196,50 @@ void GaussianSplatPass::BuildAccelerationStructures(nvrhi::ICommandList* command
     nvrhi::rt::AccelStructDesc tlasDesc;
     tlasDesc.isTopLevel = true;
     tlasDesc.debugName = "GaussianSplatTLAS";
-    tlasDesc.topLevelMaxInstances = 1;
+    tlasDesc.topLevelMaxInstances = useTLASInstances ? m_splatCount : 1;
     tlasDesc.buildFlags = nvrhi::rt::AccelStructBuildFlags::PreferFastTrace | nvrhi::rt::AccelStructBuildFlags::AllowUpdate;
     m_splatTopLevelAS = m_device->createAccelStruct(tlasDesc);
 
-    nvrhi::rt::InstanceDesc instanceDesc = {};
-    instanceDesc.bottomLevelAS = m_splatBottomLevelAS;
-    instanceDesc.instanceMask = 0xff;
-    instanceDesc.instanceID = 0;
-    instanceDesc.instanceContributionToHitGroupIndex = 0;
-    instanceDesc.flags = nvrhi::rt::InstanceFlags::ForceNonOpaque;
-    std::memcpy(instanceDesc.transform, nvrhi::rt::c_IdentityTransform, sizeof(nvrhi::rt::AffineTransform));
+    std::vector<nvrhi::rt::InstanceDesc> instances;
+    instances.resize(useTLASInstances ? m_splatCount : 1u);
+    if (useTLASInstances)
+    {
+        for (uint32_t splatIndex = 0; splatIndex < m_splatCount; ++splatIndex)
+        {
+            const GaussianSplatData& splat = m_splats[splatIndex];
+            nvrhi::rt::InstanceDesc& instanceDesc = instances[splatIndex];
+            instanceDesc.bottomLevelAS = m_splatBottomLevelAS;
+            instanceDesc.instanceMask = 0xff;
+            instanceDesc.instanceID = splatIndex;
+            instanceDesc.instanceContributionToHitGroupIndex = 0;
+            instanceDesc.flags = nvrhi::rt::InstanceFlags::ForceNonOpaque;
+            FillScaleTranslateTransform(instanceDesc.transform, splat.centerOpacity.xyz(), GaussianAabbExtent(splat, splatScale, kernelDegree, adaptiveClamp));
+        }
+    }
+    else
+    {
+        nvrhi::rt::InstanceDesc& instanceDesc = instances[0];
+        instanceDesc.bottomLevelAS = m_splatBottomLevelAS;
+        instanceDesc.instanceMask = 0xff;
+        instanceDesc.instanceID = 0;
+        instanceDesc.instanceContributionToHitGroupIndex = 0;
+        instanceDesc.flags = nvrhi::rt::InstanceFlags::ForceNonOpaque;
+        std::memcpy(instanceDesc.transform, nvrhi::rt::c_IdentityTransform, sizeof(nvrhi::rt::AffineTransform));
+    }
 
     commandList->buildTopLevelAccelStruct(
         m_splatTopLevelAS,
-        &instanceDesc,
-        1,
+        instances.data(),
+        instances.size(),
         nvrhi::rt::AccelStructBuildFlags::PreferFastTrace | nvrhi::rt::AccelStructBuildFlags::AllowUpdate);
 
     m_accelStructBuildPending = false;
+    m_lastBlasCompaction = allowBlasCompaction;
+    m_lastAsUseAABBs = useAABBs;
+    m_lastAsUseTLASInstances = useTLASInstances;
+    m_lastAsSplatScale = splatScale;
+    m_lastAsKernelDegree = kernelDegree;
+    m_lastAsAdaptiveClamp = adaptiveClamp;
 }
 
 void GaussianSplatPass::ReleaseAccelerationStructures()
@@ -961,7 +1251,7 @@ void GaussianSplatPass::ReleaseAccelerationStructures()
 
 void GaussianSplatPass::CreateBindingSets(const RenderTargets& renderTargets, nvrhi::rt::IAccelStruct* meshTopLevelAS)
 {
-    if (!m_splatBuffer || !m_shBuffer || !m_indexBuffer || !m_sortKeyBuffer)
+    if (!m_splatBuffer || !m_colorBuffer || !m_shBuffer || !m_indexBuffer || !m_sortKeyBuffer)
         return;
 
     nvrhi::BindingSetDesc rasterRenderBindingSetDesc;
@@ -969,15 +1259,16 @@ void GaussianSplatPass::CreateBindingSets(const RenderTargets& renderTargets, nv
         nvrhi::BindingSetItem::ConstantBuffer(0, m_constantBuffer),
         nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_splatBuffer),
         nvrhi::BindingSetItem::TypedBuffer_SRV(1, m_indexBuffer, nvrhi::Format::R32_UINT),
-        nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_shBuffer),
-        nvrhi::BindingSetItem::Texture_SRV(3, renderTargets.Depth)
+        nvrhi::BindingSetItem::RawBuffer_SRV(2, m_colorBuffer),
+        nvrhi::BindingSetItem::RawBuffer_SRV(3, m_shBuffer),
+        nvrhi::BindingSetItem::Texture_SRV(4, renderTargets.Depth)
     };
     m_rasterRenderBindingSet = m_device->createBindingSet(rasterRenderBindingSetDesc, m_rasterRenderBindingLayout);
 
     if (meshTopLevelAS != nullptr)
     {
         nvrhi::BindingSetDesc hybridRenderBindingSetDesc = rasterRenderBindingSetDesc;
-        hybridRenderBindingSetDesc.bindings.push_back(nvrhi::BindingSetItem::RayTracingAccelStruct(4, meshTopLevelAS));
+        hybridRenderBindingSetDesc.bindings.push_back(nvrhi::BindingSetItem::RayTracingAccelStruct(5, meshTopLevelAS));
         m_hybridRenderBindingSet = m_device->createBindingSet(hybridRenderBindingSetDesc, m_hybridRenderBindingLayout);
         m_hybridRenderMeshTopLevelAS = meshTopLevelAS;
     }
@@ -996,10 +1287,71 @@ void GaussianSplatPass::CreateBindingSets(const RenderTargets& renderTargets, nv
     m_sortKeyBindingSet = m_device->createBindingSet(sortKeyBindingSetDesc, m_sortKeyBindingLayout);
 }
 
+void GaussianSplatPass::CreateStochasticFramebuffer(const RenderTargets& renderTargets)
+{
+    if (!renderTargets.ProcessedOutputColor)
+        return;
+
+    const nvrhi::TextureDesc& colorDesc = renderTargets.ProcessedOutputColor->getDesc();
+    bool depthMatches = false;
+    if (m_stochasticDepthBuffer)
+    {
+        const nvrhi::TextureDesc& depthDesc = m_stochasticDepthBuffer->getDesc();
+        depthMatches = depthDesc.width == colorDesc.width
+            && depthDesc.height == colorDesc.height
+            && depthDesc.sampleCount == colorDesc.sampleCount
+            && depthDesc.sampleQuality == colorDesc.sampleQuality;
+    }
+
+    if (!depthMatches)
+    {
+        const std::array<nvrhi::Format, 4> depthFormats = {
+            nvrhi::Format::D32,
+            nvrhi::Format::D24S8,
+            nvrhi::Format::D32S8,
+            nvrhi::Format::D16
+        };
+        const nvrhi::FormatSupport depthFeatures =
+            nvrhi::FormatSupport::Texture |
+            nvrhi::FormatSupport::DepthStencil;
+
+        nvrhi::TextureDesc depthDesc;
+        depthDesc.width = colorDesc.width;
+        depthDesc.height = colorDesc.height;
+        depthDesc.sampleCount = colorDesc.sampleCount;
+        depthDesc.sampleQuality = colorDesc.sampleQuality;
+        depthDesc.dimension = colorDesc.dimension;
+        depthDesc.mipLevels = 1;
+        depthDesc.format = nvrhi::utils::ChooseFormat(m_device, depthFeatures, depthFormats.data(), depthFormats.size());
+        depthDesc.isTypeless = true;
+        depthDesc.isRenderTarget = true;
+        depthDesc.isUAV = false;
+        depthDesc.useClearValue = true;
+        depthDesc.clearValue = nvrhi::Color(0.0f);
+        depthDesc.initialState = nvrhi::ResourceStates::DepthWrite;
+        depthDesc.keepInitialState = true;
+        depthDesc.debugName = "GaussianSplatStochasticDepth";
+        m_stochasticDepthBuffer = m_device->createTexture(depthDesc);
+    }
+
+    const bool framebufferMatches = m_stochasticFramebuffer
+        && !m_stochasticFramebuffer->RenderTargets.empty()
+        && m_stochasticFramebuffer->RenderTargets[0].Get() == renderTargets.ProcessedOutputColor.Get()
+        && m_stochasticFramebuffer->DepthTarget.Get() == m_stochasticDepthBuffer.Get();
+    if (!framebufferMatches)
+    {
+        m_stochasticFramebuffer = std::make_shared<donut::engine::FramebufferFactory>(m_device);
+        m_stochasticFramebuffer->RenderTargets = { renderTargets.ProcessedOutputColor };
+        m_stochasticFramebuffer->DepthTarget = m_stochasticDepthBuffer;
+    }
+}
+
 void GaussianSplatPass::CreatePipeline(const RenderTargets& renderTargets)
 {
     if (!HasSplats())
         return;
+
+    CreateStochasticFramebuffer(renderTargets);
 
     std::vector<donut::engine::ShaderMacro> rasterShadowMacros = {
         donut::engine::ShaderMacro({ "GAUSSIAN_SPLAT_HYBRID_SHADOWS", "0" })
@@ -1047,6 +1399,30 @@ void GaussianSplatPass::CreatePipeline(const RenderTargets& renderTargets)
         pipelineDesc,
         renderTargets.ProcessedOutputFramebuffer->GetFramebuffer(nvrhi::AllSubresources));
 
+    if (m_stochasticFramebuffer)
+    {
+        nvrhi::BlendState::RenderTarget opaqueBlend;
+        opaqueBlend.blendEnable = false;
+        pipelineDesc.renderState.blendState.targets[0] = opaqueBlend;
+        pipelineDesc.renderState.depthStencilState.depthTestEnable = true;
+        pipelineDesc.renderState.depthStencilState.depthWriteEnable = true;
+        pipelineDesc.renderState.depthStencilState.depthFunc = nvrhi::ComparisonFunc::GreaterOrEqual;
+
+        pipelineDesc.bindingLayouts = { m_rasterRenderBindingLayout };
+        pipelineDesc.VS = m_rasterVertexShader;
+        pipelineDesc.PS = m_rasterPixelShader;
+        m_stochasticRasterRenderPipeline = m_device->createGraphicsPipeline(
+            pipelineDesc,
+            m_stochasticFramebuffer->GetFramebuffer(nvrhi::AllSubresources));
+
+        pipelineDesc.bindingLayouts = { m_hybridRenderBindingLayout };
+        pipelineDesc.VS = m_hybridVertexShader;
+        pipelineDesc.PS = m_hybridPixelShader;
+        m_stochasticHybridRenderPipeline = m_device->createGraphicsPipeline(
+            pipelineDesc,
+            m_stochasticFramebuffer->GetFramebuffer(nvrhi::AllSubresources));
+    }
+
     nvrhi::ComputePipelineDesc computePipelineDesc;
     computePipelineDesc.bindingLayouts = { m_sortKeyBindingLayout };
     computePipelineDesc.CS = m_sortKeyShader;
@@ -1063,16 +1439,122 @@ void GaussianSplatPass::UploadSplatDataIfNeeded(nvrhi::ICommandList* commandList
         return;
 
     commandList->writeBuffer(m_splatBuffer, m_splats.data(), m_splats.size() * sizeof(GaussianSplatData));
-    commandList->writeBuffer(m_shBuffer, m_shCoefficients.data(), m_shCoefficients.size() * sizeof(float4));
     m_splatUploadPending = false;
 }
 
-void GaussianSplatPass::SortSplats(nvrhi::ICommandList* commandList, const GaussianSplatConstants& constants)
+void GaussianSplatPass::UploadFormatDataIfNeeded(
+    nvrhi::ICommandList* commandList,
+    GaussianSplatStorageFormat shFormat,
+    GaussianSplatStorageFormat rgbaFormat)
 {
+    if (!HasSplats())
+        return;
+
+    const bool formatChanged = !m_colorBuffer || !m_shBuffer || shFormat != m_currentShFormat || rgbaFormat != m_currentRgbaFormat;
+    if (formatChanged)
+    {
+        m_currentShFormat = shFormat;
+        m_currentRgbaFormat = rgbaFormat;
+        m_formatUploadPending = true;
+
+        const uint64_t colorByteSize = AlignRawBufferSize(uint64_t(m_splatCount) * 4u * FormatElementSize(rgbaFormat));
+        nvrhi::BufferDesc colorDesc;
+        colorDesc.byteSize = colorByteSize;
+        colorDesc.canHaveRawViews = true;
+        colorDesc.debugName = "GaussianSplatRGBAFormatBuffer";
+        colorDesc.initialState = nvrhi::ResourceStates::ShaderResource;
+        colorDesc.keepInitialState = true;
+        m_colorBuffer = m_device->createBuffer(colorDesc);
+
+        constexpr uint32_t kShScalarStride = 45;
+        const uint64_t shByteSize = AlignRawBufferSize(uint64_t(m_splatCount) * kShScalarStride * FormatElementSize(shFormat));
+        nvrhi::BufferDesc shDesc;
+        shDesc.byteSize = shByteSize;
+        shDesc.canHaveRawViews = true;
+        shDesc.debugName = "GaussianSplatSHFormatBuffer";
+        shDesc.initialState = nvrhi::ResourceStates::ShaderResource;
+        shDesc.keepInitialState = true;
+        m_shBuffer = m_device->createBuffer(shDesc);
+
+        m_rasterRenderBindingSet = nullptr;
+        m_hybridRenderBindingSet = nullptr;
+        m_hybridRenderMeshTopLevelAS = nullptr;
+    }
+
+    if (!m_formatUploadPending)
+        return;
+
+    m_packedColorOpacity.assign(size_t(AlignRawBufferSize(uint64_t(m_splatCount) * 4u * FormatElementSize(rgbaFormat))), 0u);
+    for (uint32_t splatIndex = 0; splatIndex < m_splatCount; ++splatIndex)
+    {
+        const float4 color = splatIndex < m_colorOpacity.size()
+            ? m_colorOpacity[splatIndex]
+            : float4(1.0f, 1.0f, 1.0f, 1.0f);
+        const uint64_t base = uint64_t(splatIndex) * 4u;
+        StoreFormattedScalar(m_packedColorOpacity, base + 0u, rgbaFormat, color.x, false);
+        StoreFormattedScalar(m_packedColorOpacity, base + 1u, rgbaFormat, color.y, false);
+        StoreFormattedScalar(m_packedColorOpacity, base + 2u, rgbaFormat, color.z, false);
+        StoreFormattedScalar(m_packedColorOpacity, base + 3u, rgbaFormat, color.w, false);
+    }
+
+    constexpr uint32_t kShScalarStride = 45;
+    m_packedShCoefficients.assign(size_t(AlignRawBufferSize(uint64_t(m_splatCount) * kShScalarStride * FormatElementSize(shFormat))), 0u);
+    for (uint32_t splatIndex = 0; splatIndex < m_splatCount; ++splatIndex)
+    {
+        for (uint32_t scalarIndex = 0; scalarIndex < kShScalarStride; ++scalarIndex)
+        {
+            StoreFormattedScalar(
+                m_packedShCoefficients,
+                uint64_t(splatIndex) * kShScalarStride + scalarIndex,
+                shFormat,
+                ShCoefficientAt(m_shCoefficients, splatIndex, scalarIndex),
+                true);
+        }
+    }
+
+    commandList->writeBuffer(m_colorBuffer, m_packedColorOpacity.data(), m_packedColorOpacity.size());
+    commandList->writeBuffer(m_shBuffer, m_packedShCoefficients.data(), m_packedShCoefficients.size());
+    m_formatUploadPending = false;
+}
+
+void GaussianSplatPass::UploadStochasticSplatIndices(nvrhi::ICommandList* commandList)
+{
+    if (!m_indexBuffer || m_splatCount == 0)
+        return;
+
+    if (m_randomIndices.size() != m_splatCount)
+    {
+        m_randomIndices.resize(m_splatCount);
+        std::iota(m_randomIndices.begin(), m_randomIndices.end(), 0u);
+        std::mt19937 rng(0x3d05da7au);
+        std::shuffle(m_randomIndices.begin(), m_randomIndices.end(), rng);
+        m_randomIndexUploadPending = true;
+    }
+
+    if (!m_randomIndexUploadPending)
+        return;
+
+    commandList->writeBuffer(m_indexBuffer, m_randomIndices.data(), m_randomIndices.size() * sizeof(uint32_t));
+    m_randomIndexUploadPending = false;
+}
+
+void GaussianSplatPass::UpdateSplatIndices(nvrhi::ICommandList* commandList, const GaussianSplatConstants& constants, GaussianSplatSortMode sortMode)
+{
+    if (sortMode != m_cachedSortMode && sortMode == GaussianSplatSortMode::StochasticSplats)
+        m_randomIndexUploadPending = true;
+
+    if (sortMode == GaussianSplatSortMode::StochasticSplats)
+    {
+        UploadStochasticSplatIndices(commandList);
+        m_cachedSortMode = sortMode;
+        m_sortCacheValid = false;
+        return;
+    }
+
     if (!m_gpuSort || !m_sortKeyBindingSet || !m_sortKeyPipeline || !m_sortControlBuffer)
         return;
 
-    if (CanReuseSort(constants))
+    if (m_cachedSortMode == sortMode && CanReuseSort(constants))
         return;
 
     {
@@ -1098,6 +1580,7 @@ void GaussianSplatPass::SortSplats(nvrhi::ICommandList* commandList, const Gauss
     m_cachedSortWorldToClipNoOffset = constants.view.matWorldToClipNoOffset;
     m_cachedSortObjectToWorld = constants.objectToWorld;
     m_cachedSortSplatCount = m_splatCount;
+    m_cachedSortMode = sortMode;
     m_sortCacheValid = true;
 }
 
@@ -1108,12 +1591,22 @@ void GaussianSplatPass::Render(
     const RenderTargets& renderTargets,
     const GaussianSplatRenderSettings& settings)
 {
-    if (!settings.enabled || !HasSplats() || !m_rasterRenderPipeline || !m_gpuSort)
+    if (!settings.enabled || !HasSplats())
+        return;
+
+    if (settings.sortingMode == GaussianSplatSortMode::GpuSort && !m_gpuSort)
+        return;
+
+    const bool stochasticSplats = settings.sortingMode == GaussianSplatSortMode::StochasticSplats;
+    if (stochasticSplats && (!m_stochasticFramebuffer || !m_stochasticRasterRenderPipeline))
+        return;
+    if (!stochasticSplats && !m_rasterRenderPipeline)
         return;
 
     commandList->beginMarker("GaussianSplats");
 
     UploadSplatDataIfNeeded(commandList);
+    UploadFormatDataIfNeeded(commandList, settings.shFormat, settings.rgbaFormat);
 
     const bool useHybridShadows = settings.shadowsEnabled && meshTopLevelAS != nullptr && m_hybridRenderPipeline;
 
@@ -1147,22 +1640,56 @@ void GaussianSplatPass::Render(
     if (length(shadowDir) < 1e-4f)
         shadowDir = float3(0.0f, 1.0f, 0.0f);
     shadowDir = normalize(shadowDir);
-    constants.shadowDirectionToLight = float4(shadowDir.x, shadowDir.y, shadowDir.z, 0.0f);
+    constants.shadowDirectionToLight = float4(shadowDir.x, shadowDir.y, shadowDir.z, settings.shadowRayOffset);
     constants.shadowStrength = settings.shadowStrength;
     constants.shadowRayTMax = settings.shadowRayTMax;
+    constants.shadowMode = useHybridShadows ? settings.shadowMode : GAUSSIAN_SPLAT_SHADOWS_DISABLED;
+    constants.shadowSoftSampleCount = std::clamp(settings.shadowSoftSampleCount, 1u, 16u);
+    constants.shadowSoftRadius = settings.shadowSoftRadius;
+    constants.shadowFrameIndex = settings.shadowFrameIndex;
+    constants.sortMode = uint32_t(settings.sortingMode);
+    constants.frustumCulling = uint32_t(settings.frustumCulling);
+    constants.frustumDilation = settings.frustumDilation;
+    constants.minPixelCoverage = settings.minPixelCoverage;
+    constants.screenSizeCulling = settings.screenSizeCulling ? 1u : 0u;
+    constants.mipSplattingAntialiasing = settings.mipSplattingAntialiasing ? 1u : 0u;
+    constants.shFormat = uint32_t(settings.shFormat);
+    constants.rgbaFormat = uint32_t(settings.rgbaFormat);
+    constants.projectionMethod = uint32_t(settings.projectionMethod);
+    constants.stochasticFrameIndex = settings.stochasticFrameIndex;
     commandList->writeBuffer(m_constantBuffer, &constants, sizeof(constants));
 
-    SortSplats(commandList, constants);
+    UpdateSplatIndices(commandList, constants, settings.sortingMode);
+
+    nvrhi::GraphicsPipelineHandle renderPipeline = useHybridShadows
+        ? (stochasticSplats ? m_stochasticHybridRenderPipeline : m_hybridRenderPipeline)
+        : (stochasticSplats ? m_stochasticRasterRenderPipeline : m_rasterRenderPipeline);
+    nvrhi::IFramebuffer* framebuffer = stochasticSplats
+        ? m_stochasticFramebuffer->GetFramebuffer(nvrhi::AllSubresources)
+        : renderTargets.ProcessedOutputFramebuffer->GetFramebuffer(nvrhi::AllSubresources);
+    if (!renderPipeline || !framebuffer)
+    {
+        commandList->endMarker();
+        return;
+    }
 
     commandList->setBufferState(m_indexBuffer, nvrhi::ResourceStates::ShaderResource);
     commandList->setTextureState(renderTargets.Depth, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);
     commandList->setTextureState(renderTargets.ProcessedOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::RenderTarget);
+    if (stochasticSplats)
+        commandList->setTextureState(m_stochasticDepthBuffer, nvrhi::AllSubresources, nvrhi::ResourceStates::DepthWrite);
     commandList->commitBarriers();
 
+    if (stochasticSplats)
+    {
+        const nvrhi::FormatInfo& depthFormatInfo = nvrhi::getFormatInfo(m_stochasticDepthBuffer->getDesc().format);
+        commandList->clearDepthStencilTexture(m_stochasticDepthBuffer, nvrhi::AllSubresources, true, 0.0f, depthFormatInfo.hasStencil, 0);
+    }
+
     nvrhi::GraphicsState state;
-    state.pipeline = useHybridShadows ? m_hybridRenderPipeline : m_rasterRenderPipeline;
+    state.pipeline = renderPipeline;
     state.bindings = { renderBindingSet };
-    state.framebuffer = renderTargets.ProcessedOutputFramebuffer->GetFramebuffer(nvrhi::AllSubresources);
+    state.framebuffer = framebuffer;
     state.viewport = view.GetViewportState();
     commandList->setGraphicsState(state);
 

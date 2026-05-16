@@ -322,11 +322,42 @@ struct SampleUIData
     bool                                EnableGaussianSplats = true;
     bool                                GaussianSplatDepthTest = true;
     bool                                GaussianSplatShadows = false;
+    int                                 GaussianSplatShadowsMode = 0; // 0 = off, 1 = hard, 2 = soft
+    int                                 GaussianSplatSortingMode = 0; // 0 = GPU sort, 1 = stochastic splats
+    int                                 GaussianSplatTemporalSamplingCount = 200;
+    int                                 GaussianSplatSHFormat = 2;
+    int                                 GaussianSplatRGBAFormat = 2;
+    bool                                GaussianSplatUseAABBs = false;
+    bool                                GaussianSplatUseTLASInstances = true;
+    bool                                GaussianSplatBlasCompaction = true;
+    int                                 GaussianSplatRtxKernelDegree = 2;
+    bool                                GaussianSplatRtxAdaptiveClamp = true;
+    float                               GaussianSplatRtxAlphaClamp = 0.99f;
+    float                               GaussianSplatRtxMinimumTransmittance = 0.01f;
+    int                                 GaussianSplatRtxTraceStrategy = 0;
+    int                                 GaussianSplatRtxParticleSamplesPerPass = 18;
+    int                                 GaussianSplatRtxMaximumPassCount = 200;
+    float                               GaussianSplatRtxParticleShadowOffset = 0.20f;
+    float                               GaussianSplatRtxParticleShadowThreshold = 0.80f;
+    float                               GaussianSplatRtxColoredShadowStrength = 0.0f;
+    float                               GaussianSplatRtxMeshCompositeThreshold = 0.0f;
+    float                               GaussianSplatRtxDepthIsoThreshold = 0.70f;
+    bool                                GaussianSplatMipAntialiasing = false;
+    bool                                GaussianSplatQuantizeNormals = true;
+    int                                 GaussianSplatFTBSyncMode = 0; // 0 = Disabled, 1 = Interlock
+    float                               GaussianSplatDepthIsoThreshold = 0.70f;
+    bool                                GaussianSplatFragmentShaderBarycentric = false;
+    int                                 GaussianSplatFrustumCulling = 2; // 0 = Disabled, 1 = At distance stage, 2 = At raster stage
+    float                               GaussianSplatFrustumDilation = 0.20f;
+    bool                                GaussianSplatScreenSizeCulling = false;
+    float                               GaussianSplatMinPixelCoverage = 1.0f;
     float                               GaussianSplatScale = 1.0f;
     float                               GaussianSplatAlphaScale = 1.0f;
     float                               GaussianSplatBrightness = 1.0f;
     float                               GaussianSplatAlphaCullThreshold = 1.0f / 255.0f;
     float                               GaussianSplatShadowStrength = 0.75f;
+    float                               GaussianSplatShadowSoftRadius = 0.08f;
+    int                                 GaussianSplatShadowSoftSampleCount = 1;
     uint32_t                            GaussianSplatCount = 0;
     std::string                         GaussianSplatFileName;
     bool                                SelectedGaussianSplat = false;

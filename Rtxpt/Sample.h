@@ -242,6 +242,7 @@ private:
     void                                    PostProcessPreToneMapping(nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView);
     void                                    PostProcessPostToneMapping(nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView);
     void                                    RenderGaussianSplats();
+    void                                    AccumulateGaussianSplats(const donut::engine::IView& splatView, int temporalSamplingCount);
 
 private:
     std::shared_ptr<donut::vfs::RootFileSystem> m_RootFS;
@@ -292,6 +293,11 @@ private:
     // utility
     std::shared_ptr<class GPUSort>              m_gpuSort;
     std::unique_ptr<GaussianSplatPass>          m_gaussianSplatPass;
+    nvrhi::TextureHandle                        m_gaussianSplatCurrentColor;
+    nvrhi::TextureHandle                        m_gaussianSplatAccumulatedColor;
+    std::unique_ptr<AccumulationPass>           m_gaussianSplatAccumulationPass;
+    int                                         m_gaussianSplatTemporalSampleIndex = 0;
+    bool                                        m_gaussianSplatTemporalReset = true;
 
     // raytracing basics
     nvrhi::rt::AccelStructHandle                m_topLevelAS;
