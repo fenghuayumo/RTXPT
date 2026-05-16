@@ -70,7 +70,7 @@ struct VertexOutput
 };
 
 static const float kSqrt8 = 2.8284271247461903f;
-static const float kFragmentAlphaCullThreshold = 1.0f / 16.0f;
+static const float kFragmentAlphaCullThreshold = 1.0f / 255.0f;
 static const uint kGaussianSplatFormatFloat32 = 0;
 static const uint kGaussianSplatFormatFloat16 = 1;
 static const uint kGaussianSplatFormatUint8 = 2;
