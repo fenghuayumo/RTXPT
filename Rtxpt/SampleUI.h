@@ -330,14 +330,14 @@ struct SampleUIData
     bool                                GaussianSplatUseAABBs = false;
     bool                                GaussianSplatUseTLASInstances = true;
     bool                                GaussianSplatBlasCompaction = true;
-    int                                 GaussianSplatRtxKernelDegree = 2;
+    int                                 GaussianSplatRtxKernelDegree = 0;
     bool                                GaussianSplatRtxAdaptiveClamp = true;
     float                               GaussianSplatRtxAlphaClamp = 0.99f;
     float                               GaussianSplatRtxMinimumTransmittance = 0.01f;
     int                                 GaussianSplatRtxTraceStrategy = 0;
     int                                 GaussianSplatRtxParticleSamplesPerPass = 18;
     int                                 GaussianSplatRtxMaximumPassCount = 200;
-    float                               GaussianSplatRtxParticleShadowOffset = 0.20f;
+    float                               GaussianSplatRtxParticleShadowOffset = 0.01f;
     float                               GaussianSplatRtxParticleShadowThreshold = 0.80f;
     float                               GaussianSplatRtxColoredShadowStrength = 0.0f;
     float                               GaussianSplatRtxMeshCompositeThreshold = 0.0f;
