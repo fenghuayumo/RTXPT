@@ -74,10 +74,12 @@ struct SampleConstants
     uint GaussianSplatShadowFrameIndex;
     float GaussianSplatShadowRayOffset;
 
-    float GaussianSplatShadowAlphaClamp;
+    float GaussianSplatShadowAlphaScale;
     float GaussianSplatShadowKernelMinResponse;
     uint GaussianSplatShadowKernelDegree;
     uint GaussianSplatShadowAdaptiveClamp;
+
+    float4x4 GaussianSplatShadowWorldToObject;
 };
 
 // Used in a couple of places like multipass postprocess where you want to keep SampleConstants the same for all passes, but send just a few additional per-pass parameters 

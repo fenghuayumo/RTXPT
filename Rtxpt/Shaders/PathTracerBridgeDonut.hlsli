@@ -1042,7 +1042,7 @@ bool Bridge::traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pa
             ray,
             g_Const.GaussianSplatShadowScale,
             g_Const.GaussianSplatShadowAlphaThreshold,
-            g_Const.GaussianSplatShadowAlphaClamp,
+            g_Const.GaussianSplatShadowAlphaScale,
             g_Const.GaussianSplatShadowKernelMinResponse,
             g_Const.GaussianSplatShadowKernelDegree,
             g_Const.GaussianSplatShadowUseTLASInstances,
@@ -1050,6 +1050,7 @@ bool Bridge::traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pa
             g_Const.GaussianSplatShadowMode,
             g_Const.GaussianSplatShadowSoftRadius,
             g_Const.GaussianSplatShadowRayOffset,
+            g_Const.GaussianSplatShadowWorldToObject,
             gaussianShadowSeed);
     }
 

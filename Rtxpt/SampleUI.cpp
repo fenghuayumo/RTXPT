@@ -170,37 +170,6 @@ namespace
         return changed;
     }
 
-    bool GaussianSplatRtxTraceStrategyCombo(SampleUIData& ui)
-    {
-        const bool changed = ImGui::Combo("Trace strategy", &ui.GaussianSplatRtxTraceStrategy,
-            "All pass\0Stochastic pass\0Stochastic any-hit\0\0");
-        ui.GaussianSplatRtxTraceStrategy = dm::clamp(ui.GaussianSplatRtxTraceStrategy, 0, 2);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Ray tracing strategy for Gaussian particle hits.");
-        return changed;
-    }
-
-    bool GaussianSplatRtxParticleSamplesCombo(const char* label, int* value)
-    {
-        static constexpr int values[] = { 128, 64, 32, 20, 18, 16, 12, 8, 4, 2, 1 };
-        static const char* labels[] = { "128", "64", "32", "20", "18", "16", "12", "8", "4", "2", "1" };
-
-        int currentIndex = 4;
-        for (int i = 0; i < int(sizeof(values) / sizeof(values[0])); ++i)
-        {
-            if (*value == values[i])
-            {
-                currentIndex = i;
-                break;
-            }
-        }
-
-        const bool changed = ImGui::Combo(label, &currentIndex, labels, int(sizeof(labels) / sizeof(labels[0])));
-        if (changed)
-            *value = values[currentIndex];
-        return changed;
-    }
-
     bool IsMeshInstanceNode(donut::engine::SceneGraphNode* node)
     {
         return node != nullptr && std::dynamic_pointer_cast<donut::engine::MeshInstance>(node->GetLeaf()) != nullptr;
@@ -893,9 +862,6 @@ void SampleUI::buildUI(void)
                         m_ui.ResetAccumulation = true;
                     }
 
-                    RESET_ON_CHANGE(ImGui::DragFloat("Alpha clamp", &m_ui.GaussianSplatRtxAlphaClamp, 0.01f, 0.0f, 3.0f, "%.2f"));
-                    RESET_ON_CHANGE(ImGui::DragFloat("Minimum transmittance", &m_ui.GaussianSplatRtxMinimumTransmittance, 0.01f, 0.0f, 1.0f, "%.2f"));
-                    RESET_ON_CHANGE(GaussianSplatRtxTraceStrategyCombo(m_ui));
                     if (ResolveGaussianSplatShadowMode(m_ui) == GAUSSIAN_SPLAT_SHADOWS_SOFT)
                     {
                         RESET_ON_CHANGE(ImGui::DragFloat("Soft shadow radius", &m_ui.GaussianSplatShadowSoftRadius, 0.01f, 0.0f, 0.5f, "%.2f"));
@@ -903,30 +869,7 @@ void SampleUI::buildUI(void)
                         m_ui.GaussianSplatShadowSoftSampleCount = dm::clamp(m_ui.GaussianSplatShadowSoftSampleCount, 1, 16);
                     }
 
-                    const bool stochasticAnyHit = m_ui.GaussianSplatRtxTraceStrategy == 2;
-                    int displaySpp = stochasticAnyHit ? 1 : m_ui.GaussianSplatRtxParticleSamplesPerPass;
-                    ImGui::BeginDisabled(stochasticAnyHit);
-                    if (GaussianSplatRtxParticleSamplesCombo("Particle samples per pass", &displaySpp))
-                    {
-                        m_ui.GaussianSplatRtxParticleSamplesPerPass = displaySpp;
-                        m_ui.ResetAccumulation = true;
-                    }
-                    ImGui::EndDisabled();
-                    m_ui.GaussianSplatRtxParticleSamplesPerPass = dm::clamp(m_ui.GaussianSplatRtxParticleSamplesPerPass, 1, 128);
-
-                    RESET_ON_CHANGE(ImGui::InputInt("Maximum pass count", &m_ui.GaussianSplatRtxMaximumPassCount, 1, 100));
-                    m_ui.GaussianSplatRtxMaximumPassCount = dm::clamp(m_ui.GaussianSplatRtxMaximumPassCount, 1, 1000);
-
-                    int maximumAnyHitPerPixel = (stochasticAnyHit ? 1 : m_ui.GaussianSplatRtxParticleSamplesPerPass) * m_ui.GaussianSplatRtxMaximumPassCount;
-                    ImGui::BeginDisabled();
-                    ImGui::InputInt("Maximum anyhit/pixel", &maximumAnyHitPerPixel);
-                    ImGui::EndDisabled();
-
-                    RESET_ON_CHANGE(ImGui::DragFloat("Particle shadow offset", &m_ui.GaussianSplatRtxParticleShadowOffset, 0.01f, 0.0f, 1.0f, "%.2f"));
-                    RESET_ON_CHANGE(ImGui::DragFloat("Particle shadow threshold", &m_ui.GaussianSplatRtxParticleShadowThreshold, 0.01f, 0.0f, 0.99f, "%.2f"));
-                    RESET_ON_CHANGE(ImGui::DragFloat("Colored shadow strength", &m_ui.GaussianSplatRtxColoredShadowStrength, 0.01f, 0.0f, 5.0f, "%.2f"));
-                    RESET_ON_CHANGE(ImGui::DragFloat("Mesh composite threshold", &m_ui.GaussianSplatRtxMeshCompositeThreshold, 0.01f, 0.0f, 1.0f, "%.2f"));
-                    RESET_ON_CHANGE(ImGui::DragFloat("Depth Iso Threshold", &m_ui.GaussianSplatRtxDepthIsoThreshold, 0.01f, 0.0f, 1.0f, "%.2f"));
+                    RESET_ON_CHANGE(ImGui::DragFloat("Ray offset", &m_ui.GaussianSplatRtxParticleShadowOffset, 0.01f, 0.0f, 1.0f, "%.2f"));
                 }
             }
 

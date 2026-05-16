@@ -69,6 +69,14 @@ RayDesc HybridGaussian_JitterShadowRay(RayDesc ray, float softRadius, uint seed)
     return jitteredRay;
 }
 
+RayDesc HybridGaussian_TransformRay(RayDesc ray, float4x4 transform)
+{
+    RayDesc transformedRay = ray;
+    transformedRay.Origin = mul(float4(ray.Origin, 1.0f), transform).xyz;
+    transformedRay.Direction = mul(float4(ray.Direction, 0.0f), transform).xyz;
+    return transformedRay;
+}
+
 float3x3 HybridGaussian_LoadCovariance(GaussianSplatData splat, float splatScale)
 {
     float scale2 = splatScale * splatScale;
@@ -140,12 +148,14 @@ bool HybridGaussian_IntersectSplat(
     GaussianSplatData splat,
     float splatScale,
     float alphaThreshold,
-    float alphaClamp,
+    float alphaScale,
     float kernelMinResponse,
     uint kernelDegree,
-    out float hitT)
+    out float hitT,
+    out float alpha)
 {
     hitT = 0.0f;
+    alpha = 0.0f;
 
     if (splat.centerOpacity.w <= alphaThreshold)
         return false;
@@ -163,19 +173,59 @@ bool HybridGaussian_IntersectSplat(
     if (abs(a) < 1e-12f)
         return false;
 
-    float t = clamp(-0.5f * b / a, ray.TMin, ray.TMax);
+    float t = -0.5f * b / a;
+    if (t <= ray.TMin || t >= ray.TMax)
+        return false;
+
     float grayDist = max(a * t * t + b * t + c, 0.0f);
     float maxResponse = HybridGaussian_ParticleRayMaxKernelResponse(grayDist, kernelDegree);
-    float alpha = min(max(alphaClamp, 0.0f), maxResponse * splat.centerOpacity.w);
+    alpha = saturate(maxResponse * splat.centerOpacity.w * max(alphaScale, 0.0f));
 
     if (alpha <= alphaThreshold || maxResponse <= kernelMinResponse)
         return false;
 
-    if (t < ray.TMin || t > ray.TMax)
-        return false;
-
     hitT = min(max(t, ray.TMin + 1e-4f), ray.TMax);
     return true;
+}
+
+float HybridGaussian_StochasticOpacitySample(RayDesc ray, uint splatIndex, float hitT, uint seed)
+{
+    float3 hitPosition = ray.Origin + ray.Direction * hitT;
+    uint hash = HybridGaussian_HashCombine(seed, splatIndex);
+    hash = HybridGaussian_HashCombine(hash, asuint(hitPosition.x));
+    hash = HybridGaussian_HashCombine(hash, asuint(hitPosition.y));
+    hash = HybridGaussian_HashCombine(hash, asuint(hitPosition.z));
+    return HybridGaussian_HashToFloat(HybridGaussian_Hash32(hash));
+}
+
+bool HybridGaussian_AcceptStochasticSplat(
+    RayDesc ray,
+    uint splatIndex,
+    GaussianSplatData splat,
+    float splatScale,
+    float alphaThreshold,
+    float alphaScale,
+    float kernelMinResponse,
+    uint kernelDegree,
+    uint seed,
+    out float hitT)
+{
+    float alpha = 0.0f;
+    if (!HybridGaussian_IntersectSplat(
+        ray,
+        splat,
+        splatScale,
+        alphaThreshold,
+        alphaScale,
+        kernelMinResponse,
+        kernelDegree,
+        hitT,
+        alpha))
+    {
+        return false;
+    }
+
+    return HybridGaussian_StochasticOpacitySample(ray, splatIndex, hitT, seed) < alpha;
 }
 
 bool HybridGaussian_TraceGaussianShadow(
@@ -185,11 +235,12 @@ bool HybridGaussian_TraceGaussianShadow(
     RayDesc ray,
     float splatScale,
     float alphaThreshold,
-    float alphaClamp,
+    float alphaScale,
     float kernelMinResponse,
     uint kernelDegree,
     uint useTlasInstances,
-    uint primitiveCountPerSplat)
+    uint primitiveCountPerSplat,
+    uint seed)
 {
     if (splatCount == 0)
         return false;
@@ -206,14 +257,16 @@ bool HybridGaussian_TraceGaussianShadow(
                 : rayQuery.CandidatePrimitiveIndex();
             float hitT = 0.0f;
             if (splatIndex < splatCount
-                && HybridGaussian_IntersectSplat(
+                && HybridGaussian_AcceptStochasticSplat(
                     ray,
+                    splatIndex,
                     splats[splatIndex],
                     splatScale,
                     alphaThreshold,
-                    alphaClamp,
+                    alphaScale,
                     kernelMinResponse,
                     kernelDegree,
+                    seed,
                     hitT))
             {
                 rayQuery.CommitProceduralPrimitiveHit(hitT);
@@ -227,14 +280,16 @@ bool HybridGaussian_TraceGaussianShadow(
                 : rayQuery.CandidatePrimitiveIndex() / primitiveDivisor;
             float hitT = 0.0f;
             if (splatIndex < splatCount
-                && HybridGaussian_IntersectSplat(
+                && HybridGaussian_AcceptStochasticSplat(
                     ray,
+                    splatIndex,
                     splats[splatIndex],
                     splatScale,
                     alphaThreshold,
-                    alphaClamp,
+                    alphaScale,
                     kernelMinResponse,
                     kernelDegree,
+                    seed,
                     hitT))
             {
                 rayQuery.CommitNonOpaqueTriangleHit();
@@ -253,7 +308,7 @@ bool HybridGaussian_TraceGaussianShadowMode(
     RayDesc ray,
     float splatScale,
     float alphaThreshold,
-    float alphaClamp,
+    float alphaScale,
     float kernelMinResponse,
     uint kernelDegree,
     uint useTlasInstances,
@@ -261,6 +316,7 @@ bool HybridGaussian_TraceGaussianShadowMode(
     uint shadowMode,
     float softRadius,
     float rayOffset,
+    float4x4 worldToObject,
     uint seed)
 {
     if (shadowMode == GAUSSIAN_SPLAT_SHADOWS_DISABLED)
@@ -277,18 +333,21 @@ bool HybridGaussian_TraceGaussianShadowMode(
         shadowRay.TMax = max(shadowRay.TMin, shadowRay.TMax - offset);
     }
 
+    RayDesc localShadowRay = HybridGaussian_TransformRay(shadowRay, worldToObject);
+
     return HybridGaussian_TraceGaussianShadow(
         gaussianBVH,
         splats,
         splatCount,
-        shadowRay,
+        localShadowRay,
         splatScale,
         alphaThreshold,
-        alphaClamp,
+        alphaScale,
         kernelMinResponse,
         kernelDegree,
         useTlasInstances,
-        primitiveCountPerSplat);
+        primitiveCountPerSplat,
+        seed);
 }
 
 bool HybridGaussian_TraceMeshShadow(RaytracingAccelerationStructure meshBVH, RayDesc ray)

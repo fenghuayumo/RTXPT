@@ -107,6 +107,16 @@ namespace
     {
         return uint32_t(std::clamp(sampleCount, 1, 16));
     }
+
+    float4x4 MakeGaussianSplatObjectToWorld(const SampleUIData& ui)
+    {
+        constexpr float deg2rad = 3.14159265358979323846f / 180.0f;
+        const dm::float3 eulerRadians = ui.GaussianSplatRotationEulerDeg * deg2rad;
+        dm::affine3 objectToWorld = dm::scaling(ui.GaussianSplatObjectScale);
+        objectToWorld *= dm::rotationQuat(eulerRadians).toAffine();
+        objectToWorld *= dm::translation(ui.GaussianSplatTranslation);
+        return dm::affineToHomogeneous(objectToWorld);
+    }
 }
 
 #if defined(RTXPT_D3D_AGILITY_SDK_VERSION)
@@ -2141,14 +2151,7 @@ void Sample::RenderGaussianSplats()
     settings.stochasticFrameIndex = stochasticSplats && temporalSamplingCount > 0
         ? uint32_t(std::min(m_gaussianSplatTemporalSampleIndex, temporalSamplingCount - 1))
         : uint32_t(m_frameIndex & 0xffffffffu);
-    {
-        constexpr float deg2rad = 3.14159265358979323846f / 180.0f;
-        const dm::float3 eulerRadians = m_ui.GaussianSplatRotationEulerDeg * deg2rad;
-        dm::affine3 objectToWorld = dm::scaling(m_ui.GaussianSplatObjectScale);
-        objectToWorld *= dm::rotationQuat(eulerRadians).toAffine();
-        objectToWorld *= dm::translation(m_ui.GaussianSplatTranslation);
-        settings.objectToWorld = dm::affineToHomogeneous(objectToWorld);
-    }
+    settings.objectToWorld = MakeGaussianSplatObjectToWorld(m_ui);
 
     for (const auto& light : m_lights)
     {
@@ -2481,10 +2484,11 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
         constants.GaussianSplatShadowSoftSampleCount = ClampGaussianSplatSoftShadowSamples(m_ui.GaussianSplatShadowSoftSampleCount);
         constants.GaussianSplatShadowFrameIndex = uint32_t(m_frameIndex & 0xffffffffu);
         constants.GaussianSplatShadowRayOffset = m_ui.GaussianSplatRtxParticleShadowOffset;
-        constants.GaussianSplatShadowAlphaClamp = m_ui.GaussianSplatRtxAlphaClamp;
+        constants.GaussianSplatShadowAlphaScale = m_ui.GaussianSplatAlphaScale;
         constants.GaussianSplatShadowKernelMinResponse = kGaussianSplatKernelMinResponse;
         constants.GaussianSplatShadowKernelDegree = uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5));
         constants.GaussianSplatShadowAdaptiveClamp = m_ui.GaussianSplatRtxAdaptiveClamp ? 1u : 0u;
+        constants.GaussianSplatShadowWorldToObject = inverse(MakeGaussianSplatObjectToWorld(m_ui));
 
         constants.envMapSceneParams = m_envMapSceneParams;
         constants.envMapImportanceSamplingParams = m_envMapBaker->GetImportanceSampling()->GetShaderParams();
