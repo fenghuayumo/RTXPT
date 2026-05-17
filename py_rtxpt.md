@@ -262,7 +262,6 @@ All enums are arithmetic, so `int(enum_value)` works and enum values can be assi
 | `GaussianSplatStorageFormat` | `Float32=0`, `Float16=1`, `Uint8=2` |
 | `GaussianSplatFrustumCulling` | `Disabled=0`, `AtDistanceStage=1`, `AtRasterStage=2` |
 | `GaussianSplatShadowMode` | `Disabled=0`, `Hard=1`, `Soft=2` |
-| `GaussianSplatFTBSyncMode` | `Disabled=0`, `Interlock=1` |
 
 ## `Renderer` Class
 
@@ -482,6 +481,8 @@ app.set_reference_mode(
 
 ### 3D Gaussian Splats
 
+The table below lists the Python-facing 3DGS settings that are currently wired into the renderer. Some legacy UI/Python fields still exist in the bindings for compatibility, but are no longer consumed by the render path and are intentionally omitted here.
+
 | Property | Type | Notes |
 | --- | --- | --- |
 | `enable_gaussian_splats` | `bool` | Enables splat overlay. |
@@ -489,14 +490,10 @@ app.set_reference_mode(
 | `gaussian_splat_sorting_mode` | `int/GaussianSplatSortMode` | `GpuSort` or `StochasticSplats`. |
 | `gaussian_splat_sh_format` | `int/GaussianSplatStorageFormat` | SH payload storage format. |
 | `gaussian_splat_rgba_format` | `int/GaussianSplatStorageFormat` | RGBA payload storage format. |
-| `gaussian_splat_use_aabbs` | `bool` | Use AABB-based splat acceleration data. |
-| `gaussian_splat_use_tlas_instances` | `bool` | Use TLAS instances for splat acceleration. |
-| `gaussian_splat_blas_compaction` | `bool` | Enable BLAS compaction for splat acceleration data. |
+| `gaussian_splat_use_aabbs` | `bool` | Use AABB-based splat shadow acceleration data. |
+| `gaussian_splat_use_tlas_instances` | `bool` | Use TLAS instances for splat shadow acceleration. |
+| `gaussian_splat_blas_compaction` | `bool` | Enable BLAS compaction for splat shadow acceleration data. |
 | `gaussian_splat_mip_antialiasing` | `bool` | Enable splat mip antialiasing path. |
-| `gaussian_splat_quantize_normals` | `bool` | Quantize generated splat normals. |
-| `gaussian_splat_ftb_sync_mode` | `int/GaussianSplatFTBSyncMode` | Front-to-back synchronization mode. |
-| `gaussian_splat_depth_iso_threshold` | `float` | Depth iso threshold for raster/stochastic depth behavior. |
-| `gaussian_splat_fragment_shader_barycentric` | `bool` | Use fragment-shader barycentric path when available. |
 | `gaussian_splat_frustum_culling` | `int/GaussianSplatFrustumCulling` | Frustum culling stage. |
 | `gaussian_splat_frustum_dilation` | `float` | Culling frustum dilation. |
 | `gaussian_splat_screen_size_culling` | `bool` | Enable screen-size splat culling. |
@@ -516,16 +513,7 @@ app.set_reference_mode(
 | `gaussian_splat_shadow_soft_sample_count` | `int` | Soft shadow sample count. |
 | `gaussian_splat_rtx_kernel_degree` | `int` | RTX splat kernel degree. |
 | `gaussian_splat_rtx_adaptive_clamp` | `bool` | Enable adaptive RTX alpha clamp. |
-| `gaussian_splat_rtx_alpha_clamp` | `float` | RTX alpha clamp value. |
-| `gaussian_splat_rtx_minimum_transmittance` | `float` | RTX minimum transmittance. |
-| `gaussian_splat_rtx_trace_strategy` | `int` | RTX trace strategy selector. |
-| `gaussian_splat_rtx_particle_samples_per_pass` | `int` | RTX particle samples per pass. |
-| `gaussian_splat_rtx_maximum_pass_count` | `int` | RTX maximum pass count. |
 | `gaussian_splat_rtx_particle_shadow_offset` | `float` | RTX particle shadow offset. |
-| `gaussian_splat_rtx_particle_shadow_threshold` | `float` | RTX particle shadow threshold. |
-| `gaussian_splat_rtx_colored_shadow_strength` | `float` | RTX colored shadow strength. |
-| `gaussian_splat_rtx_mesh_composite_threshold` | `float` | RTX mesh composite threshold. |
-| `gaussian_splat_rtx_depth_iso_threshold` | `float` | RTX depth iso threshold. |
 | `gaussian_splat_count` | `int` | Read-only. |
 | `gaussian_splat_file_name` | `str` | Read-only. |
 

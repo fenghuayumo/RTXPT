@@ -948,7 +948,10 @@ GaussianSplatPass::GaussianSplatPass(
     sortLayoutDesc.bindings = {
         nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),
         nvrhi::BindingLayoutItem::StructuredBuffer_SRV(0),
-        nvrhi::BindingLayoutItem::TypedBuffer_UAV(0)
+        nvrhi::BindingLayoutItem::TypedBuffer_UAV(0),
+        nvrhi::BindingLayoutItem::TypedBuffer_UAV(1),
+        nvrhi::BindingLayoutItem::TypedBuffer_UAV(2),
+        nvrhi::BindingLayoutItem::TypedBuffer_UAV(3)
     };
     m_sortKeyBindingLayout = m_device->createBindingLayout(sortLayoutDesc);
 }
@@ -1025,10 +1028,24 @@ bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool
 
     nvrhi::BufferDesc sortControlDesc;
     sortControlDesc.byteSize = sizeof(uint32_t);
+    sortControlDesc.format = nvrhi::Format::R32_UINT;
+    sortControlDesc.canHaveTypedViews = true;
+    sortControlDesc.canHaveUAVs = true;
     sortControlDesc.debugName = "GaussianSplatSortControlBuffer";
-    sortControlDesc.initialState = nvrhi::ResourceStates::Common;
+    sortControlDesc.initialState = nvrhi::ResourceStates::UnorderedAccess;
     sortControlDesc.keepInitialState = true;
     m_sortControlBuffer = m_device->createBuffer(sortControlDesc);
+
+    nvrhi::BufferDesc drawIndirectDesc;
+    drawIndirectDesc.byteSize = sizeof(nvrhi::DrawIndirectArguments);
+    drawIndirectDesc.format = nvrhi::Format::R32_UINT;
+    drawIndirectDesc.canHaveTypedViews = true;
+    drawIndirectDesc.canHaveUAVs = true;
+    drawIndirectDesc.isDrawIndirectArgs = true;
+    drawIndirectDesc.debugName = "GaussianSplatDrawIndirectBuffer";
+    drawIndirectDesc.initialState = nvrhi::ResourceStates::UnorderedAccess;
+    drawIndirectDesc.keepInitialState = true;
+    m_drawIndirectBuffer = m_device->createBuffer(drawIndirectDesc);
 
     nvrhi::BufferDesc aabbBufferDesc;
     aabbBufferDesc.byteSize = uint64_t(m_splatCount) * sizeof(nvrhi::rt::GeometryAABB);
@@ -1251,7 +1268,7 @@ void GaussianSplatPass::ReleaseAccelerationStructures()
 
 void GaussianSplatPass::CreateBindingSets(const RenderTargets& renderTargets, nvrhi::rt::IAccelStruct* meshTopLevelAS)
 {
-    if (!m_splatBuffer || !m_colorBuffer || !m_shBuffer || !m_indexBuffer || !m_sortKeyBuffer)
+    if (!m_splatBuffer || !m_colorBuffer || !m_shBuffer || !m_indexBuffer || !m_sortKeyBuffer || !m_sortControlBuffer || !m_drawIndirectBuffer)
         return;
 
     nvrhi::BindingSetDesc rasterRenderBindingSetDesc;
@@ -1282,7 +1299,10 @@ void GaussianSplatPass::CreateBindingSets(const RenderTargets& renderTargets, nv
     sortKeyBindingSetDesc.bindings = {
         nvrhi::BindingSetItem::ConstantBuffer(0, m_constantBuffer),
         nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_splatBuffer),
-        nvrhi::BindingSetItem::TypedBuffer_UAV(0, m_sortKeyBuffer, nvrhi::Format::R32_UINT)
+        nvrhi::BindingSetItem::TypedBuffer_UAV(0, m_sortKeyBuffer, nvrhi::Format::R32_UINT),
+        nvrhi::BindingSetItem::TypedBuffer_UAV(1, m_indexBuffer, nvrhi::Format::R32_UINT),
+        nvrhi::BindingSetItem::TypedBuffer_UAV(2, m_sortControlBuffer, nvrhi::Format::R32_UINT),
+        nvrhi::BindingSetItem::TypedBuffer_UAV(3, m_drawIndirectBuffer, nvrhi::Format::R32_UINT)
     };
     m_sortKeyBindingSet = m_device->createBindingSet(sortKeyBindingSetDesc, m_sortKeyBindingLayout);
 }
@@ -1572,8 +1592,62 @@ void GaussianSplatPass::UploadStochasticSplatIndices(nvrhi::ICommandList* comman
     m_randomIndexUploadPending = false;
 }
 
+void GaussianSplatPass::BuildDistanceCulledSplatList(nvrhi::ICommandList* commandList, GaussianSplatSortMode sortMode)
+{
+    if (!m_sortKeyBindingSet || !m_sortKeyPipeline || !m_sortControlBuffer || !m_drawIndirectBuffer)
+        return;
+
+    const uint32_t zero = 0;
+    nvrhi::DrawIndirectArguments drawArgs;
+    drawArgs.vertexCount = 0;
+    drawArgs.instanceCount = 1;
+    drawArgs.startVertexLocation = 0;
+    drawArgs.startInstanceLocation = 0;
+    commandList->writeBuffer(m_sortControlBuffer, &zero, sizeof(zero));
+    commandList->writeBuffer(m_drawIndirectBuffer, &drawArgs, sizeof(drawArgs));
+
+    {
+        nvrhi::ComputeState state;
+        state.pipeline = m_sortKeyPipeline;
+        state.bindings = { m_sortKeyBindingSet };
+
+        commandList->setBufferState(m_sortKeyBuffer, nvrhi::ResourceStates::UnorderedAccess);
+        commandList->setBufferState(m_indexBuffer, nvrhi::ResourceStates::UnorderedAccess);
+        commandList->setBufferState(m_sortControlBuffer, nvrhi::ResourceStates::UnorderedAccess);
+        commandList->setBufferState(m_drawIndirectBuffer, nvrhi::ResourceStates::UnorderedAccess);
+        commandList->commitBarriers();
+
+        commandList->setComputeState(state);
+        commandList->dispatch((m_splatCount + 255u) / 256u, 1, 1);
+    }
+
+    if (sortMode == GaussianSplatSortMode::GpuSort && m_gpuSort)
+    {
+        commandList->setBufferState(m_sortKeyBuffer, nvrhi::ResourceStates::ShaderResource);
+        commandList->setBufferState(m_indexBuffer, nvrhi::ResourceStates::UnorderedAccess);
+        commandList->setBufferState(m_sortControlBuffer, nvrhi::ResourceStates::CopySource);
+        commandList->commitBarriers();
+
+        m_gpuSort->Sort(commandList, m_sortControlBuffer, 0, m_sortKeyBuffer, m_indexBuffer, m_splatCount, false);
+    }
+
+    commandList->setBufferState(m_indexBuffer, nvrhi::ResourceStates::ShaderResource);
+    commandList->setBufferState(m_drawIndirectBuffer, nvrhi::ResourceStates::IndirectArgument);
+    commandList->commitBarriers();
+
+    m_cachedSortMode = sortMode;
+    m_sortCacheValid = false;
+    m_randomIndexUploadPending = true;
+}
+
 void GaussianSplatPass::UpdateSplatIndices(nvrhi::ICommandList* commandList, const GaussianSplatConstants& constants, GaussianSplatSortMode sortMode)
 {
+    if (constants.frustumCulling == uint32_t(GaussianSplatFrustumCulling::AtDistanceStage))
+    {
+        BuildDistanceCulledSplatList(commandList, sortMode);
+        return;
+    }
+
     if (sortMode != m_cachedSortMode && sortMode == GaussianSplatSortMode::StochasticSplats)
         m_randomIndexUploadPending = true;
 
@@ -1585,7 +1659,7 @@ void GaussianSplatPass::UpdateSplatIndices(nvrhi::ICommandList* commandList, con
         return;
     }
 
-    if (!m_gpuSort || !m_sortKeyBindingSet || !m_sortKeyPipeline || !m_sortControlBuffer)
+    if (!m_gpuSort || !m_sortKeyBindingSet || !m_sortKeyPipeline || !m_sortControlBuffer || !m_drawIndirectBuffer)
         return;
 
     if (m_cachedSortMode == sortMode && CanReuseSort(constants))
@@ -1597,6 +1671,9 @@ void GaussianSplatPass::UpdateSplatIndices(nvrhi::ICommandList* commandList, con
         state.bindings = { m_sortKeyBindingSet };
 
         commandList->setBufferState(m_sortKeyBuffer, nvrhi::ResourceStates::UnorderedAccess);
+        commandList->setBufferState(m_indexBuffer, nvrhi::ResourceStates::UnorderedAccess);
+        commandList->setBufferState(m_sortControlBuffer, nvrhi::ResourceStates::UnorderedAccess);
+        commandList->setBufferState(m_drawIndirectBuffer, nvrhi::ResourceStates::UnorderedAccess);
         commandList->commitBarriers();
 
         commandList->setComputeState(state);
@@ -1607,6 +1684,7 @@ void GaussianSplatPass::UpdateSplatIndices(nvrhi::ICommandList* commandList, con
 
     commandList->setBufferState(m_sortKeyBuffer, nvrhi::ResourceStates::ShaderResource);
     commandList->setBufferState(m_indexBuffer, nvrhi::ResourceStates::UnorderedAccess);
+    commandList->setBufferState(m_sortControlBuffer, nvrhi::ResourceStates::CopySource);
     commandList->commitBarriers();
 
     m_gpuSort->Sort(commandList, m_sortControlBuffer, 0, m_sortKeyBuffer, m_indexBuffer, m_splatCount, true);
@@ -1632,6 +1710,7 @@ void GaussianSplatPass::Render(
         return;
 
     const bool stochasticSplats = settings.sortingMode == GaussianSplatSortMode::StochasticSplats;
+    const bool distanceStageCulling = settings.frustumCulling == GaussianSplatFrustumCulling::AtDistanceStage;
     const bool stochasticToOutput = stochasticSplats && settings.renderTarget == GaussianSplatRenderTarget::OutputColor;
     nvrhi::TextureHandle stochasticDepthBuffer = stochasticToOutput ? m_stochasticDepthBuffer : m_stochasticProcessedDepthBuffer;
     std::shared_ptr<donut::engine::FramebufferFactory> stochasticFramebuffer = stochasticToOutput
@@ -1723,6 +1802,8 @@ void GaussianSplatPass::Render(
     }
 
     commandList->setBufferState(m_indexBuffer, nvrhi::ResourceStates::ShaderResource);
+    if (distanceStageCulling)
+        commandList->setBufferState(m_drawIndirectBuffer, nvrhi::ResourceStates::IndirectArgument);
     commandList->setTextureState(renderTargets.Depth, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);
     nvrhi::TextureHandle colorTarget = stochasticToOutput ? renderTargets.OutputColor : renderTargets.ProcessedOutputColor;
     commandList->setTextureState(colorTarget, nvrhi::AllSubresources, nvrhi::ResourceStates::RenderTarget);
@@ -1741,12 +1822,21 @@ void GaussianSplatPass::Render(
     state.bindings = { renderBindingSet };
     state.framebuffer = framebuffer;
     state.viewport = view.GetViewportState();
+    if (distanceStageCulling)
+        state.indirectParams = m_drawIndirectBuffer;
     commandList->setGraphicsState(state);
 
-    nvrhi::DrawArguments args;
-    args.vertexCount = m_splatCount * 6;
-    args.instanceCount = 1;
-    commandList->draw(args);
+    if (distanceStageCulling)
+    {
+        commandList->drawIndirect(0);
+    }
+    else
+    {
+        nvrhi::DrawArguments args;
+        args.vertexCount = m_splatCount * 6;
+        args.instanceCount = 1;
+        commandList->draw(args);
+    }
 
     commandList->endMarker();
 }

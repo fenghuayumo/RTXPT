@@ -139,6 +139,7 @@ private:
     void UploadSplatDataIfNeeded(nvrhi::ICommandList* commandList);
     void UploadFormatDataIfNeeded(nvrhi::ICommandList* commandList, GaussianSplatStorageFormat shFormat, GaussianSplatStorageFormat rgbaFormat);
     void UpdateSplatIndices(nvrhi::ICommandList* commandList, const GaussianSplatConstants& constants, GaussianSplatSortMode sortMode);
+    void BuildDistanceCulledSplatList(nvrhi::ICommandList* commandList, GaussianSplatSortMode sortMode);
     void UploadStochasticSplatIndices(nvrhi::ICommandList* commandList);
     [[nodiscard]] bool CanReuseSort(const GaussianSplatConstants& constants) const;
     void InvalidateSortCache();
@@ -154,6 +155,7 @@ private:
     nvrhi::BufferHandle m_indexBuffer;
     nvrhi::BufferHandle m_sortKeyBuffer;
     nvrhi::BufferHandle m_sortControlBuffer;
+    nvrhi::BufferHandle m_drawIndirectBuffer;
     nvrhi::BufferHandle m_splatAabbBuffer;
     nvrhi::BufferHandle m_splatTriangleVertexBuffer;
     nvrhi::BufferHandle m_splatTriangleIndexBuffer;

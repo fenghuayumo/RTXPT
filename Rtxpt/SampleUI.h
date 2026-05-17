@@ -346,7 +346,7 @@ struct SampleUIData
     int                                 GaussianSplatFTBSyncMode = 0; // 0 = Disabled, 1 = Interlock
     float                               GaussianSplatDepthIsoThreshold = 0.70f;
     bool                                GaussianSplatFragmentShaderBarycentric = false;
-    int                                 GaussianSplatFrustumCulling = 2; // 0 = Disabled, 1 = At distance stage, 2 = At raster stage
+    int                                 GaussianSplatFrustumCulling = 1; // 0 = Disabled, 1 = At distance stage, 2 = At raster stage
     float                               GaussianSplatFrustumDilation = 0.20f;
     bool                                GaussianSplatScreenSizeCulling = false;
     float                               GaussianSplatMinPixelCoverage = 1.0f;

@@ -23,9 +23,23 @@
 ConstantBuffer<GaussianSplatConstants> g_Const : register(b0);
 StructuredBuffer<GaussianSplatData> t_Splats : register(t0);
 
+static const uint kGaussianSplatFrustumCullingDisabled = 0;
+static const uint kGaussianSplatFrustumCullingAtDistance = 1;
+static const uint kGaussianSplatFrustumCullingAtRaster = 2;
+static const uint kGaussianSplatFormatFloat32 = 0;
+static const uint kGaussianSplatFormatFloat16 = 1;
+static const uint kGaussianSplatFormatUint8 = 2;
+static const uint kGaussianSplatProjectionEigen = 0;
+static const uint kGaussianSplatProjectionConic = 1;
+static const uint kGaussianSplatSortRandom = 1;
+static const uint kGaussianSplatShScalarStride = 45;
+
 #if GAUSSIAN_SPLAT_SORT_KEYS
 
 RWBuffer<uint> u_SortKeys : register(u0);
+RWBuffer<uint> u_SplatIndices : register(u1);
+RWBuffer<uint> u_SortControl : register(u2);
+RWBuffer<uint> u_DrawIndirectArgs : register(u3);
 
 [numthreads(256, 1, 1)]
 void cs_sort_keys(uint splatIndex : SV_DispatchThreadID)
@@ -38,11 +52,32 @@ void cs_sort_keys(uint splatIndex : SV_DispatchThreadID)
     // Depth sorting ignores sub-pixel jitter so the sorted index buffer can be reused.
     float4 clipCenter = mul(worldCenter, g_Const.view.matWorldToClipNoOffset);
 
+    if (g_Const.frustumCulling == kGaussianSplatFrustumCullingAtDistance)
+    {
+        float4 viewCenter = mul(worldCenter, g_Const.view.matWorldToView);
+        if (viewCenter.z <= 1e-4f || clipCenter.w <= 0.0f)
+            return;
+
+        float clipLimit = (1.0f + max(g_Const.frustumDilation, 0.0f)) * clipCenter.w;
+        if (abs(clipCenter.x) > clipLimit || abs(clipCenter.y) > clipLimit || clipCenter.z < 0.0f || clipCenter.z > clipCenter.w)
+            return;
+    }
+
     float reverseZ = 0.0f;
     if (clipCenter.w > 0.0f)
         reverseZ = saturate(clipCenter.z / clipCenter.w);
 
-    u_SortKeys[splatIndex] = asuint(reverseZ);
+    uint sortKey = asuint(reverseZ);
+    u_SortKeys[splatIndex] = sortKey;
+
+    if (g_Const.frustumCulling == kGaussianSplatFrustumCullingAtDistance)
+    {
+        uint visibleIndex;
+        InterlockedAdd(u_SortControl[0], 1u, visibleIndex);
+        u_SplatIndices[visibleIndex] = splatIndex;
+        uint previousVertexCount;
+        InterlockedAdd(u_DrawIndirectArgs[0], 6u, previousVertexCount);
+    }
 }
 
 #else
@@ -71,13 +106,6 @@ struct VertexOutput
 
 static const float kSqrt8 = 2.8284271247461903f;
 static const float kFragmentAlphaCullThreshold = 1.0f / 255.0f;
-static const uint kGaussianSplatFormatFloat32 = 0;
-static const uint kGaussianSplatFormatFloat16 = 1;
-static const uint kGaussianSplatFormatUint8 = 2;
-static const uint kGaussianSplatProjectionEigen = 0;
-static const uint kGaussianSplatProjectionConic = 1;
-static const uint kGaussianSplatSortRandom = 1;
-static const uint kGaussianSplatShScalarStride = 45;
 
 float SrgbToLinear(float srgb)
 {
@@ -324,7 +352,7 @@ VertexOutput vs_main(uint vertexId : SV_VertexID)
         return output;
     }
 
-    if (g_Const.frustumCulling != 0)
+    if (g_Const.frustumCulling == kGaussianSplatFrustumCullingAtRaster)
     {
         float clipLimit = (1.0f + max(g_Const.frustumDilation, 0.0f)) * clipCenter.w;
         if (abs(clipCenter.x) > clipLimit || abs(clipCenter.y) > clipLimit || clipCenter.z < 0.0f || clipCenter.z > clipCenter.w)
