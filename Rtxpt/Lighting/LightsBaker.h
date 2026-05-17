@@ -14,6 +14,7 @@
 #include <nvrhi/nvrhi.h>
 #include <donut/core/math/math.h>
 #include <memory>
+#include <vector>
 
 #include <donut/core/math/math.h>
 
@@ -23,6 +24,7 @@
 #include "../SampleCommon/ComputePass.h"
 
 #include "../Shaders/SubInstanceData.h"
+#include "../ProcessingPasses/GaussianSplatEmissionProxy.h"
 
 #include <filesystem>
 
@@ -73,6 +75,10 @@ public:
         LightsBakerEnvMapParams EnvMapParams        = {};
         float DistantVsLocalImportanceScale         = 1.0f;
 
+        const std::vector<GaussianSplatEmissionProxy>* GaussianSplatEmissionProxies = nullptr;
+        float4x4    GaussianSplatEmissionObjectToWorld = float4x4::identity();
+        float       GaussianSplatEmissionIntensity = 0.0f;
+
         int64_t     FrameIndex                      = -1;
     };
 
@@ -119,6 +125,7 @@ private:
     // output goes into m_scratchLightBuffer and 
     static bool                     CollectEnvmapLightPlaceholders(const BakeSettings & settings, LightingControlData & ctrlBuff, std::vector<PolymorphicLightInfo> & outLightBuffer, std::vector<PolymorphicLightInfoEx> & outLightExBuffer, std::vector<uint> & outLightHistoryRemapCurrentToPastBuffer, std::vector<uint> & outLightHistoryRemapPastToCurrent);
     bool                            CollectAnalyticLightsCPU(const BakeSettings & settings, const std::shared_ptr<ExtendedScene> & scene, LightingControlData & ctrlBuff, std::vector<PolymorphicLightInfo> & outLightBuffer, std::vector<PolymorphicLightInfoEx> & outLightExBuffer, std::vector<uint> & outLightHistoryRemapCurrentToPast, std::vector<uint> & outLightHistoryRemapPastToCurrent);
+    bool                            CollectGaussianSplatEmissionProxies(const BakeSettings & settings, LightingControlData & ctrlBuff, std::vector<PolymorphicLightInfo> & outLightBuffer, std::vector<PolymorphicLightInfoEx> & outLightExBuffer, std::vector<uint> & outLightHistoryRemapCurrentToPast, std::vector<uint> & outLightHistoryRemapPastToCurrent);
 
     // this creates emissive triangle proc tasks and also does any required geometry instance (subInstance) processing such as analyt light proxies; has to happen AFTER CollectAnalyticLightsCPU
     bool                            ProcessEmissiveGeometry( const BakeSettings & settings, const std::shared_ptr<ExtendedScene> & scene, std::vector<SubInstanceData> & subInstanceData, LightingControlData & ctrlBuff, std::vector<struct EmissiveTrianglesProcTask> & tasks );

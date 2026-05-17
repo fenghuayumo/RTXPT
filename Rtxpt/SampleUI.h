@@ -353,6 +353,9 @@ struct SampleUIData
     float                               GaussianSplatScale = 1.0f;
     float                               GaussianSplatAlphaScale = 1.0f;
     float                               GaussianSplatBrightness = 1.0f;
+    bool                                GaussianSplatAsEmitter = false;
+    float                               GaussianSplatEmissionIntensity = 1.0f;
+    int                                 GaussianSplatEmissionMaxProxyCount = 8192;
     float                               GaussianSplatAlphaCullThreshold = 1.0f / 255.0f;
     float                               GaussianSplatShadowStrength = 0.75f;
     float                               GaussianSplatShadowSoftRadius = 0.08f;

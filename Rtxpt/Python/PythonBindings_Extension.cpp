@@ -69,6 +69,9 @@ public:
                float gaussianSplatScale,
                float gaussianSplatAlphaScale,
                float gaussianSplatBrightness,
+               bool gaussianSplatAsEmitter,
+               float gaussianSplatEmissionIntensity,
+               int gaussianSplatEmissionMaxProxyCount,
                float gaussianSplatAlphaCullThreshold)
     {
         RenderSession::Config cfg;
@@ -88,6 +91,9 @@ public:
         cfg.gaussianSplatScale = gaussianSplatScale;
         cfg.gaussianSplatAlphaScale = gaussianSplatAlphaScale;
         cfg.gaussianSplatBrightness = gaussianSplatBrightness;
+        cfg.gaussianSplatAsEmitter = gaussianSplatAsEmitter;
+        cfg.gaussianSplatEmissionIntensity = gaussianSplatEmissionIntensity;
+        cfg.gaussianSplatEmissionMaxProxyCount = gaussianSplatEmissionMaxProxyCount;
         cfg.gaussianSplatAlphaCullThreshold = gaussianSplatAlphaCullThreshold;
 
         m_session = std::make_unique<RenderSession>(cfg);
@@ -178,7 +184,7 @@ NB_MODULE(rtxpt, m)
         "    r.save_screenshot('frame.png')\n"
         "    r.close()")
         .def(nb::init<int, int, bool, bool, int, bool, const std::string&, bool, int,
-                      const std::string&, bool, bool, float, float, float, float>(),
+                      const std::string&, bool, bool, float, float, float, bool, float, int, float>(),
              nb::arg("width") = 1920,
              nb::arg("height") = 1080,
              nb::arg("headless") = true,
@@ -194,6 +200,9 @@ NB_MODULE(rtxpt, m)
              nb::arg("gaussian_splat_scale") = 1.0f,
              nb::arg("gaussian_splat_alpha_scale") = 1.0f,
              nb::arg("gaussian_splat_brightness") = 1.0f,
+             nb::arg("gaussian_splat_as_emitter") = false,
+             nb::arg("gaussian_splat_emission_intensity") = 1.0f,
+             nb::arg("gaussian_splat_emission_max_proxy_count") = 8192,
              nb::arg("gaussian_splat_alpha_cull_threshold") = 1.0f / 255.0f)
 
         .def("close", &PyRenderer::Close,

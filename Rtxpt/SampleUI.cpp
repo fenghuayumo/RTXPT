@@ -841,6 +841,21 @@ void SampleUI::buildUI(void)
                     ImGui::EndDisabled();
                 }
 
+                if (ImGui::CollapsingHeader("Emission", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
+
+                    RESET_ON_CHANGE(ImGui::Checkbox("As Emitter", &m_ui.GaussianSplatAsEmitter));
+                    ImGui::BeginDisabled(!m_ui.GaussianSplatAsEmitter);
+                    RESET_ON_CHANGE(ImGui::DragFloat("Emission Intensity", &m_ui.GaussianSplatEmissionIntensity, 0.01f, 0.0f, 100.0f, "%.2f"));
+                    if (ImGui::InputInt("Emission Proxy Limit", &m_ui.GaussianSplatEmissionMaxProxyCount, 256, 4096))
+                    {
+                        m_ui.GaussianSplatEmissionMaxProxyCount = dm::clamp(m_ui.GaussianSplatEmissionMaxProxyCount, 0, 262144);
+                        m_ui.ResetAccumulation = true;
+                    }
+                    ImGui::EndDisabled();
+                }
+
                 if (ResolveGaussianSplatShadowMode(m_ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED
                     && ImGui::CollapsingHeader("Ray Tracing", ImGuiTreeNodeFlags_DefaultOpen))
                 {
@@ -2194,6 +2209,15 @@ void SampleUI::buildUI(void)
             }
             RESET_ON_CHANGE(ImGui::DragFloat("Alpha", &m_ui.GaussianSplatAlphaScale, 0.01f, 0.0f, 4.0f, "%.2f"));
             RESET_ON_CHANGE(ImGui::DragFloat("Brightness", &m_ui.GaussianSplatBrightness, 0.01f, 0.0f, 16.0f, "%.2f"));
+            RESET_ON_CHANGE(ImGui::Checkbox("As Emitter", &m_ui.GaussianSplatAsEmitter));
+            ImGui::BeginDisabled(!m_ui.GaussianSplatAsEmitter);
+            RESET_ON_CHANGE(ImGui::DragFloat("Emission Intensity", &m_ui.GaussianSplatEmissionIntensity, 0.01f, 0.0f, 100.0f, "%.2f"));
+            if (ImGui::InputInt("Emission Proxy Limit", &m_ui.GaussianSplatEmissionMaxProxyCount, 256, 4096))
+            {
+                m_ui.GaussianSplatEmissionMaxProxyCount = dm::clamp(m_ui.GaussianSplatEmissionMaxProxyCount, 0, 262144);
+                m_ui.ResetAccumulation = true;
+            }
+            ImGui::EndDisabled();
             RESET_ON_CHANGE(ImGui::DragFloat("Alpha Cull", &m_ui.GaussianSplatAlphaCullThreshold, 0.001f, 0.0f, 0.25f, "%.3f"));
             if (ResolveGaussianSplatShadowMode(m_ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED)
                 RESET_ON_CHANGE(ImGui::DragFloat("Shadow Strength", &m_ui.GaussianSplatShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f"));

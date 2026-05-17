@@ -14,6 +14,7 @@
 #include <donut/core/math/math.h>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 #include <rtxdi/ImportanceSamplingContext.h>
 #include "../SampleCommon/ComputePass.h"
 #include "RayTracingPass.h"
@@ -22,6 +23,7 @@
 
 #include "../Shaders/PathTracer/Lighting/LightingTypes.hlsli"
 #include "../Shaders/PathTracer/Lighting/EnvMap.hlsli"
+#include "../ProcessingPasses/GaussianSplatEmissionProxy.h"
 
 class RenderTargets;
 class PrepareLightsPass;
@@ -85,6 +87,10 @@ struct RtxdiBridgeParameters
 
     bool usingLightSampling;
     bool usingReGIR;
+
+    const std::vector<GaussianSplatEmissionProxy>* gaussianSplatEmissionProxies = nullptr;
+    donut::math::float4x4 gaussianSplatEmissionObjectToWorld = donut::math::float4x4::identity();
+    float gaussianSplatEmissionIntensity = 0.0f;
 };
 
 class RtxdiPass

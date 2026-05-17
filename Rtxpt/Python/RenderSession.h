@@ -67,6 +67,9 @@ public:
         float       gaussianSplatScale = 1.0f;
         float       gaussianSplatAlphaScale = 1.0f;
         float       gaussianSplatBrightness = 1.0f;
+        bool        gaussianSplatAsEmitter = false;
+        float       gaussianSplatEmissionIntensity = 1.0f;
+        int         gaussianSplatEmissionMaxProxyCount = 8192;
         float       gaussianSplatAlphaCullThreshold = 1.0f / 255.0f;
     };
 

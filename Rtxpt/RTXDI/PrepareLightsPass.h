@@ -15,9 +15,11 @@
 #include <rtxdi/DI/ReSTIRDI.h>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include "../Shaders/PathTracer/Lighting/LightingTypes.hlsli"
 #include "../Shaders/PathTracer/Lighting/EnvMap.hlsli"
+#include "../ProcessingPasses/GaussianSplatEmissionProxy.h"
 
 namespace donut::engine
 {
@@ -63,6 +65,9 @@ private:
     std::shared_ptr<class MaterialsBaker> m_materialsBaker;
     std::shared_ptr<class OmmBaker> m_ommBaker;
     nvrhi::BufferHandle m_subInstanceData;
+    const std::vector<GaussianSplatEmissionProxy>* m_GaussianSplatEmissionProxies = nullptr;
+    donut::math::float4x4 m_GaussianSplatEmissionObjectToWorld = donut::math::float4x4::identity();
+    float m_GaussianSplatEmissionIntensity = 0.0f;
 
     std::unordered_map<size_t, uint32_t> m_InstanceLightBufferOffsets; // hash(instance*, geometryIndex) -> bufferOffset
     std::unordered_map<const donut::engine::Light*, uint32_t> m_PrimitiveLightBufferOffsets;
@@ -83,6 +88,7 @@ public:
     );
 
     void SetScene(std::shared_ptr<ExtendedScene> scene, std::shared_ptr<EnvMapBaker> environmentMap = nullptr, EnvMapSceneParams envMapSceneParams = {} );
+    void SetGaussianSplatEmissionProxies(const std::vector<GaussianSplatEmissionProxy>* proxies, donut::math::float4x4 objectToWorld, float emissionIntensity);
     void CreatePipeline();
     void CreateBindingSet(RtxdiResources& resources, const RenderTargets& renderTargets);
     void CountLightsInScene(uint32_t& numEmissiveMeshes, uint32_t& numEmissiveTriangles);

@@ -19,6 +19,7 @@
 #include <nvrhi/utils.h>
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 using namespace donut::math;
@@ -99,6 +100,16 @@ void PrepareLightsPass::SetScene(std::shared_ptr<ExtendedScene> scene,
     m_Scene = scene;
     m_EnvironmentMap = environmentMap;
     m_EnvironmentMapSceneParams = envMapSceneParams;
+}
+
+void PrepareLightsPass::SetGaussianSplatEmissionProxies(
+    const std::vector<GaussianSplatEmissionProxy>* proxies,
+    float4x4 objectToWorld,
+    float emissionIntensity)
+{
+    m_GaussianSplatEmissionProxies = proxies;
+    m_GaussianSplatEmissionObjectToWorld = objectToWorld;
+    m_GaussianSplatEmissionIntensity = emissionIntensity;
 }
 
 void PrepareLightsPass::CreatePipeline()
@@ -361,6 +372,60 @@ static bool ConvertLight(const donut::engine::Light& light, PolymorphicLightInfo
     }
 }
 
+static uint32_t GaussianProxyHash32(uint32_t x)
+{
+    x ^= x >> 16;
+    x *= 0x21f0aaad;
+    x ^= x >> 15;
+    x *= 0xf35a2d97;
+    x ^= x >> 15;
+    return x;
+}
+
+static uint32_t GaussianProxyHash32Combine(uint32_t seed, uint32_t value)
+{
+    return seed ^ (GaussianProxyHash32(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+}
+
+static float3 TransformPoint(const float3& point, const float4x4& transform)
+{
+    const float4 transformed = float4(point, 1.0f) * transform;
+    const float invW = std::abs(transformed.w) > 1e-6f ? 1.0f / transformed.w : 1.0f;
+    return transformed.xyz() * invW;
+}
+
+static float TransformRadiusScale(const float4x4& transform)
+{
+    const float3 row0 = float3(transform.row0.x, transform.row0.y, transform.row0.z);
+    const float3 row1 = float3(transform.row1.x, transform.row1.y, transform.row1.z);
+    const float3 row2 = float3(transform.row2.x, transform.row2.y, transform.row2.z);
+    return std::max(1e-4f, std::max(dm::length(row0), std::max(dm::length(row1), dm::length(row2))));
+}
+
+static PolymorphicLightInfoFull ConvertGaussianSplatEmissionProxy(
+    const GaussianSplatEmissionProxy& proxy,
+    const float4x4& objectToWorld,
+    float emissionIntensity,
+    uint32_t proxyIndex)
+{
+    PolymorphicLightInfoFull polymorphic = {};
+
+    const float3 radiance = float3(
+        std::max(proxy.radiance.x * emissionIntensity, 0.0f),
+        std::max(proxy.radiance.y * emissionIntensity, 0.0f),
+        std::max(proxy.radiance.z * emissionIntensity, 0.0f));
+    const float radius = std::max(proxy.radius * TransformRadiusScale(objectToWorld), 1e-4f);
+
+    polymorphic.Base.ColorTypeAndFlags = (uint32_t)PolymorphicLightType::kSphere << kPolymorphicLightTypeShift;
+    packLightColor(radiance, polymorphic);
+    polymorphic.Base.Center = TransformPoint(proxy.center, objectToWorld);
+    polymorphic.Base.Scalars = fp32ToFp16(radius);
+    polymorphic.Extended = PolymorphicLightInfoEx::empty();
+    polymorphic.Extended.UniqueID = GaussianProxyHash32Combine(0x3D650000u, proxyIndex);
+
+    return polymorphic;
+}
+
 static int isInfiniteLight(const donut::engine::Light& light)
 {
     switch (light.GetLightType())
@@ -446,6 +511,31 @@ RTXDI_LightBufferParameters PrepareLightsPass::Process(nvrhi::ICommandList* comm
     uint32_t numInfinitePrimLights = 0;
 
     bool enableImportanceSampledEnvironmentLight = m_EnvironmentMap ? true : false;
+
+    if (m_GaussianSplatEmissionProxies != nullptr && m_GaussianSplatEmissionIntensity > 0.0f)
+    {
+        const std::vector<GaussianSplatEmissionProxy>& proxies = *m_GaussianSplatEmissionProxies;
+        for (uint32_t proxyIndex = 0; proxyIndex < proxies.size() && lightBufferOffset < m_MaxLightsInBuffer; ++proxyIndex)
+        {
+            const PolymorphicLightInfoFull polymorphicLight = ConvertGaussianSplatEmissionProxy(
+                proxies[proxyIndex],
+                m_GaussianSplatEmissionObjectToWorld,
+                m_GaussianSplatEmissionIntensity,
+                proxyIndex);
+
+            PrepareLightsTask task;
+            task.instanceAndGeometryIndex = TASK_PRIMITIVE_LIGHT_BIT | uint32_t(primitiveLightInfos.size());
+            task.lightBufferOffset = lightBufferOffset;
+            task.triangleCount = 1;
+            task.previousLightBufferOffset = -1;
+
+            lightBufferOffset += task.triangleCount;
+
+            tasks.push_back(task);
+            primitiveLightInfos.push_back(polymorphicLight);
+            numFinitePrimLights++;
+        }
+    }
 
     for (const std::shared_ptr<Light>& pLight : sortedLights)
     {

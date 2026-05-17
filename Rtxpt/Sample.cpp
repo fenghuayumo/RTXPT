@@ -108,6 +108,20 @@ namespace
         return uint32_t(std::clamp(sampleCount, 1, 16));
     }
 
+    uint32_t ClampGaussianSplatEmissionProxyCount(int proxyCount)
+    {
+        return uint32_t(std::clamp(proxyCount, 0, 262144));
+    }
+
+    bool IsGaussianSplatEmissionEnabled(const SampleUIData& ui)
+    {
+        return ui.EnableGaussianSplats
+            && ui.GaussianSplatAsEmitter
+            && ui.GaussianSplatEmissionIntensity > 0.0f
+            && ui.GaussianSplatEmissionMaxProxyCount > 0
+            && ui.GaussianSplatCount > 0;
+    }
+
     float4x4 MakeGaussianSplatObjectToWorld(const SampleUIData& ui)
     {
         constexpr float deg2rad = 3.14159265358979323846f / 180.0f;
@@ -209,6 +223,9 @@ void Sample::Init(const std::string& preferredScene,
     m_ui.GaussianSplatScale = m_cmdLine.GaussianSplatScale;
     m_ui.GaussianSplatAlphaScale = m_cmdLine.GaussianSplatAlphaScale;
     m_ui.GaussianSplatBrightness = m_cmdLine.GaussianSplatBrightness;
+    m_ui.GaussianSplatAsEmitter = m_cmdLine.GaussianSplatAsEmitter;
+    m_ui.GaussianSplatEmissionIntensity = m_cmdLine.GaussianSplatEmissionIntensity;
+    m_ui.GaussianSplatEmissionMaxProxyCount = m_cmdLine.GaussianSplatEmissionMaxProxyCount;
     m_ui.GaussianSplatAlphaCullThreshold = m_cmdLine.GaussianSplatAlphaCullThreshold;
     if (!m_cmdLine.GaussianSplatFileName.empty())
         LoadGaussianSplatFile(m_cmdLine.GaussianSplatFileName, m_cmdLine.GaussianSplatConvertRdfToDonut);
@@ -1617,6 +1634,20 @@ void Sample::UpdateLighting(nvrhi::CommandListHandle commandList)
         settings.EnvMapParams = LightsBakerEnvMapParams{ .Transform = m_envMapSceneParams.Transform, .InvTransform = m_envMapSceneParams.InvTransform, .ColorMultiplier = m_envMapSceneParams.ColorMultiplier, .Enabled = m_envMapSceneParams.Enabled };
         settings.FrameIndex = m_frameIndex;
 
+        if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->HasSplats() && IsGaussianSplatEmissionEnabled(m_ui))
+        {
+            m_gaussianSplatPass->BuildEmissionProxies(
+                ClampGaussianSplatEmissionProxyCount(m_ui.GaussianSplatEmissionMaxProxyCount),
+                m_ui.GaussianSplatScale,
+                uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5)),
+                m_ui.GaussianSplatRtxAdaptiveClamp,
+                m_ui.GaussianSplatAlphaCullThreshold);
+
+            settings.GaussianSplatEmissionProxies = &m_gaussianSplatPass->GetEmissionProxies();
+            settings.GaussianSplatEmissionObjectToWorld = MakeGaussianSplatObjectToWorld(m_ui);
+            settings.GaussianSplatEmissionIntensity = m_ui.GaussianSplatEmissionIntensity;
+        }
+
         m_lightsBaker->UpdateBegin(commandList, *m_bindingCache, settings, m_sceneTime, m_scene, m_materialsBaker, m_ommBaker, m_subInstanceBuffer, m_subInstanceData, m_envMapBaker->GetImportanceSampling()->GetRadianceAndImportanceMap());
     }
 }
@@ -1784,6 +1815,20 @@ void Sample::RtxdiSetupFrame(nvrhi::IFramebuffer* framebuffer, PathTracerCameraD
     bridgeParameters.usingReGIR = m_ui.ActualUseReSTIRDI();
 
     bridgeParameters.userSettings.restirDI.initialSamplingParams.environmentMapImportanceSampling = envMapPresent;
+
+    if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->HasSplats() && IsGaussianSplatEmissionEnabled(m_ui))
+    {
+        m_gaussianSplatPass->BuildEmissionProxies(
+            ClampGaussianSplatEmissionProxyCount(m_ui.GaussianSplatEmissionMaxProxyCount),
+            m_ui.GaussianSplatScale,
+            uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5)),
+            m_ui.GaussianSplatRtxAdaptiveClamp,
+            m_ui.GaussianSplatAlphaCullThreshold);
+
+        bridgeParameters.gaussianSplatEmissionProxies = &m_gaussianSplatPass->GetEmissionProxies();
+        bridgeParameters.gaussianSplatEmissionObjectToWorld = MakeGaussianSplatObjectToWorld(m_ui);
+        bridgeParameters.gaussianSplatEmissionIntensity = m_ui.GaussianSplatEmissionIntensity;
+    }
 
     if( m_ui.ResetRealtimeCaches )
         m_rtxdiPass->Reset();

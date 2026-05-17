@@ -224,12 +224,18 @@ void RtxdiPass::PrepareResources(
     }
 
     m_PrepareLightsPass->SetScene(m_Scene, envMap, envMapSceneParams);
+    m_PrepareLightsPass->SetGaussianSplatEmissionProxies(
+        m_BridgeParameters.gaussianSplatEmissionProxies,
+        m_BridgeParameters.gaussianSplatEmissionObjectToWorld,
+        m_BridgeParameters.gaussianSplatEmissionIntensity);
 
     //Check if resources have changed
     bool envMapPresent = envMap != nullptr;
     uint32_t numEmissiveMeshes, numEmissiveTriangles = 0;
     m_PrepareLightsPass->CountLightsInScene(numEmissiveMeshes, numEmissiveTriangles);
     uint32_t numPrimitiveLights = uint32_t(m_Scene->GetSceneGraph()->GetLights().size());
+    if (m_BridgeParameters.gaussianSplatEmissionProxies != nullptr && m_BridgeParameters.gaussianSplatEmissionIntensity > 0.0f)
+        numPrimitiveLights += uint32_t(m_BridgeParameters.gaussianSplatEmissionProxies->size());
     uint32_t numGeometryInstances = uint32_t(m_Scene->GetSceneGraph()->GetGeometryInstancesCount());
 
     if (m_rtxdiResources && (

@@ -13,6 +13,8 @@
 #include <donut/core/math/math.h>
 #include <nvrhi/nvrhi.h>
 
+#include "GaussianSplatEmissionProxy.h"
+
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -117,6 +119,12 @@ public:
         uint32_t kernelDegree,
         bool adaptiveClamp);
     void ReleaseAccelerationStructures();
+    void BuildEmissionProxies(
+        uint32_t maxProxyCount,
+        float splatScale,
+        uint32_t kernelDegree,
+        bool adaptiveClamp,
+        float alphaCullThreshold);
 
     void Render(
         nvrhi::ICommandList* commandList,
@@ -132,6 +140,7 @@ public:
     [[nodiscard]] nvrhi::IBuffer* GetSplatBuffer() const { return m_splatBuffer.Get(); }
     [[nodiscard]] uint32_t GetShadowPrimitiveCountPerSplat() const { return m_shadowPrimitiveCountPerSplat; }
     [[nodiscard]] bool GetShadowUsesTLASInstances() const { return m_lastAsUseTLASInstances; }
+    [[nodiscard]] const std::vector<GaussianSplatEmissionProxy>& GetEmissionProxies() const { return m_emissionProxies; }
 
 private:
     void CreateBindingSets(const RenderTargets& renderTargets, nvrhi::rt::IAccelStruct* meshTopLevelAS);
@@ -190,6 +199,7 @@ private:
     std::vector<GaussianSplatData> m_splats;
     std::vector<donut::math::float4> m_colorOpacity;
     std::vector<donut::math::float4> m_shCoefficients;
+    std::vector<GaussianSplatEmissionProxy> m_emissionProxies;
     std::vector<uint8_t> m_packedColorOpacity;
     std::vector<uint8_t> m_packedShCoefficients;
     uint32_t m_splatCount = 0;
@@ -204,6 +214,12 @@ private:
     float m_lastAsSplatScale = 1.0f;
     uint32_t m_lastAsKernelDegree = 2;
     bool m_lastAsAdaptiveClamp = true;
+    uint32_t m_cachedEmissionProxyMaxCount = 0;
+    float m_cachedEmissionProxySplatScale = 1.0f;
+    uint32_t m_cachedEmissionProxyKernelDegree = 0;
+    bool m_cachedEmissionProxyAdaptiveClamp = true;
+    float m_cachedEmissionProxyAlphaCullThreshold = 0.0f;
+    bool m_emissionProxyBuildPending = true;
     uint32_t m_shadowPrimitiveCountPerSplat = 1;
     bool m_sortCacheValid = false;
     uint32_t m_cachedSortSplatCount = 0;

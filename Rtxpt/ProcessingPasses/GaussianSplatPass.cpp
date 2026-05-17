@@ -121,6 +121,24 @@ namespace
             std::sqrt(variance.z)) * (std::max(splatScale, 1e-4f) * std::max(kernelScale, 1e-3f));
     }
 
+    float SrgbToLinear(float srgb)
+    {
+        srgb = std::max(srgb, 0.0f);
+        return srgb <= 0.04045f
+            ? srgb / 12.92f
+            : std::pow((srgb + 0.055f) / 1.055f, 2.4f);
+    }
+
+    float3 SrgbToLinear(const float3& srgb)
+    {
+        return float3(SrgbToLinear(srgb.x), SrgbToLinear(srgb.y), SrgbToLinear(srgb.z));
+    }
+
+    float Luminance(const float3& color)
+    {
+        return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+    }
+
     nvrhi::rt::GeometryAABB GaussianAabbFromSplat(const GaussianSplatData& splat, float splatScale, uint32_t kernelDegree, bool adaptiveClamp)
     {
         const float3 center = splat.centerOpacity.xyz();
@@ -992,6 +1010,7 @@ bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool
 
     m_splats = std::move(loadedSplats);
     m_shCoefficients = std::move(loadedShCoefficients);
+    m_emissionProxies.clear();
     m_splatCount = uint32_t(m_splats.size());
     m_shDegree = loadedShDegree;
     m_colorOpacity.clear();
@@ -1073,12 +1092,99 @@ bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool
     m_lastAsSplatScale = 1.0f;
     m_lastAsKernelDegree = 2;
     m_lastAsAdaptiveClamp = true;
+    m_cachedEmissionProxyMaxCount = 0;
+    m_cachedEmissionProxySplatScale = 1.0f;
+    m_cachedEmissionProxyKernelDegree = 0;
+    m_cachedEmissionProxyAdaptiveClamp = true;
+    m_cachedEmissionProxyAlphaCullThreshold = 0.0f;
+    m_emissionProxyBuildPending = true;
     m_shadowPrimitiveCountPerSplat = 1;
     m_randomIndices.clear();
     m_randomIndexUploadPending = true;
     InvalidateSortCache();
 
     return true;
+}
+
+void GaussianSplatPass::BuildEmissionProxies(
+    uint32_t maxProxyCount,
+    float splatScale,
+    uint32_t kernelDegree,
+    bool adaptiveClamp,
+    float alphaCullThreshold)
+{
+    kernelDegree = std::min(kernelDegree, 5u);
+    alphaCullThreshold = std::max(alphaCullThreshold, 0.0f);
+
+    if (!HasSplats() || maxProxyCount == 0)
+    {
+        m_emissionProxies.clear();
+        m_cachedEmissionProxyMaxCount = maxProxyCount;
+        m_cachedEmissionProxySplatScale = splatScale;
+        m_cachedEmissionProxyKernelDegree = kernelDegree;
+        m_cachedEmissionProxyAdaptiveClamp = adaptiveClamp;
+        m_cachedEmissionProxyAlphaCullThreshold = alphaCullThreshold;
+        m_emissionProxyBuildPending = false;
+        return;
+    }
+
+    if (!m_emissionProxyBuildPending
+        && m_cachedEmissionProxyMaxCount == maxProxyCount
+        && std::abs(m_cachedEmissionProxySplatScale - splatScale) < 1e-4f
+        && m_cachedEmissionProxyKernelDegree == kernelDegree
+        && m_cachedEmissionProxyAdaptiveClamp == adaptiveClamp
+        && std::abs(m_cachedEmissionProxyAlphaCullThreshold - alphaCullThreshold) < 1e-6f)
+    {
+        return;
+    }
+
+    std::vector<GaussianSplatEmissionProxy> candidates;
+    candidates.reserve(m_splats.size());
+
+    for (const GaussianSplatData& splat : m_splats)
+    {
+        const float opacity = std::max(splat.centerOpacity.w, 0.0f);
+        if (opacity <= alphaCullThreshold)
+            continue;
+
+        const float3 extent = GaussianAabbExtent(splat, splatScale, kernelDegree, adaptiveClamp);
+        const float radius = std::max(1e-4f, std::max(extent.x, std::max(extent.y, extent.z)));
+        const float3 linearSh0 = SrgbToLinear(float3(
+            std::max(splat.color.x, 0.0f),
+            std::max(splat.color.y, 0.0f),
+            std::max(splat.color.z, 0.0f)));
+        const float3 radiance = linearSh0 * opacity;
+        const float weight = std::max(0.0f, Luminance(radiance)) * radius * radius;
+        if (weight <= 0.0f)
+            continue;
+
+        GaussianSplatEmissionProxy proxy;
+        proxy.center = splat.centerOpacity.xyz();
+        proxy.radius = radius;
+        proxy.radiance = radiance;
+        proxy.weight = weight;
+        candidates.push_back(proxy);
+    }
+
+    if (candidates.size() > maxProxyCount)
+    {
+        auto byDescendingWeight = [](const GaussianSplatEmissionProxy& lhs, const GaussianSplatEmissionProxy& rhs)
+        {
+            return lhs.weight > rhs.weight;
+        };
+
+        std::nth_element(candidates.begin(), candidates.begin() + maxProxyCount, candidates.end(), byDescendingWeight);
+        candidates.resize(maxProxyCount);
+        std::sort(candidates.begin(), candidates.end(), byDescendingWeight);
+    }
+
+    m_emissionProxies = std::move(candidates);
+    m_cachedEmissionProxyMaxCount = maxProxyCount;
+    m_cachedEmissionProxySplatScale = splatScale;
+    m_cachedEmissionProxyKernelDegree = kernelDegree;
+    m_cachedEmissionProxyAdaptiveClamp = adaptiveClamp;
+    m_cachedEmissionProxyAlphaCullThreshold = alphaCullThreshold;
+    m_emissionProxyBuildPending = false;
 }
 
 void GaussianSplatPass::BuildAccelerationStructures(

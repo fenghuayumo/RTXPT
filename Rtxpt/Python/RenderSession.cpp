@@ -244,6 +244,9 @@ RenderSession::RenderSession(const Config& cfg)
     m_cmdLine.GaussianSplatScale = cfg.gaussianSplatScale;
     m_cmdLine.GaussianSplatAlphaScale = cfg.gaussianSplatAlphaScale;
     m_cmdLine.GaussianSplatBrightness = cfg.gaussianSplatBrightness;
+    m_cmdLine.GaussianSplatAsEmitter = cfg.gaussianSplatAsEmitter;
+    m_cmdLine.GaussianSplatEmissionIntensity = cfg.gaussianSplatEmissionIntensity;
+    m_cmdLine.GaussianSplatEmissionMaxProxyCount = cfg.gaussianSplatEmissionMaxProxyCount;
     m_cmdLine.GaussianSplatAlphaCullThreshold = cfg.gaussianSplatAlphaCullThreshold;
 
     if (cfg.nonInteractive)
