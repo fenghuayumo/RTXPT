@@ -84,6 +84,7 @@ without creating an OS window or swap chain.
 | `Settings.realtime_aa`          | rtxpt.RealtimeAA (Off / TAA / DLSS / DLSS-RR) |
 | `Settings.dlss_mode` etc.       | DLSS / DLSS-RR / DLSS-G / Reflex parameters   |
 | `Settings.oidn_*`               | OIDN denoiser parameters (reference mode)     |
+| `Settings.gaussian_splat_*`     | 3DGS raster, storage, culling, shadow controls|
 | `Settings.environment_map`      | Tint/intensity/rotation of the env map        |
 | `Settings.bounce_count` etc.    | Path tracer / NEE / RTXDI knobs               |
 | `Renderer.step()/step_n(n)`     | (extension) drive the loop one frame at a time|
@@ -101,6 +102,11 @@ without creating an OS window or swap chain.
 * `rtxpt.OidnPasses` - `ColorOnly`, `Albedo`, `AlbedoNormal`
 * `rtxpt.OidnPrefilter` - `None_`, `Fast`, `Accurate`
 * `rtxpt.OidnQuality` - `Fast`, `Balanced`, `High`
+* `rtxpt.GaussianSplatSortMode` - `GpuSort`, `StochasticSplats`
+* `rtxpt.GaussianSplatStorageFormat` - `Float32`, `Float16`, `Uint8`
+* `rtxpt.GaussianSplatFrustumCulling` - `Disabled`, `AtDistanceStage`, `AtRasterStage`
+* `rtxpt.GaussianSplatShadowMode` - `Disabled`, `Hard`, `Soft`
+* `rtxpt.GaussianSplatFTBSyncMode` - `Disabled`, `Interlock`
 
 All enums support `int(rtxpt.<EnumName>.<value>)` so they can be assigned
 directly to settings fields that store ints.

@@ -64,6 +64,11 @@ namespace py_enums
     enum class OidnPasses     : int { ColorOnly = 0, Albedo = 1, AlbedoNormal = 2 };
     enum class OidnPrefilter  : int { None_ = 0, Fast = 1, Accurate = 2 };
     enum class OidnQuality    : int { Fast = 0, Balanced = 1, High = 2 };
+    enum class GaussianSplatSortMode : int { GpuSort = 0, StochasticSplats = 1 };
+    enum class GaussianSplatStorageFormat : int { Float32 = 0, Float16 = 1, Uint8 = 2 };
+    enum class GaussianSplatFrustumCulling : int { Disabled = 0, AtDistanceStage = 1, AtRasterStage = 2 };
+    enum class GaussianSplatShadowMode : int { Disabled = 0, Hard = 1, Soft = 2 };
+    enum class GaussianSplatFTBSyncMode : int { Disabled = 0, Interlock = 1 };
 }
 
 namespace
@@ -193,6 +198,44 @@ void RegisterCoreBindings(nb::module_& m)
         .value("Fast",     OidnQuality::Fast)
         .value("Balanced", OidnQuality::Balanced)
         .value("High",     OidnQuality::High)
+        .export_values();
+
+    nb::enum_<GaussianSplatSortMode>(m, "GaussianSplatSortMode",
+        "3D Gaussian Splat rasterization ordering mode.",
+        nb::is_arithmetic())
+        .value("GpuSort",           GaussianSplatSortMode::GpuSort)
+        .value("StochasticSplats",  GaussianSplatSortMode::StochasticSplats)
+        .export_values();
+
+    nb::enum_<GaussianSplatStorageFormat>(m, "GaussianSplatStorageFormat",
+        "GPU storage format for 3DGS color/SH payloads.",
+        nb::is_arithmetic())
+        .value("Float32", GaussianSplatStorageFormat::Float32)
+        .value("Float16", GaussianSplatStorageFormat::Float16)
+        .value("Uint8",   GaussianSplatStorageFormat::Uint8)
+        .export_values();
+
+    nb::enum_<GaussianSplatFrustumCulling>(m, "GaussianSplatFrustumCulling",
+        "3DGS frustum culling mode.",
+        nb::is_arithmetic())
+        .value("Disabled",        GaussianSplatFrustumCulling::Disabled)
+        .value("AtDistanceStage",  GaussianSplatFrustumCulling::AtDistanceStage)
+        .value("AtRasterStage",    GaussianSplatFrustumCulling::AtRasterStage)
+        .export_values();
+
+    nb::enum_<GaussianSplatShadowMode>(m, "GaussianSplatShadowMode",
+        "Hybrid 3DGS shadow mode.",
+        nb::is_arithmetic())
+        .value("Disabled", GaussianSplatShadowMode::Disabled)
+        .value("Hard",     GaussianSplatShadowMode::Hard)
+        .value("Soft",     GaussianSplatShadowMode::Soft)
+        .export_values();
+
+    nb::enum_<GaussianSplatFTBSyncMode>(m, "GaussianSplatFTBSyncMode",
+        "3DGS front-to-back synchronization mode.",
+        nb::is_arithmetic())
+        .value("Disabled",  GaussianSplatFTBSyncMode::Disabled)
+        .value("Interlock", GaussianSplatFTBSyncMode::Interlock)
         .export_values();
 
     // --- PTMaterial -------------------------------------------------------
@@ -421,8 +464,17 @@ void RegisterCoreBindings(nb::module_& m)
         .def_rw("gaussian_splat_depth_test",     &SampleUIData::GaussianSplatDepthTest)
         .def_rw("gaussian_splat_shadows",        &SampleUIData::GaussianSplatShadows)
         .def_rw("gaussian_splat_hybrid_shadows", &SampleUIData::GaussianSplatShadows)
-        .def_rw("gaussian_splat_shadows_mode",   &SampleUIData::GaussianSplatShadowsMode)
-        .def_rw("gaussian_splat_sorting_mode",   &SampleUIData::GaussianSplatSortingMode)
+        .def_rw("gaussian_splat_shadows_mode",   &SampleUIData::GaussianSplatShadowsMode,
+                "3DGS shadow mode (rtxpt.GaussianSplatShadowMode).")
+        .def_rw("gaussian_splat_sorting_mode",   &SampleUIData::GaussianSplatSortingMode,
+                "3DGS sort mode (rtxpt.GaussianSplatSortMode).")
+        .def_rw("gaussian_splat_sh_format",      &SampleUIData::GaussianSplatSHFormat,
+                "3DGS SH storage format (rtxpt.GaussianSplatStorageFormat).")
+        .def_rw("gaussian_splat_rgba_format",    &SampleUIData::GaussianSplatRGBAFormat,
+                "3DGS RGBA storage format (rtxpt.GaussianSplatStorageFormat).")
+        .def_rw("gaussian_splat_use_aabbs",      &SampleUIData::GaussianSplatUseAABBs)
+        .def_rw("gaussian_splat_use_tlas_instances", &SampleUIData::GaussianSplatUseTLASInstances)
+        .def_rw("gaussian_splat_blas_compaction", &SampleUIData::GaussianSplatBlasCompaction)
         .def_rw("gaussian_splat_rtx_kernel_degree", &SampleUIData::GaussianSplatRtxKernelDegree)
         .def_rw("gaussian_splat_rtx_adaptive_clamp", &SampleUIData::GaussianSplatRtxAdaptiveClamp)
         .def_rw("gaussian_splat_rtx_alpha_clamp", &SampleUIData::GaussianSplatRtxAlphaClamp)
@@ -435,6 +487,17 @@ void RegisterCoreBindings(nb::module_& m)
         .def_rw("gaussian_splat_rtx_colored_shadow_strength", &SampleUIData::GaussianSplatRtxColoredShadowStrength)
         .def_rw("gaussian_splat_rtx_mesh_composite_threshold", &SampleUIData::GaussianSplatRtxMeshCompositeThreshold)
         .def_rw("gaussian_splat_rtx_depth_iso_threshold", &SampleUIData::GaussianSplatRtxDepthIsoThreshold)
+        .def_rw("gaussian_splat_mip_antialiasing", &SampleUIData::GaussianSplatMipAntialiasing)
+        .def_rw("gaussian_splat_quantize_normals", &SampleUIData::GaussianSplatQuantizeNormals)
+        .def_rw("gaussian_splat_ftb_sync_mode", &SampleUIData::GaussianSplatFTBSyncMode,
+                "3DGS front-to-back synchronization mode (rtxpt.GaussianSplatFTBSyncMode).")
+        .def_rw("gaussian_splat_depth_iso_threshold", &SampleUIData::GaussianSplatDepthIsoThreshold)
+        .def_rw("gaussian_splat_fragment_shader_barycentric", &SampleUIData::GaussianSplatFragmentShaderBarycentric)
+        .def_rw("gaussian_splat_frustum_culling", &SampleUIData::GaussianSplatFrustumCulling,
+                "3DGS frustum culling mode (rtxpt.GaussianSplatFrustumCulling).")
+        .def_rw("gaussian_splat_frustum_dilation", &SampleUIData::GaussianSplatFrustumDilation)
+        .def_rw("gaussian_splat_screen_size_culling", &SampleUIData::GaussianSplatScreenSizeCulling)
+        .def_rw("gaussian_splat_min_pixel_coverage", &SampleUIData::GaussianSplatMinPixelCoverage)
         .def_rw("gaussian_splat_scale",          &SampleUIData::GaussianSplatScale)
         .def_rw("gaussian_splat_alpha_scale",    &SampleUIData::GaussianSplatAlphaScale)
         .def_rw("gaussian_splat_brightness",     &SampleUIData::GaussianSplatBrightness)
@@ -442,6 +505,24 @@ void RegisterCoreBindings(nb::module_& m)
         .def_rw("gaussian_splat_shadow_strength", &SampleUIData::GaussianSplatShadowStrength)
         .def_rw("gaussian_splat_shadow_soft_radius", &SampleUIData::GaussianSplatShadowSoftRadius)
         .def_rw("gaussian_splat_shadow_soft_sample_count", &SampleUIData::GaussianSplatShadowSoftSampleCount)
+        .def_prop_rw("gaussian_splat_translation",
+            [](SampleUIData& s) { return Float3ToTuple(s.GaussianSplatTranslation); },
+            [](SampleUIData& s, nb::object v) {
+                s.GaussianSplatTranslation = ToFloat3(v);
+                s.ResetAccumulation = true;
+            })
+        .def_prop_rw("gaussian_splat_rotation_euler_deg",
+            [](SampleUIData& s) { return Float3ToTuple(s.GaussianSplatRotationEulerDeg); },
+            [](SampleUIData& s, nb::object v) {
+                s.GaussianSplatRotationEulerDeg = ToFloat3(v);
+                s.ResetAccumulation = true;
+            })
+        .def_prop_rw("gaussian_splat_object_scale",
+            [](SampleUIData& s) { return Float3ToTuple(s.GaussianSplatObjectScale); },
+            [](SampleUIData& s, nb::object v) {
+                s.GaussianSplatObjectScale = ToFloat3(v);
+                s.ResetAccumulation = true;
+            })
         .def_ro("gaussian_splat_count",          &SampleUIData::GaussianSplatCount)
         .def_ro("gaussian_splat_file_name",      &SampleUIData::GaussianSplatFileName)
 
