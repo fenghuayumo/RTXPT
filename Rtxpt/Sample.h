@@ -241,8 +241,8 @@ private:
     void                                    ApplyReferenceOIDN();
     void                                    PostProcessPreToneMapping(nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView);
     void                                    PostProcessPostToneMapping(nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView);
-    void                                    RenderGaussianSplats();
-    void                                    AccumulateGaussianSplats(const donut::engine::IView& splatView, int temporalSamplingCount);
+    void                                    RenderGaussianSplats(bool renderToOutputColor);
+    void                                    AccumulateGaussianSplats(const donut::engine::IView& splatView);
 
 private:
     std::shared_ptr<donut::vfs::RootFileSystem> m_RootFS;

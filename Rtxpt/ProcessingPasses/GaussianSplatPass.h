@@ -56,12 +56,19 @@ enum class GaussianSplatProjectionMethod : uint32_t
     Conic = 1
 };
 
+enum class GaussianSplatRenderTarget : uint32_t
+{
+    ProcessedOutputColor = 0,
+    OutputColor = 1
+};
+
 struct GaussianSplatRenderSettings
 {
     bool enabled = true;
     bool depthTest = true;
     bool shadowsEnabled = false;
     GaussianSplatSortMode sortingMode = GaussianSplatSortMode::GpuSort;
+    GaussianSplatRenderTarget renderTarget = GaussianSplatRenderTarget::ProcessedOutputColor;
     GaussianSplatFrustumCulling frustumCulling = GaussianSplatFrustumCulling::AtRasterStage;
     GaussianSplatProjectionMethod projectionMethod = GaussianSplatProjectionMethod::Eigen;
     GaussianSplatStorageFormat shFormat = GaussianSplatStorageFormat::Uint8;
@@ -151,6 +158,7 @@ private:
     nvrhi::BufferHandle m_splatTriangleVertexBuffer;
     nvrhi::BufferHandle m_splatTriangleIndexBuffer;
     nvrhi::TextureHandle m_stochasticDepthBuffer;
+    nvrhi::TextureHandle m_stochasticProcessedDepthBuffer;
 
     nvrhi::BindingLayoutHandle m_rasterRenderBindingLayout;
     nvrhi::BindingLayoutHandle m_hybridRenderBindingLayout;
@@ -168,11 +176,14 @@ private:
     nvrhi::GraphicsPipelineHandle m_hybridRenderPipeline;
     nvrhi::GraphicsPipelineHandle m_stochasticRasterRenderPipeline;
     nvrhi::GraphicsPipelineHandle m_stochasticHybridRenderPipeline;
+    nvrhi::GraphicsPipelineHandle m_stochasticProcessedRasterRenderPipeline;
+    nvrhi::GraphicsPipelineHandle m_stochasticProcessedHybridRenderPipeline;
     nvrhi::ComputePipelineHandle m_sortKeyPipeline;
     nvrhi::rt::AccelStructHandle m_splatBottomLevelAS;
     nvrhi::rt::AccelStructHandle m_splatTopLevelAS;
     nvrhi::rt::IAccelStruct* m_hybridRenderMeshTopLevelAS = nullptr;
     std::shared_ptr<donut::engine::FramebufferFactory> m_stochasticFramebuffer;
+    std::shared_ptr<donut::engine::FramebufferFactory> m_stochasticProcessedFramebuffer;
 
     std::vector<GaussianSplatData> m_splats;
     std::vector<donut::math::float4> m_colorOpacity;

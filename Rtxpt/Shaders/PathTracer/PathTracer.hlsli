@@ -483,8 +483,11 @@ namespace PathTracer
 #if PATH_TRACER_MODE!=PATH_TRACER_MODE_REFERENCE
         StablePlanesHandleMiss(path, environmentEmission, rayOrigin, rayDir, rayTCurrent, workingContext);
 #else
-        // in case of reference path tracer, dump guide buffers just in case ever needed; these are dumped every frame and are not accumulated so they'll jitter
-        Bridge::ExportNonSurface(path, rayOrigin+rayDir*rayTCurrent, float3(0,0,0) );
+        // Reference mode does not have a stable-plane prepass, so export only
+        // the primary camera depth. Secondary bounces or terminal misses would
+        // otherwise overwrite the mesh depth used by rasterized 3DGS occlusion.
+        if (path.getVertexIndex() == 1)
+            Bridge::ExportNonSurface(path, rayOrigin+rayDir*rayTCurrent, float3(0,0,0) );
 #endif
 
         if (any(environmentEmission>0))
@@ -680,8 +683,10 @@ namespace PathTracer
         // this needs to happen before updating throughput
         StablePlanesHandleHit(path, rayOrigin, rayDir, rayTCurrent, workingContext, surfaceData, volumeAbsorption, surfaceEmission, pathStopping);
 #else
-        // in case of reference path tracer, dump guide buffers just in case ever needed; these are dumped every frame and are not accumulated so they'll jitter
-        Bridge::ExportSurface(path, surfaceData, path.GetSceneLength(), float3(0,0,0) );
+        // Keep exported depth as the primary camera surface for post path-trace
+        // passes such as rasterized 3DGS mesh-depth testing.
+        if (path.getVertexIndex() == 1)
+            Bridge::ExportSurface(path, surfaceData, path.GetSceneLength(), float3(0,0,0) );
 #endif
 
         if (pathStopping)

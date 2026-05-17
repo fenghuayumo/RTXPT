@@ -324,7 +324,6 @@ struct SampleUIData
     bool                                GaussianSplatShadows = false;
     int                                 GaussianSplatShadowsMode = 0; // 0 = off, 1 = hard, 2 = soft
     int                                 GaussianSplatSortingMode = 0; // 0 = GPU sort, 1 = stochastic splats
-    int                                 GaussianSplatTemporalSamplingCount = 200;
     int                                 GaussianSplatSHFormat = 2;
     int                                 GaussianSplatRGBAFormat = 2;
     bool                                GaussianSplatUseAABBs = false;

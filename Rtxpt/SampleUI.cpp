@@ -115,7 +115,7 @@ namespace
 
     bool GaussianSplatSortingCombo(SampleUIData& ui)
     {
-        const bool changed = ImGui::Combo("Sorting Method", &ui.GaussianSplatSortingMode, "GPU sort\0Stachostic Splats\0\0");
+        const bool changed = ImGui::Combo("Sorting Method", &ui.GaussianSplatSortingMode, "GPU sort\0Stochastic Splats\0\0");
         ui.GaussianSplatSortingMode = dm::clamp(ui.GaussianSplatSortingMode, 0, 1);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("GPU sort uses the existing radix-sort path. Stochastic splats uses stable randomized order plus stochastic opacity accept/reject.");
@@ -822,12 +822,6 @@ void SampleUI::buildUI(void)
                     RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
 
                     RESET_ON_CHANGE(GaussianSplatSortingCombo(m_ui));
-                    ImGui::BeginDisabled(m_ui.GaussianSplatSortingMode != 1);
-                    RESET_ON_CHANGE(ImGui::InputInt("Temporal Sampling Count", &m_ui.GaussianSplatTemporalSamplingCount, 1, 10));
-                    ImGui::EndDisabled();
-                    m_ui.GaussianSplatTemporalSamplingCount = dm::clamp(m_ui.GaussianSplatTemporalSamplingCount, 0, 1024 * 1024);
-                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                        ImGui::SetTooltip("Number of stochastic splat frames accumulated before temporal sampling stops. 0 disables stochastic temporal accumulation.");
                     RESET_ON_CHANGE(ImGui::Checkbox("Mip splatting antialiasing", &m_ui.GaussianSplatMipAntialiasing));
                     RESET_ON_CHANGE(ImGui::Checkbox("Quantize Normals", &m_ui.GaussianSplatQuantizeNormals));
                     RESET_ON_CHANGE(GaussianSplatFTBCombo(m_ui));

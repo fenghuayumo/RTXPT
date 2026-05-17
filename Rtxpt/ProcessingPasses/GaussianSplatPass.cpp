@@ -1289,61 +1289,71 @@ void GaussianSplatPass::CreateBindingSets(const RenderTargets& renderTargets, nv
 
 void GaussianSplatPass::CreateStochasticFramebuffer(const RenderTargets& renderTargets)
 {
-    if (!renderTargets.ProcessedOutputColor)
-        return;
-
-    const nvrhi::TextureDesc& colorDesc = renderTargets.ProcessedOutputColor->getDesc();
-    bool depthMatches = false;
-    if (m_stochasticDepthBuffer)
+    auto createFramebuffer = [this](
+        const nvrhi::TextureHandle& colorTarget,
+        nvrhi::TextureHandle& depthBuffer,
+        std::shared_ptr<donut::engine::FramebufferFactory>& framebuffer,
+        const char* depthName)
     {
-        const nvrhi::TextureDesc& depthDesc = m_stochasticDepthBuffer->getDesc();
-        depthMatches = depthDesc.width == colorDesc.width
-            && depthDesc.height == colorDesc.height
-            && depthDesc.sampleCount == colorDesc.sampleCount
-            && depthDesc.sampleQuality == colorDesc.sampleQuality;
-    }
+        if (!colorTarget)
+            return;
 
-    if (!depthMatches)
-    {
-        const std::array<nvrhi::Format, 4> depthFormats = {
-            nvrhi::Format::D32,
-            nvrhi::Format::D24S8,
-            nvrhi::Format::D32S8,
-            nvrhi::Format::D16
-        };
-        const nvrhi::FormatSupport depthFeatures =
-            nvrhi::FormatSupport::Texture |
-            nvrhi::FormatSupport::DepthStencil;
+        const nvrhi::TextureDesc& colorDesc = colorTarget->getDesc();
+        bool depthMatches = false;
+        if (depthBuffer)
+        {
+            const nvrhi::TextureDesc& depthDesc = depthBuffer->getDesc();
+            depthMatches = depthDesc.width == colorDesc.width
+                && depthDesc.height == colorDesc.height
+                && depthDesc.sampleCount == colorDesc.sampleCount
+                && depthDesc.sampleQuality == colorDesc.sampleQuality;
+        }
 
-        nvrhi::TextureDesc depthDesc;
-        depthDesc.width = colorDesc.width;
-        depthDesc.height = colorDesc.height;
-        depthDesc.sampleCount = colorDesc.sampleCount;
-        depthDesc.sampleQuality = colorDesc.sampleQuality;
-        depthDesc.dimension = colorDesc.dimension;
-        depthDesc.mipLevels = 1;
-        depthDesc.format = nvrhi::utils::ChooseFormat(m_device, depthFeatures, depthFormats.data(), depthFormats.size());
-        depthDesc.isTypeless = true;
-        depthDesc.isRenderTarget = true;
-        depthDesc.isUAV = false;
-        depthDesc.useClearValue = true;
-        depthDesc.clearValue = nvrhi::Color(0.0f);
-        depthDesc.initialState = nvrhi::ResourceStates::DepthWrite;
-        depthDesc.keepInitialState = true;
-        depthDesc.debugName = "GaussianSplatStochasticDepth";
-        m_stochasticDepthBuffer = m_device->createTexture(depthDesc);
-    }
+        if (!depthMatches)
+        {
+            const std::array<nvrhi::Format, 4> depthFormats = {
+                nvrhi::Format::D32,
+                nvrhi::Format::D24S8,
+                nvrhi::Format::D32S8,
+                nvrhi::Format::D16
+            };
+            const nvrhi::FormatSupport depthFeatures =
+                nvrhi::FormatSupport::Texture |
+                nvrhi::FormatSupport::DepthStencil;
 
-    const bool framebufferMatches = m_stochasticFramebuffer
-        && !m_stochasticFramebuffer->RenderTargets.empty()
-        && m_stochasticFramebuffer->RenderTargets[0].Get() == renderTargets.ProcessedOutputColor.Get()
-        && m_stochasticFramebuffer->DepthTarget.Get() == m_stochasticDepthBuffer.Get();
-    if (!framebufferMatches)
-    {
-        m_stochasticFramebuffer = std::make_shared<donut::engine::FramebufferFactory>(m_device);
-        m_stochasticFramebuffer->RenderTargets = { renderTargets.ProcessedOutputColor };
-        m_stochasticFramebuffer->DepthTarget = m_stochasticDepthBuffer;
-    }
+            nvrhi::TextureDesc depthDesc;
+            depthDesc.width = colorDesc.width;
+            depthDesc.height = colorDesc.height;
+            depthDesc.sampleCount = colorDesc.sampleCount;
+            depthDesc.sampleQuality = colorDesc.sampleQuality;
+            depthDesc.dimension = colorDesc.dimension;
+            depthDesc.mipLevels = 1;
+            depthDesc.format = nvrhi::utils::ChooseFormat(m_device, depthFeatures, depthFormats.data(), depthFormats.size());
+            depthDesc.isTypeless = true;
+            depthDesc.isRenderTarget = true;
+            depthDesc.isUAV = false;
+            depthDesc.useClearValue = true;
+            depthDesc.clearValue = nvrhi::Color(0.0f);
+            depthDesc.initialState = nvrhi::ResourceStates::DepthWrite;
+            depthDesc.keepInitialState = true;
+            depthDesc.debugName = depthName;
+            depthBuffer = m_device->createTexture(depthDesc);
+        }
+
+        const bool framebufferMatches = framebuffer
+            && !framebuffer->RenderTargets.empty()
+            && framebuffer->RenderTargets[0].Get() == colorTarget.Get()
+            && framebuffer->DepthTarget.Get() == depthBuffer.Get();
+        if (!framebufferMatches)
+        {
+            framebuffer = std::make_shared<donut::engine::FramebufferFactory>(m_device);
+            framebuffer->RenderTargets = { colorTarget };
+            framebuffer->DepthTarget = depthBuffer;
+        }
+    };
+
+    createFramebuffer(renderTargets.OutputColor, m_stochasticDepthBuffer, m_stochasticFramebuffer, "GaussianSplatStochasticDepth");
+    createFramebuffer(renderTargets.ProcessedOutputColor, m_stochasticProcessedDepthBuffer, m_stochasticProcessedFramebuffer, "GaussianSplatStochasticProcessedDepth");
 }
 
 void GaussianSplatPass::CreatePipeline(const RenderTargets& renderTargets)
@@ -1421,6 +1431,30 @@ void GaussianSplatPass::CreatePipeline(const RenderTargets& renderTargets)
         m_stochasticHybridRenderPipeline = m_device->createGraphicsPipeline(
             pipelineDesc,
             m_stochasticFramebuffer->GetFramebuffer(nvrhi::AllSubresources));
+    }
+
+    if (m_stochasticProcessedFramebuffer)
+    {
+        nvrhi::BlendState::RenderTarget opaqueBlend;
+        opaqueBlend.blendEnable = false;
+        pipelineDesc.renderState.blendState.targets[0] = opaqueBlend;
+        pipelineDesc.renderState.depthStencilState.depthTestEnable = true;
+        pipelineDesc.renderState.depthStencilState.depthWriteEnable = true;
+        pipelineDesc.renderState.depthStencilState.depthFunc = nvrhi::ComparisonFunc::GreaterOrEqual;
+
+        pipelineDesc.bindingLayouts = { m_rasterRenderBindingLayout };
+        pipelineDesc.VS = m_rasterVertexShader;
+        pipelineDesc.PS = m_rasterPixelShader;
+        m_stochasticProcessedRasterRenderPipeline = m_device->createGraphicsPipeline(
+            pipelineDesc,
+            m_stochasticProcessedFramebuffer->GetFramebuffer(nvrhi::AllSubresources));
+
+        pipelineDesc.bindingLayouts = { m_hybridRenderBindingLayout };
+        pipelineDesc.VS = m_hybridVertexShader;
+        pipelineDesc.PS = m_hybridPixelShader;
+        m_stochasticProcessedHybridRenderPipeline = m_device->createGraphicsPipeline(
+            pipelineDesc,
+            m_stochasticProcessedFramebuffer->GetFramebuffer(nvrhi::AllSubresources));
     }
 
     nvrhi::ComputePipelineDesc computePipelineDesc;
@@ -1598,7 +1632,12 @@ void GaussianSplatPass::Render(
         return;
 
     const bool stochasticSplats = settings.sortingMode == GaussianSplatSortMode::StochasticSplats;
-    if (stochasticSplats && (!m_stochasticFramebuffer || !m_stochasticRasterRenderPipeline))
+    const bool stochasticToOutput = stochasticSplats && settings.renderTarget == GaussianSplatRenderTarget::OutputColor;
+    nvrhi::TextureHandle stochasticDepthBuffer = stochasticToOutput ? m_stochasticDepthBuffer : m_stochasticProcessedDepthBuffer;
+    std::shared_ptr<donut::engine::FramebufferFactory> stochasticFramebuffer = stochasticToOutput
+        ? m_stochasticFramebuffer
+        : m_stochasticProcessedFramebuffer;
+    if (stochasticSplats && (!stochasticFramebuffer || !stochasticDepthBuffer))
         return;
     if (!stochasticSplats && !m_rasterRenderPipeline)
         return;
@@ -1661,11 +1700,21 @@ void GaussianSplatPass::Render(
 
     UpdateSplatIndices(commandList, constants, settings.sortingMode);
 
-    nvrhi::GraphicsPipelineHandle renderPipeline = useHybridShadows
-        ? (stochasticSplats ? m_stochasticHybridRenderPipeline : m_hybridRenderPipeline)
-        : (stochasticSplats ? m_stochasticRasterRenderPipeline : m_rasterRenderPipeline);
+    nvrhi::GraphicsPipelineHandle renderPipeline;
+    if (useHybridShadows)
+    {
+        renderPipeline = stochasticSplats
+            ? (stochasticToOutput ? m_stochasticHybridRenderPipeline : m_stochasticProcessedHybridRenderPipeline)
+            : m_hybridRenderPipeline;
+    }
+    else
+    {
+        renderPipeline = stochasticSplats
+            ? (stochasticToOutput ? m_stochasticRasterRenderPipeline : m_stochasticProcessedRasterRenderPipeline)
+            : m_rasterRenderPipeline;
+    }
     nvrhi::IFramebuffer* framebuffer = stochasticSplats
-        ? m_stochasticFramebuffer->GetFramebuffer(nvrhi::AllSubresources)
+        ? stochasticFramebuffer->GetFramebuffer(nvrhi::AllSubresources)
         : renderTargets.ProcessedOutputFramebuffer->GetFramebuffer(nvrhi::AllSubresources);
     if (!renderPipeline || !framebuffer)
     {
@@ -1675,15 +1724,16 @@ void GaussianSplatPass::Render(
 
     commandList->setBufferState(m_indexBuffer, nvrhi::ResourceStates::ShaderResource);
     commandList->setTextureState(renderTargets.Depth, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);
-    commandList->setTextureState(renderTargets.ProcessedOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::RenderTarget);
+    nvrhi::TextureHandle colorTarget = stochasticToOutput ? renderTargets.OutputColor : renderTargets.ProcessedOutputColor;
+    commandList->setTextureState(colorTarget, nvrhi::AllSubresources, nvrhi::ResourceStates::RenderTarget);
     if (stochasticSplats)
-        commandList->setTextureState(m_stochasticDepthBuffer, nvrhi::AllSubresources, nvrhi::ResourceStates::DepthWrite);
+        commandList->setTextureState(stochasticDepthBuffer, nvrhi::AllSubresources, nvrhi::ResourceStates::DepthWrite);
     commandList->commitBarriers();
 
     if (stochasticSplats)
     {
-        const nvrhi::FormatInfo& depthFormatInfo = nvrhi::getFormatInfo(m_stochasticDepthBuffer->getDesc().format);
-        commandList->clearDepthStencilTexture(m_stochasticDepthBuffer, nvrhi::AllSubresources, true, 0.0f, depthFormatInfo.hasStencil, 0);
+        const nvrhi::FormatInfo& depthFormatInfo = nvrhi::getFormatInfo(stochasticDepthBuffer->getDesc().format);
+        commandList->clearDepthStencilTexture(stochasticDepthBuffer, nvrhi::AllSubresources, true, 0.0f, depthFormatInfo.hasStencil, 0);
     }
 
     nvrhi::GraphicsState state;

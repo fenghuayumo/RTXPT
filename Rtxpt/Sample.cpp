@@ -2103,29 +2103,21 @@ void Sample::PostProcessPostToneMapping(nvrhi::ICommandList* commandList, const 
     }
 }
 
-void Sample::RenderGaussianSplats()
+void Sample::RenderGaussianSplats(bool renderToOutputColor)
 {
     if (m_gaussianSplatPass == nullptr || !m_gaussianSplatPass->HasSplats())
         return;
 
     const bool stochasticSplats = m_ui.EnableGaussianSplats && m_ui.GaussianSplatSortingMode == 1;
-    const int temporalSamplingCount = dm::clamp(m_ui.GaussianSplatTemporalSamplingCount, 0, 1024 * 1024);
-    if (!stochasticSplats || temporalSamplingCount == 0)
-    {
+    if (stochasticSplats && (m_ui.ResetAccumulation || m_ui.ResetRealtimeCaches || m_gaussianSplatTemporalReset))
         m_gaussianSplatTemporalSampleIndex = 0;
-        m_gaussianSplatTemporalReset = true;
-    }
-    else if (m_ui.ResetAccumulation || m_ui.ResetRealtimeCaches || m_gaussianSplatTemporalReset)
-    {
-        m_gaussianSplatTemporalSampleIndex = 0;
-        m_gaussianSplatTemporalReset = false;
-    }
 
     const uint32_t gaussianSplatShadowMode = ResolveGaussianSplatShadowMode(m_ui);
     GaussianSplatRenderSettings settings;
     settings.enabled = m_ui.EnableGaussianSplats;
     settings.depthTest = m_ui.GaussianSplatDepthTest;
     settings.sortingMode = m_ui.GaussianSplatSortingMode == 1 ? GaussianSplatSortMode::StochasticSplats : GaussianSplatSortMode::GpuSort;
+    settings.renderTarget = renderToOutputColor ? GaussianSplatRenderTarget::OutputColor : GaussianSplatRenderTarget::ProcessedOutputColor;
     settings.frustumCulling = static_cast<GaussianSplatFrustumCulling>(dm::clamp(m_ui.GaussianSplatFrustumCulling, 0, 2));
     settings.projectionMethod = GaussianSplatProjectionMethod::Eigen;
     settings.shFormat = static_cast<GaussianSplatStorageFormat>(dm::clamp(m_ui.GaussianSplatSHFormat, 0, 2));
@@ -2148,9 +2140,12 @@ void Sample::RenderGaussianSplats()
     settings.shadowFrameIndex = uint32_t(m_frameIndex & 0xffffffffu);
     settings.frustumDilation = m_ui.GaussianSplatFrustumDilation;
     settings.minPixelCoverage = m_ui.GaussianSplatMinPixelCoverage;
-    settings.stochasticFrameIndex = stochasticSplats && temporalSamplingCount > 0
-        ? uint32_t(std::min(m_gaussianSplatTemporalSampleIndex, temporalSamplingCount - 1))
-        : uint32_t(m_frameIndex & 0xffffffffu);
+    if (stochasticSplats && m_ui.RealtimeMode)
+        settings.stochasticFrameIndex = uint32_t(m_gaussianSplatTemporalSampleIndex);
+    else
+        settings.stochasticFrameIndex = uint32_t(m_sampleIndex >= 0
+            ? uint32_t(m_sampleIndex)
+            : uint32_t(m_frameIndex & 0xffffffffu));
     settings.objectToWorld = MakeGaussianSplatObjectToWorld(m_ui);
 
     for (const auto& light : m_lights)
@@ -2166,35 +2161,36 @@ void Sample::RenderGaussianSplats()
     }
 
     donut::engine::PlanarView splatView = *m_view;
-    splatView.SetViewport(nvrhi::Viewport(float(m_displaySize.x), float(m_displaySize.y)));
-    splatView.SetPixelOffset(dm::float2::zero());
+    if (!renderToOutputColor)
+    {
+        splatView.SetViewport(nvrhi::Viewport(float(m_displaySize.x), float(m_displaySize.y)));
+        splatView.SetPixelOffset(dm::float2::zero());
+    }
     splatView.UpdateCache();
 
     m_gaussianSplatPass->Render(m_commandList, splatView, m_topLevelAS.Get(), *m_renderTargets, settings);
 
-    if (stochasticSplats && temporalSamplingCount > 0)
-        AccumulateGaussianSplats(splatView, temporalSamplingCount);
+    if (stochasticSplats && !renderToOutputColor)
+        AccumulateGaussianSplats(splatView);
 }
 
-void Sample::AccumulateGaussianSplats(const donut::engine::IView& splatView, int temporalSamplingCount)
+void Sample::AccumulateGaussianSplats(const donut::engine::IView& splatView)
 {
     if (m_gaussianSplatAccumulationPass == nullptr || m_renderTargets == nullptr || m_gaussianSplatCurrentColor == nullptr || m_gaussianSplatAccumulatedColor == nullptr)
         return;
 
-    temporalSamplingCount = std::max(1, temporalSamplingCount);
-
-    const bool stillSampling = m_gaussianSplatTemporalSampleIndex < temporalSamplingCount;
-    const float accumulationWeight = stillSampling
-        ? 1.0f / float(m_gaussianSplatTemporalSampleIndex + 1)
-        : 0.0f;
-
-    if (stillSampling)
+    if (m_ui.ResetAccumulation || m_ui.ResetRealtimeCaches || m_gaussianSplatTemporalReset)
     {
-        m_commandList->setTextureState(m_renderTargets->ProcessedOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::CopySource);
-        m_commandList->setTextureState(m_gaussianSplatCurrentColor, nvrhi::AllSubresources, nvrhi::ResourceStates::CopyDest);
-        m_commandList->commitBarriers();
-        m_commandList->copyTexture(m_gaussianSplatCurrentColor, nvrhi::TextureSlice(), m_renderTargets->ProcessedOutputColor, nvrhi::TextureSlice());
+        m_gaussianSplatTemporalSampleIndex = 0;
+        m_gaussianSplatTemporalReset = false;
     }
+
+    const float accumulationWeight = 1.0f / float(m_gaussianSplatTemporalSampleIndex + 1);
+
+    m_commandList->setTextureState(m_renderTargets->ProcessedOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::CopySource);
+    m_commandList->setTextureState(m_gaussianSplatCurrentColor, nvrhi::AllSubresources, nvrhi::ResourceStates::CopyDest);
+    m_commandList->commitBarriers();
+    m_commandList->copyTexture(m_gaussianSplatCurrentColor, nvrhi::TextureSlice(), m_renderTargets->ProcessedOutputColor, nvrhi::TextureSlice());
 
     m_commandList->setTextureState(m_gaussianSplatCurrentColor, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);
     m_commandList->setTextureState(m_gaussianSplatAccumulatedColor, nvrhi::AllSubresources, nvrhi::ResourceStates::UnorderedAccess);
@@ -2203,8 +2199,7 @@ void Sample::AccumulateGaussianSplats(const donut::engine::IView& splatView, int
 
     m_gaussianSplatAccumulationPass->Render(m_commandList, splatView, splatView, accumulationWeight);
 
-    if (stillSampling)
-        m_gaussianSplatTemporalSampleIndex = std::min(m_gaussianSplatTemporalSampleIndex + 1, temporalSamplingCount);
+    m_gaussianSplatTemporalSampleIndex = std::min(m_gaussianSplatTemporalSampleIndex + 1, 1024 * 1024);
 }
 
 void Sample::Render(nvrhi::IFramebuffer* framebuffer)
@@ -2530,12 +2525,18 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
 
         SampleRenderCode(framebuffer, m_commandList, constants);
 
+        const bool stochasticSplats = m_ui.EnableGaussianSplats && m_ui.GaussianSplatSortingMode == 1;
+        const bool stochasticUsesMainTemporal = stochasticSplats && (!m_ui.RealtimeMode || m_ui.RealtimeAA == 1);
+        if (stochasticUsesMainTemporal)
+            RenderGaussianSplats(true);
+
         PostProcessAA(framebuffer, needNewPasses || m_ui.ResetRealtimeCaches);
         ApplyReferenceOIDN();
         if (m_ui.ReferenceOIDNDenoiser)
             m_commandList->writeBuffer(m_constantBuffer, &constants, sizeof(constants));
 
-        RenderGaussianSplats();
+        if (!stochasticUsesMainTemporal)
+            RenderGaussianSplats(false);
     }
 
     donut::engine::PlanarView fullscreenView = *m_view;
@@ -3819,13 +3820,31 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
         }
         else if (m_ui.RealtimeAA == 1 && m_temporalAntiAliasingPass != nullptr )
         {
-            bool previousViewValid = (GetFrameIndex() != 0);
+            const bool stochasticSplats = m_ui.EnableGaussianSplats && m_ui.GaussianSplatSortingMode == 1;
+            const bool stochasticReset = stochasticSplats && (reset || m_ui.ResetAccumulation || m_ui.ResetRealtimeCaches || m_gaussianSplatTemporalReset);
+            if (stochasticReset)
+                m_gaussianSplatTemporalSampleIndex = 0;
+
+            bool previousViewValid = !reset && !stochasticReset && (GetFrameIndex() != 0);
+            donut::render::TemporalAntiAliasingParameters taaParams = m_ui.TemporalAntiAliasingParams;
+            if (stochasticSplats)
+            {
+                taaParams.enableHistoryClamping = false;
+                taaParams.useHistoryClampRelax = false;
+                taaParams.newFrameWeight = 1.0f / float(m_gaussianSplatTemporalSampleIndex + 1);
+            }
 
             m_commandList->beginMarker("TAA");
 
-            m_temporalAntiAliasingPass->TemporalResolve(m_commandList, m_ui.TemporalAntiAliasingParams, previousViewValid, *m_view, *m_view);
+            m_temporalAntiAliasingPass->TemporalResolve(m_commandList, taaParams, previousViewValid, *m_view, *m_view);
 
             m_commandList->endMarker();
+
+            if (stochasticSplats)
+            {
+                m_gaussianSplatTemporalSampleIndex = std::min(m_gaussianSplatTemporalSampleIndex + 1, 1024 * 1024);
+                m_gaussianSplatTemporalReset = false;
+            }
         }
 
 #if DONUT_WITH_STREAMLINE
