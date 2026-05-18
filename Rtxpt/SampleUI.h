@@ -72,6 +72,7 @@ struct EnvironmentMapRuntimeParameters
     float       Intensity = 1.f;
     dm::float3  RotationXYZ = { 0.f, 0.f, 0.f };
     bool        Enabled = true;
+    bool        VisibleToCamera = true;
 };
 
 #if RTXPT_STOCHASTIC_TEXTURE_FILTERING_ENABLE
@@ -353,6 +354,7 @@ struct SampleUIData
     float                               GaussianSplatScale = 1.0f;
     float                               GaussianSplatAlphaScale = 1.0f;
     float                               GaussianSplatBrightness = 1.0f;
+    dm::float3                          GaussianSplatTintColor = dm::float3(1.0f);
     bool                                GaussianSplatAsEmitter = false;
     float                               GaussianSplatEmissionIntensity = 1.0f;
     int                                 GaussianSplatEmissionMaxProxyCount = 8192;

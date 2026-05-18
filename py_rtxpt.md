@@ -286,6 +286,10 @@ rtxpt.Renderer(
     gaussian_splat_scale=1.0,
     gaussian_splat_alpha_scale=1.0,
     gaussian_splat_brightness=1.0,
+    gaussian_splat_tint_color=(1.0, 1.0, 1.0),
+    gaussian_splat_as_emitter=False,
+    gaussian_splat_emission_intensity=1.0,
+    gaussian_splat_emission_max_proxy_count=8192,
     gaussian_splat_alpha_cull_threshold=1.0 / 255.0,
 )
 ```
@@ -501,6 +505,10 @@ The table below lists the Python-facing 3DGS settings that are currently wired i
 | `gaussian_splat_scale` | `float` | Projected footprint scale. |
 | `gaussian_splat_alpha_scale` | `float` | Opacity multiplier. |
 | `gaussian_splat_brightness` | `float` | Color multiplier. |
+| `gaussian_splat_tint_color` | `(r, g, b)` | Multiplies the SH0/base color before brightness. |
+| `gaussian_splat_as_emitter` | `bool` | Inject 3DGS emissive proxies into light sampling. |
+| `gaussian_splat_emission_intensity` | `float` | Emissive proxy intensity multiplier. |
+| `gaussian_splat_emission_max_proxy_count` | `int` | Emissive proxy budget. |
 | `gaussian_splat_alpha_cull_threshold` | `float` | Cull low-alpha splats. |
 | `gaussian_splat_translation` | `(x, y, z)` | World-space splat object translation. |
 | `gaussian_splat_rotation_euler_deg` | `(x, y, z)` | Splat object Euler rotation in degrees. |
@@ -579,6 +587,8 @@ Reference / OIDN:
 | `intensity` | `float` |
 | `rotation_xyz` | `(x, y, z)` |
 | `enabled` | `bool` |
+| `visible_to_camera` | `bool` |
+| `hide_source` | `bool` inverse of `visible_to_camera` |
 
 ## `Material` Class
 

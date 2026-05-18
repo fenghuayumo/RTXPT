@@ -210,7 +210,9 @@ void main( uint2 dispatchThreadID : SV_DispatchThreadID )
     }
     else // no-hit, sample the background
     {
-        radiance = t_EnvironmentMap.SampleLevel(s_EnvironmentMapSampler, rayDir, 0).xyz;
+        radiance = (g_Const.ptConsts.environmentMapVisibleToCamera != 0)
+            ? t_EnvironmentMap.SampleLevel(s_EnvironmentMapSampler, rayDir, 0).xyz
+            : 0.xxx;
     }
 
     // Output hdr color

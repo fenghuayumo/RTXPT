@@ -400,7 +400,11 @@ void RegisterCoreBindings(nb::module_& m)
         .def_prop_rw("rotation_xyz",
             [](EnvironmentMapRuntimeParameters& s) { return Float3ToTuple(s.RotationXYZ); },
             [](EnvironmentMapRuntimeParameters& s, nb::object v) { s.RotationXYZ = ToFloat3(v); })
-        .def_rw("enabled", &EnvironmentMapRuntimeParameters::Enabled);
+        .def_rw("enabled", &EnvironmentMapRuntimeParameters::Enabled)
+        .def_rw("visible_to_camera", &EnvironmentMapRuntimeParameters::VisibleToCamera)
+        .def_prop_rw("hide_source",
+            [](EnvironmentMapRuntimeParameters& s) { return !s.VisibleToCamera; },
+            [](EnvironmentMapRuntimeParameters& s, bool hide) { s.VisibleToCamera = !hide; });
 
     nb::class_<SampleUIData>(m, "Settings",
         "Live UI state of the renderer. Mutating attributes is equivalent\n"
@@ -501,6 +505,9 @@ void RegisterCoreBindings(nb::module_& m)
         .def_rw("gaussian_splat_scale",          &SampleUIData::GaussianSplatScale)
         .def_rw("gaussian_splat_alpha_scale",    &SampleUIData::GaussianSplatAlphaScale)
         .def_rw("gaussian_splat_brightness",     &SampleUIData::GaussianSplatBrightness)
+        .def_prop_rw("gaussian_splat_tint_color",
+            [](SampleUIData& s) { return Float3ToTuple(s.GaussianSplatTintColor); },
+            [](SampleUIData& s, nb::object v) { s.GaussianSplatTintColor = ToFloat3(v); })
         .def_rw("gaussian_splat_as_emitter",     &SampleUIData::GaussianSplatAsEmitter)
         .def_rw("gaussian_splat_emission_intensity", &SampleUIData::GaussianSplatEmissionIntensity)
         .def_rw("gaussian_splat_emission_max_proxy_count", &SampleUIData::GaussianSplatEmissionMaxProxyCount)
@@ -599,7 +606,7 @@ void RegisterCoreBindings(nb::module_& m)
 
         .def_rw("environment_map",               &SampleUIData::EnvironmentMapParams,
                 nb::rv_policy::reference_internal,
-                "EnvironmentMapParams structure (intensity, tint, rotation, enabled).")
+                "EnvironmentMapParams structure (intensity, tint, rotation, enabled, visible_to_camera).")
         ;
 
     // --- Sample (top-level renderer access) -------------------------------

@@ -1096,6 +1096,7 @@ bool GaussianSplatPass::LoadFromFile(const std::filesystem::path& fileName, bool
     m_cachedEmissionProxySplatScale = 1.0f;
     m_cachedEmissionProxyKernelDegree = 0;
     m_cachedEmissionProxyAdaptiveClamp = true;
+    m_cachedEmissionProxyTintColor = float3(1.0f);
     m_cachedEmissionProxyAlphaCullThreshold = 0.0f;
     m_emissionProxyBuildPending = true;
     m_shadowPrimitiveCountPerSplat = 1;
@@ -1111,9 +1112,14 @@ void GaussianSplatPass::BuildEmissionProxies(
     float splatScale,
     uint32_t kernelDegree,
     bool adaptiveClamp,
+    float3 tintColor,
     float alphaCullThreshold)
 {
     kernelDegree = std::min(kernelDegree, 5u);
+    tintColor = float3(
+        std::max(tintColor.x, 0.0f),
+        std::max(tintColor.y, 0.0f),
+        std::max(tintColor.z, 0.0f));
     alphaCullThreshold = std::max(alphaCullThreshold, 0.0f);
 
     if (!HasSplats() || maxProxyCount == 0)
@@ -1123,16 +1129,23 @@ void GaussianSplatPass::BuildEmissionProxies(
         m_cachedEmissionProxySplatScale = splatScale;
         m_cachedEmissionProxyKernelDegree = kernelDegree;
         m_cachedEmissionProxyAdaptiveClamp = adaptiveClamp;
+        m_cachedEmissionProxyTintColor = tintColor;
         m_cachedEmissionProxyAlphaCullThreshold = alphaCullThreshold;
         m_emissionProxyBuildPending = false;
         return;
     }
+
+    const bool tintChanged =
+        std::abs(m_cachedEmissionProxyTintColor.x - tintColor.x) >= 1e-4f ||
+        std::abs(m_cachedEmissionProxyTintColor.y - tintColor.y) >= 1e-4f ||
+        std::abs(m_cachedEmissionProxyTintColor.z - tintColor.z) >= 1e-4f;
 
     if (!m_emissionProxyBuildPending
         && m_cachedEmissionProxyMaxCount == maxProxyCount
         && std::abs(m_cachedEmissionProxySplatScale - splatScale) < 1e-4f
         && m_cachedEmissionProxyKernelDegree == kernelDegree
         && m_cachedEmissionProxyAdaptiveClamp == adaptiveClamp
+        && !tintChanged
         && std::abs(m_cachedEmissionProxyAlphaCullThreshold - alphaCullThreshold) < 1e-6f)
     {
         return;
@@ -1152,7 +1165,7 @@ void GaussianSplatPass::BuildEmissionProxies(
         const float3 linearSh0 = SrgbToLinear(float3(
             std::max(splat.color.x, 0.0f),
             std::max(splat.color.y, 0.0f),
-            std::max(splat.color.z, 0.0f)));
+            std::max(splat.color.z, 0.0f)) * tintColor);
         const float3 radiance = linearSh0 * opacity;
         const float weight = std::max(0.0f, Luminance(radiance)) * radius * radius;
         if (weight <= 0.0f)
@@ -1183,6 +1196,7 @@ void GaussianSplatPass::BuildEmissionProxies(
     m_cachedEmissionProxySplatScale = splatScale;
     m_cachedEmissionProxyKernelDegree = kernelDegree;
     m_cachedEmissionProxyAdaptiveClamp = adaptiveClamp;
+    m_cachedEmissionProxyTintColor = tintColor;
     m_cachedEmissionProxyAlphaCullThreshold = alphaCullThreshold;
     m_emissionProxyBuildPending = false;
 }
@@ -1856,6 +1870,10 @@ void GaussianSplatPass::Render(
     constants.alphaScale = settings.alphaScale;
     constants.brightness = settings.brightness;
     constants.splatCount = m_splatCount;
+    constants.tintColor = float3(
+        std::max(settings.tintColor.x, 0.0f),
+        std::max(settings.tintColor.y, 0.0f),
+        std::max(settings.tintColor.z, 0.0f));
     constants.alphaCullThreshold = settings.alphaCullThreshold;
     constants.shDegree = m_shDegree;
     constants.depthTest = settings.depthTest ? 1u : 0u;

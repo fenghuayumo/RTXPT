@@ -364,6 +364,7 @@ bool RenderSession::InitRenderer()
         ? std::string("bistro-programmer-art.scene.json")
         : m_config.scene;
 
+    g_sampleUIData.GaussianSplatTintColor = m_config.gaussianSplatTintColor;
     m_renderer->Init(preferredScene, m_shaderFactory);
     m_deviceManager->AddRenderPassToBack(m_renderer.get());
 

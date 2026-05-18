@@ -385,7 +385,7 @@ VertexOutput vs_main(uint vertexId : SV_VertexID)
     float3 ndcCenter = clipCenter.xyz / clipCenter.w;
     float2 ndcOffset = (corner.x * basis1 + corner.y * basis2) * g_Const.view.viewportSizeInv * 2.0f;
 
-    float3 color = splatColorOpacity.rgb;
+    float3 color = splatColorOpacity.rgb * g_Const.tintColor;
     if (g_Const.shDegree > 0)
     {
         float3 worldViewDir = normalize(worldCenter.xyz - g_Const.cameraPosition.xyz);

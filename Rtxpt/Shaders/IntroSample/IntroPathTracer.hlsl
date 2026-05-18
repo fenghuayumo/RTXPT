@@ -342,6 +342,8 @@ void RAYGEN_ENTRY()
         {
 
             float3 envRadiance = t_EnvironmentMap.SampleLevel(s_EnvironmentMapSampler, pathContext.rayDirection, 0).xyz;
+            if (bounceNdx == 0 && g_Const.ptConsts.environmentMapVisibleToCamera == 0)
+                envRadiance = 0;
             pathContext.accumRadiance += pathContext.throughput * envRadiance;
 
             break;

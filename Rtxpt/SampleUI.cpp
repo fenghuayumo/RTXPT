@@ -887,6 +887,7 @@ void SampleUI::buildUI(void)
                 RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
 
                 RESET_ON_CHANGE(ImGui::Checkbox("Enabled", &m_ui.EnvironmentMapParams.Enabled));
+                RESET_ON_CHANGE(ImGui::Checkbox("Visible to Camera", &m_ui.EnvironmentMapParams.VisibleToCamera));
 
                 if (m_app.GetEnvMapLocalPath() != "==PROCEDURAL_SKY==")
                     ImGui::TextWrapped("Source: `%s`", m_app.GetEnvMapLocalPath().c_str());
@@ -2209,6 +2210,8 @@ void SampleUI::buildUI(void)
             }
             RESET_ON_CHANGE(ImGui::DragFloat("Alpha", &m_ui.GaussianSplatAlphaScale, 0.01f, 0.0f, 4.0f, "%.2f"));
             RESET_ON_CHANGE(ImGui::DragFloat("Brightness", &m_ui.GaussianSplatBrightness, 0.01f, 0.0f, 16.0f, "%.2f"));
+            RESET_ON_CHANGE(ImGui::InputFloat3("Tint Color", (float*)&m_ui.GaussianSplatTintColor.x));
+            ImGui::SeparatorText("Emission");
             RESET_ON_CHANGE(ImGui::Checkbox("As Emitter", &m_ui.GaussianSplatAsEmitter));
             ImGui::BeginDisabled(!m_ui.GaussianSplatAsEmitter);
             RESET_ON_CHANGE(ImGui::DragFloat("Emission Intensity", &m_ui.GaussianSplatEmissionIntensity, 0.01f, 0.0f, 100.0f, "%.2f"));

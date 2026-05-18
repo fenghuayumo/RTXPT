@@ -105,10 +105,13 @@ struct GaussianSplatConstants
     float brightness;
     uint splatCount;
 
+    float3 tintColor;
     float alphaCullThreshold;
+
     uint shDegree;
     uint depthTest;
     uint shadowsEnabled;
+    uint padding0;
 
     float4 shadowDirectionToLight;
 

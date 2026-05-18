@@ -69,6 +69,7 @@ public:
                float gaussianSplatScale,
                float gaussianSplatAlphaScale,
                float gaussianSplatBrightness,
+               nb::object gaussianSplatTintColor,
                bool gaussianSplatAsEmitter,
                float gaussianSplatEmissionIntensity,
                int gaussianSplatEmissionMaxProxyCount,
@@ -91,6 +92,7 @@ public:
         cfg.gaussianSplatScale = gaussianSplatScale;
         cfg.gaussianSplatAlphaScale = gaussianSplatAlphaScale;
         cfg.gaussianSplatBrightness = gaussianSplatBrightness;
+        cfg.gaussianSplatTintColor = ToFloat3(gaussianSplatTintColor);
         cfg.gaussianSplatAsEmitter = gaussianSplatAsEmitter;
         cfg.gaussianSplatEmissionIntensity = gaussianSplatEmissionIntensity;
         cfg.gaussianSplatEmissionMaxProxyCount = gaussianSplatEmissionMaxProxyCount;
@@ -184,7 +186,7 @@ NB_MODULE(rtxpt, m)
         "    r.save_screenshot('frame.png')\n"
         "    r.close()")
         .def(nb::init<int, int, bool, bool, int, bool, const std::string&, bool, int,
-                      const std::string&, bool, bool, float, float, float, bool, float, int, float>(),
+                      const std::string&, bool, bool, float, float, float, nb::object, bool, float, int, float>(),
              nb::arg("width") = 1920,
              nb::arg("height") = 1080,
              nb::arg("headless") = true,
@@ -200,6 +202,7 @@ NB_MODULE(rtxpt, m)
              nb::arg("gaussian_splat_scale") = 1.0f,
              nb::arg("gaussian_splat_alpha_scale") = 1.0f,
              nb::arg("gaussian_splat_brightness") = 1.0f,
+             nb::arg("gaussian_splat_tint_color") = nb::make_tuple(1.0f, 1.0f, 1.0f),
              nb::arg("gaussian_splat_as_emitter") = false,
              nb::arg("gaussian_splat_emission_intensity") = 1.0f,
              nb::arg("gaussian_splat_emission_max_proxy_count") = 8192,

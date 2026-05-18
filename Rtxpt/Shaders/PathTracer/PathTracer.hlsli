@@ -474,6 +474,9 @@ namespace PathTracer
             environmentEmission = lpfloat3(misWeight * Le);
         }
 
+        if (path.getVertexIndex() == 1 && workingContext.PtConsts.environmentMapVisibleToCamera == 0)
+            environmentEmission = 0;
+
 #if RTXPT_FIREFLY_FILTER && PATH_TRACER_MODE!=PATH_TRACER_MODE_BUILD_STABLE_PLANES
             lpfloat baseFFThreshold = (lpfloat)workingContext.PtConsts.fireflyFilterThreshold;
             if( baseFFThreshold != 0 )

@@ -59,6 +59,7 @@ env.intensity   = 1.5
 env.tint_color  = (1.0, 0.95, 0.9)
 env.rotation_xyz = (0.0, 35.0, 0.0)   # degrees
 env.enabled     = True
+env.visible_to_camera = True           # False hides the HDRI background but keeps its lighting
 
 # 7) Camera tweaks
 settings.camera_aperture       = 0.0

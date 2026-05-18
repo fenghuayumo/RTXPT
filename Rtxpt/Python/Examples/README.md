@@ -85,7 +85,7 @@ without creating an OS window or swap chain.
 | `Settings.dlss_mode` etc.       | DLSS / DLSS-RR / DLSS-G / Reflex parameters   |
 | `Settings.oidn_*`               | OIDN denoiser parameters (reference mode)     |
 | `Settings.gaussian_splat_*`     | 3DGS raster, storage, culling, shadow controls|
-| `Settings.environment_map`      | Tint/intensity/rotation of the env map        |
+| `Settings.environment_map`      | Tint/intensity/rotation/visibility of env map |
 | `Settings.bounce_count` etc.    | Path tracer / NEE / RTXDI knobs               |
 | `Renderer.step()/step_n(n)`     | (extension) drive the loop one frame at a time|
 | `Renderer.step_until_accumulated()` | (extension) render to SPP target          |

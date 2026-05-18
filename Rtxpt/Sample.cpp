@@ -1641,6 +1641,7 @@ void Sample::UpdateLighting(nvrhi::CommandListHandle commandList)
                 m_ui.GaussianSplatScale,
                 uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5)),
                 m_ui.GaussianSplatRtxAdaptiveClamp,
+                m_ui.GaussianSplatTintColor,
                 m_ui.GaussianSplatAlphaCullThreshold);
 
             settings.GaussianSplatEmissionProxies = &m_gaussianSplatPass->GetEmissionProxies();
@@ -1768,6 +1769,7 @@ void Sample::UpdatePathTracerConstants( PathTracerConstants & constants, const P
         constants.fireflyFilterThreshold = (m_ui.ReferenceFireflyFilterEnabled)?(m_ui.ReferenceFireflyFilterThreshold*sqrtf(constants.preExposedGrayLuminance)*1e3f):(disabledFF); // making it exposure-adaptive breaks determinism with accumulation (because there's a feedback loop), so that's disabled
     constants.useReSTIRDI = m_ui.ActualUseReSTIRDI();
     constants.useReSTIRGI = m_ui.ActualUseReSTIRGI();
+    constants.environmentMapVisibleToCamera = m_ui.EnvironmentMapParams.VisibleToCamera ? 1u : 0u;
     constants.denoiserRadianceClampK = m_ui.DenoiserRadianceClampK;
     constants.DLSSRRBrightnessClampK = (m_ui.DLSSRRBrightnessClampK>0)?(m_ui.DLSSRRBrightnessClampK * constants.preExposedGrayLuminance):(0.0f);
 
@@ -1823,6 +1825,7 @@ void Sample::RtxdiSetupFrame(nvrhi::IFramebuffer* framebuffer, PathTracerCameraD
             m_ui.GaussianSplatScale,
             uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5)),
             m_ui.GaussianSplatRtxAdaptiveClamp,
+            m_ui.GaussianSplatTintColor,
             m_ui.GaussianSplatAlphaCullThreshold);
 
         bridgeParameters.gaussianSplatEmissionProxies = &m_gaussianSplatPass->GetEmissionProxies();
@@ -2175,6 +2178,7 @@ void Sample::RenderGaussianSplats(bool renderToOutputColor)
     settings.splatScale = m_ui.GaussianSplatScale;
     settings.alphaScale = m_ui.GaussianSplatAlphaScale;
     settings.brightness = m_ui.GaussianSplatBrightness;
+    settings.tintColor = m_ui.GaussianSplatTintColor;
     settings.alphaCullThreshold = m_ui.GaussianSplatAlphaCullThreshold;
     settings.shadowsEnabled = gaussianSplatShadowMode != GAUSSIAN_SPLAT_SHADOWS_DISABLED;
     settings.shadowMode = gaussianSplatShadowMode;

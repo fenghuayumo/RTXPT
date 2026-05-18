@@ -83,6 +83,7 @@ struct GaussianSplatRenderSettings
     float splatScale = 1.0f;
     float alphaScale = 1.0f;
     float brightness = 1.0f;
+    donut::math::float3 tintColor = donut::math::float3(1.0f);
     float alphaCullThreshold = 1.0f / 255.0f;
     float shadowStrength = 0.75f;
     float shadowRayTMax = 100000.0f;
@@ -124,6 +125,7 @@ public:
         float splatScale,
         uint32_t kernelDegree,
         bool adaptiveClamp,
+        donut::math::float3 tintColor,
         float alphaCullThreshold);
 
     void Render(
@@ -218,6 +220,7 @@ private:
     float m_cachedEmissionProxySplatScale = 1.0f;
     uint32_t m_cachedEmissionProxyKernelDegree = 0;
     bool m_cachedEmissionProxyAdaptiveClamp = true;
+    donut::math::float3 m_cachedEmissionProxyTintColor = donut::math::float3(1.0f);
     float m_cachedEmissionProxyAlphaCullThreshold = 0.0f;
     bool m_emissionProxyBuildPending = true;
     uint32_t m_shadowPrimitiveCountPerSplat = 1;
