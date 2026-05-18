@@ -180,39 +180,58 @@ void PTPipelineVariant::CompileIfNeeded_Enqueue(std::filesystem::file_time_type 
         
         // see https://simoncoenen.com/blog/programming/graphics/DxcCompiling for switch reference
         std::string command;
+        std::string hashCommand;
         command += " \"" + srcFullPath.string() + "\"";
+        hashCommand += " \"" + permutation->ShaderSrcFileName.generic_string() + "\"";
         command += " -Zi";              //  Enable debug information. Cannot be used together with -Zs  - DXC_ARG_DEBUG
+        hashCommand += " -Zi";
 #if PIPELINE_BAKER_EMBED_PDBS
         command += " -Qembed_debug";    //  Embed PDB in shader container (must be used with /Zi)
+        hashCommand += " -Qembed_debug";
 #endif
         command += " -Zsb";             //  Compute Shader Hash considering only output binary
+        hashCommand += " -Zsb";
 #if PIPELINE_BAKER_USE_OPTIMIZATIONS
         command += " -O3";
+        hashCommand += " -O3";
 #else
         command += " -Od";
+        hashCommand += " -Od";
 #endif
         command += " -enable-16bit-types";
+        hashCommand += " -enable-16bit-types";
         command += " -WX";              //  Warnings are errors
+        hashCommand += " -WX";
         //command += " -Gfa";             //  Avoid flow control
         //command += " -Gfp";             //  Avoid flow control
         command += " -all_resources_bound";
+        hashCommand += " -all_resources_bound";
 #if RTXPT_D3D_AGILITY_SDK_VERSION >= 619
         command += " -T lib_6_9";
+        hashCommand += " -T lib_6_9";
         //command += " -disable-payload-qualifiers";
         //command += " -Vd";
 #else
         command += " -T lib_6_6";
+        hashCommand += " -T lib_6_6";
         command += " -enable-payload-qualifiers";
+        hashCommand += " -enable-payload-qualifiers";
 #endif
         
         command += " -D ENABLE_DEBUG_PRINT"; // <- some issues with Linux and SPIRV? need to test this; also - test perf implications
+        hashCommand += " -D ENABLE_DEBUG_PRINT";
 
         for (auto& macro : permutation->CombinedAndSpecializedMacros)
+        {
             command += " -D " + macro.name + "=" + macro.definition;
+            hashCommand += " -D " + macro.name + "=" + macro.definition;
+        }
 
         command += " -I \"" + baker->GetShadersPathExternalIncludes1().string() + "\"";
+        hashCommand += " -I <external1>";
         if (!baker->GetShadersPathExternalIncludes2().empty())
             command += " -I \"" + baker->GetShadersPathExternalIncludes2().string() + "\"";
+        hashCommand += " -I <external2>";
 
         std::string targetMacro = " -D ";
         if (baker->GetDevice()->getGraphicsAPI() == nvrhi::GraphicsAPI::D3D12)
@@ -226,6 +245,7 @@ void PTPipelineVariant::CompileIfNeeded_Enqueue(std::filesystem::file_time_type 
         else assert(false);
 
         command += targetMacro;
+        hashCommand += targetMacro;
 
         if (baker->GetDevice()->getGraphicsAPI() == nvrhi::GraphicsAPI::VULKAN)
         {
@@ -234,6 +254,11 @@ void PTPipelineVariant::CompileIfNeeded_Enqueue(std::filesystem::file_time_type 
             command += " -fspv-target-env=vulkan1.2";
             command += " -fspv-extension=SPV_EXT_descriptor_indexing";
             command += " -fspv-extension=KHR";
+            hashCommand += " -D SPIRV";
+            hashCommand += " -spirv";
+            hashCommand += " -fspv-target-env=vulkan1.2";
+            hashCommand += " -fspv-extension=SPV_EXT_descriptor_indexing";
+            hashCommand += " -fspv-extension=KHR";
 
             nvrhi::VulkanBindingOffsets cBindingOffsets;
             for (int i = 0; i < 7; i++)
@@ -243,13 +268,18 @@ void PTPipelineVariant::CompileIfNeeded_Enqueue(std::filesystem::file_time_type 
                 command += StringFormat(" -fvk-t-shift %d %d", cBindingOffsets.shaderResource, i);
                 command += StringFormat(" -fvk-b-shift %d %d", cBindingOffsets.constantBuffer, i);
                 command += StringFormat(" -fvk-u-shift %d %d", cBindingOffsets.unorderedAccess, i);
+                hashCommand += StringFormat(" -fvk-s-shift %d %d", cBindingOffsets.sampler, i);
+                hashCommand += StringFormat(" -fvk-t-shift %d %d", cBindingOffsets.shaderResource, i);
+                hashCommand += StringFormat(" -fvk-b-shift %d %d", cBindingOffsets.constantBuffer, i);
+                hashCommand += StringFormat(" -fvk-u-shift %d %d", cBindingOffsets.unorderedAccess, i);
             }
         }
 
         std::string previousHashHex = permutation->CompiledHashHex;
 
-        // adding all command params (which includes all macros) but NOT the full file path (just file name) - this is to avoid recompiling if just moving folders around
-        std::string newHash = ShaderCompilerUtils::ComputeSha256Hex(command);
+        // Hash with logical source/include names only, so precompiled binary
+        // filenames stay valid after the Python wheel is installed elsewhere.
+        std::string newHash = ShaderCompilerUtils::ComputeSha256Hex(hashCommand);
         if (newHash!=permutation->CompiledHashHex)
         {
             permutation->CompiledHashHex = newHash;
@@ -268,7 +298,7 @@ void PTPipelineVariant::CompileIfNeeded_Enqueue(std::filesystem::file_time_type 
                 donut::log::info("No need to compile shader variant of '%s', up-to-date file already exists...", srcFullPath.string().c_str());
             permutation->US_compileCmdLine = "";
         }
-        else // we need to re-compile!
+        else if (baker->CanCompileShaders()) // we need to re-compile!
         {
             command = commandBase + command;
 #if !PIPELINE_BAKER_EMBED_PDBS
@@ -282,6 +312,14 @@ void PTPipelineVariant::CompileIfNeeded_Enqueue(std::filesystem::file_time_type 
             permutation->US_compileCmdLine = command;
             resetPipelineNeeded = true;
             permutation->ResetShaderLibrary();
+        }
+        else
+        {
+            permutation->US_compileCmdLine = "";
+            permutation->US_compileError = StringFormat(
+                "Missing precompiled shader '%s' and runtime shader compilation is disabled.",
+                permutation->CompiledFullPath.c_str());
+            donut::log::error("%s", permutation->US_compileError.c_str());
         }
         baker->EnqueueShaderPermutation(permutation);
     }
@@ -472,7 +510,7 @@ void PTPipelineBaker::EnqueueShaderPermutation(PTPipelineVariant::ShaderPermutat
 void PTPipelineBaker::Update(const std::shared_ptr<class ExtendedScene>& scene, unsigned int subInstanceCount, const std::function<void(std::vector<donut::engine::ShaderMacro>& macros)>& globalMacrosGetter, bool forceShaderReload)
 {
     // Auto-reload: poll for source file changes
-    if (!forceShaderReload && !m_variants.empty())
+    if (m_compilerConfig.CanCompile() && !forceShaderReload && !m_variants.empty())
     {
         static auto lastPollTime = std::chrono::steady_clock::now();
         auto now = std::chrono::steady_clock::now();
@@ -545,7 +583,9 @@ void PTPipelineBaker::Update(const std::shared_ptr<class ExtendedScene>& scene, 
         // we need the output folder
         EnsureDirectoryExists(m_compilerConfig.ShaderBinariesPath);
 
-        std::optional<std::filesystem::file_time_type> a = GetLatestModifiedTimeDirectoryRecursive(m_compilerConfig.ShadersPath);
+        std::optional<std::filesystem::file_time_type> a = m_compilerConfig.CanCompile()
+            ? GetLatestModifiedTimeDirectoryRecursive(m_compilerConfig.ShadersPath)
+            : std::optional<std::filesystem::file_time_type>(std::filesystem::file_time_type::min());
         // let's not track externals for perf reasons but here's the code in case it's needed
         //std::optional<std::filesystem::file_time_type> b = GetLatestModifiedTimeRecursive(m_compilerConfig.ShadersPathExternalIncludes1);
         //std::optional<std::filesystem::file_time_type> c = GetLatestModifiedTimeRecursive(m_compilerConfig.ShadersPathExternalIncludes2);
@@ -554,7 +594,7 @@ void PTPipelineBaker::Update(const std::shared_ptr<class ExtendedScene>& scene, 
 
     if (!m_lastUpdatedSourceTimestamp.has_value())
     {
-        log::error("There is something wrong with the shader source path or logic - unable to dynamically compile shaders");
+        log::error("There is something wrong with the shader source path or logic - unable to load or dynamically compile shaders");
         return;
     }
 
@@ -670,6 +710,7 @@ void PTPipelineBaker::Update(const std::shared_ptr<class ExtendedScene>& scene, 
 
         if (firstError!="")
         {
+            log::error("%s", firstError.c_str());
             bool retry = false;
 #if _WIN32
             if (!HelpersIsNonInteractive())

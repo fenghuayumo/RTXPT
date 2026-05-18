@@ -42,6 +42,7 @@ namespace ShaderCompilerUtils
         std::filesystem::path   ShadersPathExternalIncludes2;   // Second external include path (can be empty)
         std::filesystem::path   ShaderBinariesPath;             // Output path for compiled binaries
         nvrhi::GraphicsAPI      GraphicsAPI;                    // D3D12 or Vulkan
+        bool                    RuntimeCompilationAvailable = false;
         
         // Initializes the config by finding shader compiler and source paths
         // Returns true on success, false if required paths cannot be found
@@ -49,6 +50,8 @@ namespace ShaderCompilerUtils
         
         // Returns the shader compiler executable path as a quoted string for command-line use
         std::string GetCompilerPathQuoted() const;
+
+        bool CanCompile() const { return RuntimeCompilationAvailable; }
     };
     
     //////////////////////////////////////////////////////////////////////////
@@ -68,6 +71,7 @@ namespace ShaderCompilerUtils
     struct DxcCommandOptions
     {
         std::filesystem::path   SourceFilePath;         // Full path to source .hlsl file
+        std::filesystem::path   LogicalSourceFileName;  // Path used for cache hashing (kept stable across installs)
         ShaderProfile           Profile = ShaderProfile::Compute_6_6;
         std::string             EntryPoint;             // Entry point function name (empty for library targets)
         bool                    EnableDebugInfo = true;

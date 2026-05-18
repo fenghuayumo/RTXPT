@@ -146,6 +146,7 @@ private:
 
     bool                                IsVerbose() const                       { return m_verbose; }
     bool                                IsNVAPIShaderExtensionEnabled() const   { return m_enableNVAPIShaderExtension; }
+    bool                                CanCompileShaders() const               { return m_compilerConfig.CanCompile(); }
 
     const ShaderCompilerUtils::ShaderCompilerConfig& 
                                         GetCompilerConfig() const           { return m_compilerConfig; }

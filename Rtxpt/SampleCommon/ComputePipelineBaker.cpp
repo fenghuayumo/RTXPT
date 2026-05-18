@@ -95,7 +95,7 @@ void ComputePipelineBaker::EnqueueShaderForCompilation(ComputeShaderVariant* var
 void ComputePipelineBaker::Update(bool forceReload)
 {
     // Auto-reload: poll for source file changes
-    if (!forceReload && !m_variants.empty())
+    if (m_compilerConfig.CanCompile() && !forceReload && !m_variants.empty())
     {
         static auto lastPollTime = std::chrono::steady_clock::now();
         auto now = std::chrono::steady_clock::now();
@@ -162,25 +162,30 @@ void ComputePipelineBaker::Update(bool forceReload)
     // Get latest source modification time (from all monitored paths)
     EnsureDirectoryExists(m_compilerConfig.ShaderBinariesPath);
     
-    m_lastUpdatedSourceTimestamp = GetLatestModifiedTimeDirectoryRecursive(m_compilerConfig.ShadersPath);
+    m_lastUpdatedSourceTimestamp = m_compilerConfig.CanCompile()
+        ? GetLatestModifiedTimeDirectoryRecursive(m_compilerConfig.ShadersPath)
+        : std::optional<std::filesystem::file_time_type>(std::filesystem::file_time_type::min());
     
     // Also include additional monitored paths
-    for (const auto& path : m_additionalMonitorPaths)
+    if (m_compilerConfig.CanCompile())
     {
-        if (std::filesystem::exists(path))
+        for (const auto& path : m_additionalMonitorPaths)
         {
-            auto pathTimestamp = GetLatestModifiedTimeDirectoryRecursive(path);
-            if (pathTimestamp.has_value())
+            if (std::filesystem::exists(path))
             {
-                if (!m_lastUpdatedSourceTimestamp.has_value() || *pathTimestamp > *m_lastUpdatedSourceTimestamp)
-                    m_lastUpdatedSourceTimestamp = pathTimestamp;
+                auto pathTimestamp = GetLatestModifiedTimeDirectoryRecursive(path);
+                if (pathTimestamp.has_value())
+                {
+                    if (!m_lastUpdatedSourceTimestamp.has_value() || *pathTimestamp > *m_lastUpdatedSourceTimestamp)
+                        m_lastUpdatedSourceTimestamp = pathTimestamp;
+                }
             }
         }
     }
     
     if (!m_lastUpdatedSourceTimestamp.has_value())
     {
-        log::error("Unable to get source timestamp - cannot dynamically compile compute shaders");
+        log::error("Unable to get source timestamp - cannot load or dynamically compile compute shaders");
         return;
     }
 
@@ -277,6 +282,7 @@ void ComputePipelineBaker::Update(bool forceReload)
 
         if (!firstError.empty())
         {
+            log::error("%s", firstError.c_str());
             bool retry = false;
 #if _WIN32
             if (!HelpersIsNonInteractive())
@@ -352,6 +358,7 @@ void ComputeShaderVariant::PrepareCompilation(std::filesystem::file_time_type la
     // Build DXC command using shared utilities
     ShaderCompilerUtils::DxcCommandOptions options;
     options.SourceFilePath = srcFullPath;
+    options.LogicalSourceFileName = m_shaderSrcFileName;
 #if RTXPT_D3D_AGILITY_SDK_VERSION >= 619
     options.Profile = ShaderCompilerUtils::ShaderProfile::Compute_6_9;
 #else
@@ -390,7 +397,7 @@ void ComputeShaderVariant::PrepareCompilation(std::filesystem::file_time_type la
             log::info("No need to compile compute shader '%s', up-to-date file exists", m_debugName.c_str());
         m_compileCmdLine = "";
     }
-    else
+    else if (baker->CanCompileShaders())
     {
         // Need to recompile
         std::string command = baker->GetCompilerConfig().GetCompilerPathQuoted();
@@ -407,6 +414,13 @@ void ComputeShaderVariant::PrepareCompilation(std::filesystem::file_time_type la
         
         m_compileCmdLine = command;
         ResetPipeline();
+    }
+    else
+    {
+        m_compileError = StringFormat(
+            "Missing precompiled compute shader '%s' and runtime shader compilation is disabled.",
+            m_compiledFullPath.c_str());
+        log::error("%s", m_compileError.c_str());
     }
 }
 

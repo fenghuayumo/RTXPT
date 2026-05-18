@@ -59,20 +59,16 @@ namespace ShaderCompilerUtils
         const char* dxcExecutableName = "dxc";
     #endif
 
-        ShaderCompilerPath = std::filesystem::absolute(
-            runtimeDirectory / "ShaderDynamic/Tools" / graphicsAPIName / platformName / dxcExecutableName);
-        
-        if (!std::filesystem::exists(ShaderCompilerPath))
-        {
-            donut::log::error("Unable to find '%s' - required for runtime shader compilation", 
-                ShaderCompilerPath.string().c_str());
-            return false;
-        }
-        
         std::filesystem::path shaderSourcePathDevelopment = 
             sourceRootDirectory / "Rtxpt/Shaders";
         std::filesystem::path shaderSourcePathRuntime = 
             runtimeDirectory / "ShaderDynamic/Source/Rtxpt";
+
+        ShaderBinariesPath = runtimeDirectory / binarySubfolder / 
+            donut::app::GetShaderTypeName(device->getGraphicsAPI());
+
+        ShaderCompilerPath = std::filesystem::absolute(
+            runtimeDirectory / "ShaderDynamic/Tools" / graphicsAPIName / platformName / dxcExecutableName);
         
         if (!std::filesystem::exists(shaderSourcePathDevelopment))
         {
@@ -82,15 +78,18 @@ namespace ShaderCompilerUtils
                 
             if (!std::filesystem::exists(shaderSourcePathRuntime))
             {
-                donut::log::error("Unable to find shaders folder '%s' - required for shader compilation", 
+                donut::log::info("Shader source folder '%s' not found; runtime shader compilation is disabled.",
                     shaderSourcePathRuntime.string().c_str());
-                return false;
+                ShadersPath = shaderSourcePathRuntime;
+                ShadersPathExternalIncludes1 = runtimeDirectory / "ShaderDynamic/Source/External";
+                ShadersPathExternalIncludes2 = std::filesystem::path();
             }
-            
-            ShadersPath = shaderSourcePathRuntime;
-            ShadersPathExternalIncludes1 = 
-                runtimeDirectory / "ShaderDynamic/Source/External";
-            ShadersPathExternalIncludes2 = std::filesystem::path();
+            else
+            {
+                ShadersPath = shaderSourcePathRuntime;
+                ShadersPathExternalIncludes1 = runtimeDirectory / "ShaderDynamic/Source/External";
+                ShadersPathExternalIncludes2 = std::filesystem::path();
+            }
         }
         else
         {
@@ -100,10 +99,7 @@ namespace ShaderCompilerUtils
             ShadersPathExternalIncludes2 = 
                 sourceRootDirectory / "External";
         }
-        
-        ShaderBinariesPath = runtimeDirectory / binarySubfolder / 
-            donut::app::GetShaderTypeName(device->getGraphicsAPI());
-        
+
         // Convert all paths to absolute
         ShaderCompilerPath = std::filesystem::absolute(ShaderCompilerPath);
         ShadersPath = std::filesystem::absolute(ShadersPath);
@@ -111,12 +107,28 @@ namespace ShaderCompilerUtils
         if (!ShadersPathExternalIncludes2.empty())
             ShadersPathExternalIncludes2 = std::filesystem::absolute(ShadersPathExternalIncludes2);
         ShaderBinariesPath = std::filesystem::absolute(ShaderBinariesPath);
+
+        RuntimeCompilationAvailable =
+            std::filesystem::exists(ShaderCompilerPath) &&
+            std::filesystem::exists(ShadersPath);
+
+        if (!RuntimeCompilationAvailable)
+        {
+            if (!std::filesystem::exists(ShaderCompilerPath))
+            {
+                donut::log::info("Shader compiler '%s' not found; loading precompiled shader binaries only.",
+                    ShaderCompilerPath.string().c_str());
+            }
+        }
         
-        donut::log::info("Shader compiler: '%s'", ShaderCompilerPath.string().c_str());
-        donut::log::info("Shader sources: '%s' (includes: '%s', '%s')", 
-            ShadersPath.string().c_str(), 
-            ShadersPathExternalIncludes1.string().c_str(), 
-            ShadersPathExternalIncludes2.string().c_str());
+        if (RuntimeCompilationAvailable)
+        {
+            donut::log::info("Shader compiler: '%s'", ShaderCompilerPath.string().c_str());
+            donut::log::info("Shader sources: '%s' (includes: '%s', '%s')",
+                ShadersPath.string().c_str(),
+                ShadersPathExternalIncludes1.string().c_str(),
+                ShadersPathExternalIncludes2.string().c_str());
+        }
         donut::log::info("Shader binaries output: '%s'", ShaderBinariesPath.string().c_str());
         
         return true;
@@ -155,69 +167,112 @@ namespace ShaderCompilerUtils
         DxcCommandResult result;
         
         auto srcFullPath = std::filesystem::absolute(options.SourceFilePath);
+        std::filesystem::path logicalSource = options.LogicalSourceFileName.empty()
+            ? options.SourceFilePath.filename()
+            : options.LogicalSourceFileName;
         
         // See https://simoncoenen.com/blog/programming/graphics/DxcCompiling for switch reference
         std::string command;
+        std::string hashCommand;
         
         // Source file
         command += " \"" + srcFullPath.string() + "\"";
+        hashCommand += " \"" + logicalSource.generic_string() + "\"";
         
         // Debug info
         if (options.EnableDebugInfo)
         {
             command += " -Zi";              // Enable debug information
+            hashCommand += " -Zi";
             if (options.EmbedPdb)
+            {
                 command += " -Qembed_debug"; // Embed PDB in shader container
+                hashCommand += " -Qembed_debug";
+            }
         }
         
         // Hash based on binary output only
         command += " -Zsb";
+        hashCommand += " -Zsb";
         
         // Optimization level
         if (options.UseOptimizations)
+        {
             command += " -O3";
+            hashCommand += " -O3";
+        }
         else
+        {
             command += " -Od";
+            hashCommand += " -Od";
+        }
         
         // 16-bit types
         if (options.Enable16BitTypes)
+        {
             command += " -enable-16bit-types";
+            hashCommand += " -enable-16bit-types";
+        }
         
         // Warnings as errors
         if (options.WarningsAsErrors)
+        {
             command += " -WX";
+            hashCommand += " -WX";
+        }
         
         // All resources bound
         if (options.AllResourcesBound)
+        {
             command += " -all_resources_bound";
+            hashCommand += " -all_resources_bound";
+        }
         
         // Shader profile/target
         command += " -T " + GetProfileString(options.Profile);
+        hashCommand += " -T " + GetProfileString(options.Profile);
         
         // Entry point (only for non-library targets)
         if (!IsLibraryProfile(options.Profile) && !options.EntryPoint.empty())
+        {
             command += " -E " + options.EntryPoint;
+            hashCommand += " -E " + options.EntryPoint;
+        }
         
         // Payload qualifiers for older library profiles
         if (options.Profile == ShaderProfile::Library_6_6)
+        {
             command += " -enable-payload-qualifiers";
+            hashCommand += " -enable-payload-qualifiers";
+        }
         
         // Debug print macro
         if (options.EnableDebugPrint)
+        {
             command += " -D ENABLE_DEBUG_PRINT";
+            hashCommand += " -D ENABLE_DEBUG_PRINT";
+        }
         
         // User-defined macros
         for (const auto& macro : options.Macros)
+        {
             command += " -D " + macro.name + "=" + macro.definition;
+            hashCommand += " -D " + macro.name + "=" + macro.definition;
+        }
         
         // Include paths - config's external includes
         command += " -I \"" + config.ShadersPathExternalIncludes1.string() + "\"";
+        hashCommand += " -I <external1>";
         if (!config.ShadersPathExternalIncludes2.empty())
             command += " -I \"" + config.ShadersPathExternalIncludes2.string() + "\"";
+        hashCommand += " -I <external2>";
         
         // Additional include paths
         for (const auto& includePath : options.AdditionalIncludes)
+        {
             command += " -I \"" + includePath.string() + "\"";
+            hashCommand += " -I <additional:" + includePath.filename().generic_string() + ">";
+        }
         
         // Target API macro
         std::string targetMacro = " -D ";
@@ -230,6 +285,7 @@ namespace ShaderCompilerUtils
             targetMacro += "TARGET_VULKAN";
         }
         command += targetMacro;
+        hashCommand += targetMacro;
         
         // Vulkan-specific options
         if (config.GraphicsAPI == nvrhi::GraphicsAPI::VULKAN)
@@ -239,6 +295,11 @@ namespace ShaderCompilerUtils
             command += " -fspv-target-env=vulkan1.2";
             command += " -fspv-extension=SPV_EXT_descriptor_indexing";
             command += " -fspv-extension=KHR";
+            hashCommand += " -D SPIRV";
+            hashCommand += " -spirv";
+            hashCommand += " -fspv-target-env=vulkan1.2";
+            hashCommand += " -fspv-extension=SPV_EXT_descriptor_indexing";
+            hashCommand += " -fspv-extension=KHR";
             
             nvrhi::VulkanBindingOffsets cBindingOffsets;
             for (int i = 0; i < 7; i++)
@@ -248,6 +309,10 @@ namespace ShaderCompilerUtils
                 command += StringFormat(" -fvk-t-shift %d %d", cBindingOffsets.shaderResource, i);
                 command += StringFormat(" -fvk-b-shift %d %d", cBindingOffsets.constantBuffer, i);
                 command += StringFormat(" -fvk-u-shift %d %d", cBindingOffsets.unorderedAccess, i);
+                hashCommand += StringFormat(" -fvk-s-shift %d %d", cBindingOffsets.sampler, i);
+                hashCommand += StringFormat(" -fvk-t-shift %d %d", cBindingOffsets.shaderResource, i);
+                hashCommand += StringFormat(" -fvk-b-shift %d %d", cBindingOffsets.constantBuffer, i);
+                hashCommand += StringFormat(" -fvk-u-shift %d %d", cBindingOffsets.unorderedAccess, i);
             }
         }
         
@@ -255,7 +320,7 @@ namespace ShaderCompilerUtils
         
         // Compute hash of command (which includes all macros) but NOT the full file path
         // This avoids recompiling if just moving folders around
-        result.HashHex = ComputeSha256Hex(command);
+        result.HashHex = ComputeSha256Hex(hashCommand);
         
         // Build suggested output filename
         std::filesystem::path outFileName = options.SourceFilePath;
