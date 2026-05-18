@@ -16,6 +16,8 @@
 #include <donut/engine/SceneTypes.h>
 #include <json/json.h>
 #include <fstream>
+#include <format>
+#include <charconv>
 
 using namespace donut;
 using namespace donut::math;
@@ -33,8 +35,10 @@ namespace
     }
 }
 
+#ifdef _WIN32
 #include <windows.h>
 #include <commctrl.h>
+#endif
 #include <thread>
 #include <atomic>
 #include <regex>
@@ -584,7 +588,7 @@ std::tuple<int, std::string, std::string > SystemShell(const std::string & comma
 #endif
     std::filesystem::path tempLogFile = std::filesystem::temp_directory_path() / StringFormat("RTXPT_out_%d_%d.txt", pid, uniqueIndex);
     std::filesystem::path tempErrLogFile = std::filesystem::temp_directory_path() / StringFormat("RTXPT_err_%d_%d.txt", pid, uniqueIndex);
-    std::string startCmd = "\"" + command + " > \"" + tempLogFile.string() + "\"" + " 2> \"" + tempErrLogFile.string() + "\"" + " \"";
+    std::string startCmd = command + " > \"" + tempLogFile.string() + "\"" + " 2> \"" + tempErrLogFile.string() + "\"";
 
     resultValue = std::system(startCmd.c_str());
 

@@ -19,7 +19,7 @@
 #include <donut/engine/SceneGraph.h>
 #include <iterator>
 #include <imgui_internal.h>
-#include "Materials\MaterialsBaker.h"
+#include "Materials/MaterialsBaker.h"
 
 #include "ToneMapper/ToneMappingPasses.h"
 #include "Misc/Korgi.h"
@@ -358,6 +358,31 @@ static void ApplyPreset(SampleUIData& ui, const PerformancePreset& p)
     ui.ResetAccumulation = true;
 }
 
+void InitializeSampleUIDataFromCommandLine(SampleUIData& ui, const CommandLineOptions& cmdLine)
+{
+    ui.RelaxSettings = NrdConfig::getDefaultRELAXSettings();
+    ui.ReblurSettings = NrdConfig::getDefaultREBLURSettings();
+
+    ui.TemporalAntiAliasingParams.useHistoryClampRelax = true;
+    ui.ToneMappingParams.toneMapOperator = ToneMapperOperator::HableUc2;
+
+    // Enable by default for now.
+    ui.RTXDI.regir.regirStaticParams.Mode = rtxdi::ReGIRMode::Grid;
+
+    ui.UseNEE                     = cmdLine.UseNEE != 0;
+    ui.NEEType                    = cmdLine.NEEType;
+    ui.UseReSTIRDI                = cmdLine.UseReSTIRDI != 0;
+    ui.UseReSTIRGI                = cmdLine.UseReSTIRGI != 0;
+    ui.RealtimeSamplesPerPixel    = cmdLine.RealtimeSamplesPerPixel;
+    ui.AccumulationTarget         = cmdLine.ReferenceSamplesPerPixel;
+    ui.StandaloneDenoiser         = cmdLine.StandaloneDenoiser != 0;
+    ui.RealtimeAA                 = cmdLine.RealtimeAA;
+
+    ApplyPreset(ui, s_performancePresets[2]);
+
+    ui.EnableBloom &= !cmdLine.DisablePostProcessFilters;
+}
+
 SampleUI::SampleUI(DeviceManager* deviceManager, SampleBaseApp & baseApp, Sample& app, SampleUIData& ui, bool NVAPI_SERSupported, const CommandLineOptions& cmdLine)
         : ImGui_Renderer(deviceManager)
         , m_baseApp(baseApp)
@@ -389,30 +414,7 @@ SampleUI::SampleUI(DeviceManager* deviceManager, SampleBaseApp & baseApp, Sample
 #if ENABLE_DEBUG_DELTA_TREE_VIZUALISATION
     m_ImNodesContext = ImNodes::Ez::CreateContext();
 #endif
-
-    m_ui.RelaxSettings = NrdConfig::getDefaultRELAXSettings();
-    m_ui.ReblurSettings = NrdConfig::getDefaultREBLURSettings();
-
-    m_ui.TemporalAntiAliasingParams.useHistoryClampRelax = true;
-
-    m_ui.ToneMappingParams.toneMapOperator = ToneMapperOperator::HableUc2;
-
-    // enable by default for now
-    m_ui.RTXDI.regir.regirStaticParams.Mode = rtxdi::ReGIRMode::Grid;
-
-    // load core settings
-    m_ui.UseNEE                     = cmdLine.UseNEE != 0;
-    m_ui.NEEType                    = cmdLine.NEEType;
-    m_ui.UseReSTIRDI                = cmdLine.UseReSTIRDI != 0;
-    m_ui.UseReSTIRGI                = cmdLine.UseReSTIRGI != 0;
-    m_ui.RealtimeSamplesPerPixel    = cmdLine.RealtimeSamplesPerPixel;
-    m_ui.AccumulationTarget         = cmdLine.ReferenceSamplesPerPixel;
-    m_ui.StandaloneDenoiser         = cmdLine.StandaloneDenoiser != 0;
-    m_ui.RealtimeAA                 = cmdLine.RealtimeAA;
-
-    ApplyPreset(m_ui, s_performancePresets[2]);
-
-    m_ui.EnableBloom &= !cmdLine.DisablePostProcessFilters;
+    InitializeSampleUIDataFromCommandLine(m_ui, cmdLine);
 }
 
 SampleUI::~SampleUI()
@@ -583,6 +585,9 @@ void SampleUI::BuildUIPerformancePresets()
 
 void SampleUI::DLSSFGSelectorUI()
 {
+#if !DONUT_WITH_STREAMLINE
+    return;
+#else
     const char* items[] = { "Off", "2x", "3x", "4x" };
     const int itemCount = IM_ARRAYSIZE(items);
 
@@ -610,6 +615,7 @@ void SampleUI::DLSSFGSelectorUI()
 
     if (!m_ui.RealtimeMode)
         ImGui::TextColored(warnColor, "Note: DLSS-G is DISABLED in Reference PT mode");
+#endif
 };
 
 
@@ -647,7 +653,7 @@ void SampleUI::buildUI(void)
         const float indent = (int)ImGui::GetStyle().IndentSpacing*0.4f;
 
         ImGui::Text("%s, %s", GetDeviceManager()->GetRendererString(), m_app.GetResolutionInfo().c_str() );
-        ImGui::Text(m_app.GetFPSInfo().c_str());
+        ImGui::Text("%s", m_app.GetFPSInfo().c_str());
 
         if (BuildUIScriptsAndEtc())
         {
@@ -679,7 +685,9 @@ void SampleUI::buildUI(void)
             }
 
             {
+#if DONUT_WITH_STREAMLINE
                 UI_SCOPED_DISABLE(m_ui.ActualDLSSFGMode() != SI::DLSSGMode::eOff);
+#endif
                 ImGui::Checkbox("VSync", &m_ui.EnableVsync);
                 bool fpsLimiter = m_ui.FPSLimiter != 0;
                 ImGui::SameLine();
@@ -2456,7 +2464,7 @@ void SampleUI::buildUI(void)
                     if (buttons[i].HoverText.has_value())
                     {
                         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) 
-                            ImGui::SetTooltip(buttons[i].HoverText.value().c_str());
+                            ImGui::SetTooltip("%s", buttons[i].HoverText.value().c_str());
                     }
                 }
             }

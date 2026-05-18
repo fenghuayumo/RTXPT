@@ -181,7 +181,7 @@ void AnyHit(inout RayPayload payload : SV_RayPayload, in RayAttributes attrib : 
 RayHitInfo TraceVisibilityRay(RaytracingAccelerationStructure accelStruct, RayDesc ray, bool includeGaussianSplatShadows)
 {
 #if USE_RAY_QUERY
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS> rayQuery;
+    RTXPT_RayQuery(RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS) rayQuery;
     rayQuery.TraceRayInline(accelStruct, RAY_FLAG_NONE, 0xff, ray);
 
     while (rayQuery.Proceed())

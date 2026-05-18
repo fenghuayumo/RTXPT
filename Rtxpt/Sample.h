@@ -47,7 +47,9 @@ class CaptureScriptManager;
 class ComputePipelineBaker;
 class ComputeShaderVariant;
 class OidnDenoiser;
+#if RTXPT_WITH_PYTHON
 class PythonScripting;
+#endif
 class GaussianSplatPass;
 
 class Sample : public donut::app::ApplicationBase
@@ -64,6 +66,7 @@ public:
     //std::shared_ptr<donut::vfs::IFileSystem> GetRootFs() const                      { return m_RootFS; }
     std::shared_ptr<donut::engine::ShaderFactory> GetShaderFactory() const          { return m_shaderFactory; }
     std::shared_ptr<donut::engine::CommonRenderPasses> GetCommonPasses() const      { return m_CommonPasses; }
+    nvrhi::ITexture*                       GetLdrColorTexture() const               { return m_renderTargets ? m_renderTargets->LdrColor.Get() : nullptr; }
     std::shared_ptr<donut::engine::Scene>   GetScene() const                        { return m_scene; }
     std::vector<std::string> const &        GetAvailableScenes() const              { return m_sceneFilesAvailable; }
     std::string                             GetCurrentSceneName() const             { return m_currentSceneName; }
@@ -186,9 +189,9 @@ public:
 
     const std::unique_ptr<CaptureScriptManager> & GetCaptureScriptManager() const { return m_captureScriptManager; }
 
-    // Embedded Python scripting host (nullptr when built without RTXPT_WITH_PYTHON
-    // - all forwarding methods on the wrapper are still safe to call).
+#if RTXPT_WITH_PYTHON
     const std::unique_ptr<PythonScripting> & GetPythonScripting() const { return m_pythonScripting; }
+#endif
 
     bool                                    HasAsyncLoadingInProgress() const   { return m_asyncLoadingInProgress || m_ui.ShaderAndACRefreshDelayedRequest > 0; }
 
@@ -231,7 +234,9 @@ protected:
     std::shared_ptr<class PTPipelineVariant>    m_ptPipelineEdgeDetection;
 
     std::unique_ptr<CaptureScriptManager>       m_captureScriptManager;
+#if RTXPT_WITH_PYTHON
     std::unique_ptr<PythonScripting>            m_pythonScripting;
+#endif
 
 private:
     void                                    UpdateCameraFromScene( const std::shared_ptr<donut::engine::PerspectiveCamera> & sceneCamera );

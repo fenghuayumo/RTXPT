@@ -14,6 +14,7 @@
 
 #include "../AdvancedSample.h"
 #include "../Sample.h"
+#include "../SampleCommon/LocalConfig.h"
 #include "../SampleCommon/SampleCommon.h"
 
 #include <donut/app/DeviceManager.h>
@@ -217,6 +218,23 @@ namespace
 
         return p;
     }
+
+    nvrhi::GraphicsAPI ResolveGraphicsAPI(const RenderSession::Config& cfg)
+    {
+#if DONUT_WITH_DX12 && DONUT_WITH_VULKAN
+        return cfg.useVulkan ? nvrhi::GraphicsAPI::VULKAN : nvrhi::GraphicsAPI::D3D12;
+#elif DONUT_WITH_VULKAN
+        if (!cfg.useVulkan)
+            log::warning("RenderSession: DX12 was requested but this build only has Vulkan; using Vulkan.");
+        return nvrhi::GraphicsAPI::VULKAN;
+#elif DONUT_WITH_DX12
+        if (cfg.useVulkan)
+            log::warning("RenderSession: Vulkan was requested but this build only has DX12; using DX12.");
+        return nvrhi::GraphicsAPI::D3D12;
+#else
+        static_assert(DONUT_WITH_DX12 || DONUT_WITH_VULKAN, "RTXPT requires at least one graphics backend");
+#endif
+    }
 }
 
 RenderSession::RenderSession(const Config& cfg)
@@ -235,9 +253,6 @@ RenderSession::RenderSession(const Config& cfg)
     m_cmdLine.OverrideToReferenceMode = !cfg.realtimeMode;
     m_cmdLine.OverrideToRealtimeMode  =  cfg.realtimeMode;
     m_cmdLine.ReferenceSamplesPerPixel = cfg.accumulationTarget;
-    m_cmdLine.RealtimeAA = 0; // no DLSS unless caller explicitly requests it
-    m_cmdLine.UseReSTIRDI = false;
-    m_cmdLine.UseReSTIRGI = false;
     m_cmdLine.GaussianSplatFileName = cfg.gaussianSplatFile;
     m_cmdLine.GaussianSplatConvertRdfToDonut = cfg.gaussianSplatConvertRdfToDonut;
     m_cmdLine.GaussianSplatDepthTest = cfg.gaussianSplatDepthTest;
@@ -284,9 +299,7 @@ RenderSession::~RenderSession()
 
 bool RenderSession::InitDevice()
 {
-    nvrhi::GraphicsAPI api = m_config.useVulkan
-        ? nvrhi::GraphicsAPI::VULKAN
-        : nvrhi::GraphicsAPI::D3D12;
+    nvrhi::GraphicsAPI api = ResolveGraphicsAPI(m_config);
 
 #if DONUT_WITH_DX12 && defined(RTXPT_D3D_AGILITY_SDK_VERSION)
     if (api == nvrhi::GraphicsAPI::D3D12)
@@ -329,6 +342,19 @@ bool RenderSession::InitDevice()
             m_lastRenderedBackBufferIndex = manager.GetCurrentBackBufferIndex();
         };
 
+    auto device = m_deviceManager->GetDevice();
+    if (!device->queryFeatureSupport(nvrhi::Feature::RayTracingPipeline))
+    {
+        log::error("RenderSession: the graphics device does not support Ray Tracing Pipelines");
+        return false;
+    }
+
+    if (!device->queryFeatureSupport(nvrhi::Feature::RayQuery))
+    {
+        log::error("RenderSession: the graphics device does not support Ray Queries");
+        return false;
+    }
+
     return true;
 }
 
@@ -356,12 +382,14 @@ bool RenderSession::InitRenderer()
     m_shaderFactory = std::make_shared<donut::engine::ShaderFactory>(device, rootFS, "/ShaderPrecompiled");
 
     m_renderer = std::make_unique<AdvancedPathTracer>(*m_deviceManager, m_cmdLine);
+    InitializeSampleUIDataFromCommandLine(g_sampleUIData, m_cmdLine);
+    LocalConfig::PostAppInit(g_sampleUIData);
 
     // Pick whichever scene the user requested (or fall back to the donut
     // default).  This loads the actual scene file asynchronously inside
     // Sample::Init().
     std::string preferredScene = m_config.scene.empty()
-        ? std::string("bistro-programmer-art.scene.json")
+        ? std::string("default.json")
         : m_config.scene;
 
     g_sampleUIData.GaussianSplatTintColor = m_config.gaussianSplatTintColor;
@@ -479,14 +507,23 @@ bool RenderSession::SaveScreenshot(const std::string& outputPath)
     if (!m_initialized || !m_deviceManager || !m_renderer)
         return false;
 
-    uint32_t backBufferIndex = m_lastRenderedBackBufferIndex;
-    if (backBufferIndex == UINT32_MAX)
-        backBufferIndex = m_deviceManager->GetCurrentBackBufferIndex();
-
-    nvrhi::ITexture* tex = m_deviceManager->GetBackBuffer(backBufferIndex);
+    nvrhi::ITexture* tex = m_renderer->GetLdrColorTexture();
+    nvrhi::ResourceStates state = nvrhi::ResourceStates::ShaderResource;
     if (!tex)
     {
-        log::error("RenderSession: no current back buffer");
+        uint32_t backBufferIndex = m_lastRenderedBackBufferIndex;
+        if (backBufferIndex == UINT32_MAX)
+            backBufferIndex = m_deviceManager->GetCurrentBackBufferIndex();
+
+        tex = m_deviceManager->GetBackBuffer(backBufferIndex);
+        state = m_config.headless
+            ? nvrhi::ResourceStates::RenderTarget
+            : nvrhi::ResourceStates::Present;
+    }
+
+    if (!tex)
+    {
+        log::error("RenderSession: no current output texture");
         return false;
     }
 
@@ -502,10 +539,6 @@ bool RenderSession::SaveScreenshot(const std::string& outputPath)
     std::filesystem::path p(outputPath);
     if (p.has_parent_path())
         EnsureDirectoryExists(p.parent_path());
-
-    nvrhi::ResourceStates state = m_config.headless
-        ? nvrhi::ResourceStates::RenderTarget
-        : nvrhi::ResourceStates::Present;
 
     return donut::engine::SaveTextureToFile(
         m_deviceManager->GetDevice(),

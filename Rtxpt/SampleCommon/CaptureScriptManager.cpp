@@ -69,7 +69,7 @@ bool CaptureScriptManager::ScriptProgressUI()
 
     if (m_resetAndWarmupCounter > 0)
     {
-        ImGui::Text("");
+        ImGui::Spacing();
         ImGui::TextWrapped("Running warm-up: %d out of %d", m_resetAndWarmupCounter, m_resetAndWarmupFrames);
     }
     if (!m_ui.RealtimeMode)
@@ -78,12 +78,12 @@ bool CaptureScriptManager::ScriptProgressUI()
     }
     if (m_sequenceRecordCounter > 0)
     {
-        ImGui::Text("");
+        ImGui::Spacing();
         ImGui::TextWrapped("Running sequence export: %d", m_sequenceRecordCounter);
     }
     if (m_start)
     {
-        ImGui::Text("");
+        ImGui::Spacing();
         ImGui::TextWrapped("Starting (scene loading might still in progress)...");
     }
 

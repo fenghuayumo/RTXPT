@@ -12,6 +12,8 @@
 #include <cxxopts.hpp>
 #include <donut/core/log.h>
 #include <filesystem>
+#include <algorithm>
+#include <cctype>
 
 bool CommandLineOptions::InitFromCommandLine(int _argc, char const* const* _argv)
 {
@@ -34,8 +36,13 @@ bool CommandLineOptions::InitFromCommandLine(int _argc, char const* const* _argv
 			("f,fullscreen", "run in fullscreen mode", value(fullscreen))
 			("a,adapter", "--adapter must be followed by a string used to match the preferred adapter, e.g --adapter NVIDIA or --adapter RTX", value(adapter))
 			("h,help", "Print the help message", value(help))
+			("backend", "Render backend: dx12/d3d12 or vulkan/vk", value(graphicsBackend))
+			("api", "Alias for --backend", value(graphicsBackend))
+			("graphicsApi", "Alias for --backend", value(graphicsBackend))
 			("d3d12", "Render using DirectX 12 (default)")
+			("dx12", "Alias for --d3d12")
 			("vk", "Render using Vulkan", value(useVulkan))
+			("vulkan", "Alias for --vk", value(useVulkan))
             ("stopAnimations", "Always start the scene with animations disabled", value(stopAnimations))
             ("noSER", "Disable Shader Execution Reordering", value(disableSER))
             ("adapterIndex", "--adapterIndex must be followed by a number used to identify the preferred adapter index, e.g '--adapterIndex 0' or '--adapterIndex 1'; default is -1 (automatic)", value(adapterIndex))
@@ -81,6 +88,27 @@ bool CommandLineOptions::InitFromCommandLine(int _argc, char const* const* _argv
 		int argc = _argc;
 		char const* const* argv = _argv;
 		options.parse(argc, argv);
+
+        if (!graphicsBackend.empty())
+        {
+            std::string backend = graphicsBackend;
+            std::transform(backend.begin(), backend.end(), backend.begin(),
+                [](unsigned char c) { return char(std::tolower(c)); });
+
+            if (backend == "vulkan" || backend == "vk")
+            {
+                useVulkan = true;
+            }
+            else if (backend == "dx12" || backend == "d3d12" || backend == "directx12" || backend == "directx")
+            {
+                useVulkan = false;
+            }
+            else
+            {
+                donut::log::error("Unknown render backend '%s'. Expected dx12/d3d12 or vulkan/vk.", graphicsBackend.c_str());
+                return false;
+            }
+        }
 
 		if (help)
 		{

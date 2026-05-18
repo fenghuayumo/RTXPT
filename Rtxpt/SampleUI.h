@@ -135,8 +135,13 @@ struct SampleUIData
 
     bool                                ActualUseApproximateMIS() const { return (RealtimeMode)?(NEEMISType!=0):(NEEMISType==2); }
 
+#if DONUT_WITH_STREAMLINE
     bool                                ActualEnableVsync() const       { return (ActualDLSSFGMode() != SI::DLSSGMode::eOff) ? (false) : (EnableVsync); }
     int                                 ActualFPSLimiter() const        { return (ActualDLSSFGMode() != SI::DLSSGMode::eOff) ? (0) : (FPSLimiter); }
+#else
+    bool                                ActualEnableVsync() const       { return EnableVsync; }
+    int                                 ActualFPSLimiter() const        { return FPSLimiter; }
+#endif
 
     bool                                ShowUI                                  = true;
     int                                 FPSLimiter                              = 0; // 0 - no limit, otherwise limit fps to FPSLimiter and fix scene update deltaTime to 1./FPSLimiter
@@ -383,6 +388,8 @@ struct SampleUIData
 };
 
 extern SampleUIData g_sampleUIData;
+
+void InitializeSampleUIDataFromCommandLine(SampleUIData& ui, const struct CommandLineOptions& cmdLine);
 
 class SampleUI : public donut::app::ImGui_Renderer
 {

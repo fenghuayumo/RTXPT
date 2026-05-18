@@ -24,6 +24,13 @@
 #define RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS 0
 #endif
 
+// SPIR-V RayQuery only supports a single template argument (ray flags).
+#if defined(SPIRV) || defined(TARGET_VULKAN)
+#define RTXPT_RayQuery(rayFlags, ommFlags) RayQuery<rayFlags>
+#else
+#define RTXPT_RayQuery(rayFlags, ommFlags) RayQuery<rayFlags, ommFlags>
+#endif
+
 namespace Bridge
 {
     static uint getSampleIndex();
@@ -95,7 +102,7 @@ namespace Bridge
     // Consider simplifying alpha testing - perhaps splitting it up from the main geometry path, load it with fewer indirections or something like that.
     static bool traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pathVertexIndex, DebugContext debug);
 
-    static void traceScatterRay(const PathState path, inout RayQuery<RAY_FLAG_NONE, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS> rayQuery, const float2 tMinMax, DebugContext debug);
+    static void traceScatterRay(const PathState path, inout RTXPT_RayQuery(RAY_FLAG_NONE, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS) rayQuery, const float2 tMinMax, DebugContext debug);
 
 #if PT_USE_RESTIR_GI
     static void StoreSecondarySurfacePositionAndNormal(uint2 pixelCoordinate, float3 worldPos, float3 normal);

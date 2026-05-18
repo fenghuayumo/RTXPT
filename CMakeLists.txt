@@ -43,8 +43,13 @@ endif()
 # we can't run with DX11
 option(DONUT_WITH_DX11 OFF)
 
-# default VULKAN to OFF
-option(DONUT_WITH_VULKAN OFF "Enable the Vulkan version of Donut")
+# Vulkan is required for Linux/WSL builds because the D3D backends are Windows-only.
+if (WIN32)
+    set(RTXPT_DEFAULT_WITH_VULKAN OFF)
+else()
+    set(RTXPT_DEFAULT_WITH_VULKAN ON)
+endif()
+option(DONUT_WITH_VULKAN "Enable the Vulkan version of Donut" ${RTXPT_DEFAULT_WITH_VULKAN})
 
 # we want shader PDBs always embedded
 option(DONUT_EMBED_SHADER_PDBS "" ON)
@@ -82,7 +87,16 @@ endfunction()
 #----------------------------------------------------------------------------------------------------------------------
 # Streamline config
 #set(FETCHCONTENT_QUIET OFF) <- use for a lot more detailed info from FetchContent
-option(DONUT_WITH_STREAMLINE "Enable streamline, separate package required" ON)
+if (WIN32)
+    set(RTXPT_DEFAULT_WITH_STREAMLINE ON)
+else()
+    set(RTXPT_DEFAULT_WITH_STREAMLINE OFF)
+endif()
+option(DONUT_WITH_STREAMLINE "Enable streamline, separate package required" ${RTXPT_DEFAULT_WITH_STREAMLINE})
+if (DONUT_WITH_STREAMLINE AND NOT WIN32)
+    message(WARNING "Streamline integration is currently Windows-only in this codebase; disabling DONUT_WITH_STREAMLINE for this platform.")
+    set(DONUT_WITH_STREAMLINE OFF CACHE BOOL "Enable streamline, separate package required" FORCE)
+endif()
 set(STREAMLINE_DOWNLOAD_PATH "${CMAKE_SOURCE_DIR}/External/Streamline")
 
 set(DONUT_STREAMLINE_FETCH_URL "https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.9.0/streamline-sdk-v2.9.0.zip" CACHE STRING "URL to Streamline package to fetch from https://github.com/NVIDIA-RTX/Streamline/releases")
@@ -102,9 +116,28 @@ option(STREAMLINE_FEATURE_DIRECTSR  "Include DirectSR dll"          OFF )
 #----------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------
-# Get and unpack DXC for DirectX shader compilation
-CheckAndDownloadPackage("DXC" "v1.9.2602.17" ${CMAKE_CURRENT_SOURCE_DIR}/external/dxc https://www.nuget.org/api/v2/package/Microsoft.Direct3D.DXC/1.9.2602.17 "zip")
-set(DXC_CUSTOM_PATH "${CMAKE_SOURCE_DIR}/External/dxc/build/native/bin/x64/" CACHE STRING "Path to embedded dxc")
+# Get and unpack DXC for DirectX shader compilation. Linux/WSL uses the Vulkan SDK DXC.
+if (WIN32)
+    CheckAndDownloadPackage("DXC" "v1.9.2602.17" ${CMAKE_CURRENT_SOURCE_DIR}/external/dxc https://www.nuget.org/api/v2/package/Microsoft.Direct3D.DXC/1.9.2602.17 "zip")
+    set(DXC_CUSTOM_PATH "${CMAKE_SOURCE_DIR}/External/dxc/build/native/bin/x64/" CACHE STRING "Path to embedded dxc")
+else()
+    if (DEFINED DXC_SPIRV_PATH AND DXC_SPIRV_PATH)
+        set(RTXPT_DXC_SPIRV_EXECUTABLE "${DXC_SPIRV_PATH}")
+    elseif (DEFINED SHADERMAKE_DXC_VK_PATH AND SHADERMAKE_DXC_VK_PATH)
+        set(RTXPT_DXC_SPIRV_EXECUTABLE "${SHADERMAKE_DXC_VK_PATH}")
+    else()
+        find_program(RTXPT_DXC_SPIRV_EXECUTABLE
+            NAMES dxc
+            HINTS
+                "$ENV{VULKAN_SDK}/bin"
+                "$ENV{VULKAN_SDK}/x86_64/bin"
+        )
+    endif()
+    if (NOT RTXPT_DXC_SPIRV_EXECUTABLE)
+        message(FATAL_ERROR "DXC for SPIR-V was not found. Install the Linux Vulkan SDK in WSL, or set DXC_SPIRV_PATH/SHADERMAKE_DXC_VK_PATH to the dxc executable.")
+    endif()
+    set(DXC_CUSTOM_PATH "" CACHE STRING "Path to embedded dxc")
+endif()
 #----------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------
@@ -143,27 +176,45 @@ if (RTXPT_WITH_OIDN)
         set(RTXPT_OIDN_FETCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/External/OIDN")
         set(RTXPT_OIDN_PACKAGE_DIR "${RTXPT_OIDN_FETCH_DIR}/oidn-${RTXPT_OIDN_VERSION}.x64.windows")
         set(RTXPT_OIDN_BIN_DIR "${RTXPT_OIDN_PACKAGE_DIR}/bin" CACHE INTERNAL "Open Image Denoise runtime DLL directory")
+        set(RTXPT_OIDN_LIBRARY_DIR "${RTXPT_OIDN_PACKAGE_DIR}/bin" CACHE INTERNAL "Open Image Denoise runtime library directory")
 
         CheckAndDownloadPackage(
             "Open Image Denoise"
-            "v${RTXPT_OIDN_VERSION}"
+            "v${RTXPT_OIDN_VERSION}.x64.windows"
             ${RTXPT_OIDN_FETCH_DIR}
             "https://github.com/RenderKit/oidn/releases/download/v${RTXPT_OIDN_VERSION}/oidn-${RTXPT_OIDN_VERSION}.x64.windows.zip"
             "zip")
+    elseif (UNIX AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        set(RTXPT_OIDN_FETCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/External/OIDN")
+        set(RTXPT_OIDN_PACKAGE_DIR "${RTXPT_OIDN_FETCH_DIR}/oidn-${RTXPT_OIDN_VERSION}.x86_64.linux")
+        set(RTXPT_OIDN_LIBRARY_DIR "${RTXPT_OIDN_PACKAGE_DIR}/lib" CACHE INTERNAL "Open Image Denoise runtime library directory")
 
+        CheckAndDownloadPackage(
+            "Open Image Denoise"
+            "v${RTXPT_OIDN_VERSION}.x86_64.linux"
+            ${RTXPT_OIDN_FETCH_DIR}
+            "https://github.com/RenderKit/oidn/releases/download/v${RTXPT_OIDN_VERSION}/oidn-${RTXPT_OIDN_VERSION}.x86_64.linux.tar.gz"
+            "tar.gz")
+    else()
+        message(WARNING "RTXPT_WITH_OIDN is supported for x64 Windows and x86_64 Linux packages; disabling OIDN for this platform.")
+        set(RTXPT_WITH_OIDN OFF CACHE BOOL "Enable Intel Open Image Denoise for Reference path tracing mode" FORCE)
+    endif()
+
+    if (RTXPT_WITH_OIDN)
         find_package(OpenImageDenoise ${RTXPT_OIDN_VERSION} CONFIG REQUIRED
             PATHS
                 "${RTXPT_OIDN_PACKAGE_DIR}"
                 "${RTXPT_OIDN_PACKAGE_DIR}/lib/cmake/OpenImageDenoise-${RTXPT_OIDN_VERSION}"
             NO_DEFAULT_PATH)
 
-        set_target_properties(OpenImageDenoise OpenImageDenoise_core PROPERTIES
-            MAP_IMPORTED_CONFIG_DEBUG Release
-            MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
-            MAP_IMPORTED_CONFIG_MINSIZEREL Release)
-    else()
-        message(WARNING "RTXPT_WITH_OIDN currently uses the official x64 Windows OIDN package; disabling OIDN for this platform.")
-        set(RTXPT_WITH_OIDN OFF CACHE BOOL "Enable Intel Open Image Denoise for Reference path tracing mode" FORCE)
+        foreach(_oidn_target OpenImageDenoise OpenImageDenoise_core)
+            if (TARGET ${_oidn_target})
+                set_target_properties(${_oidn_target} PROPERTIES
+                    MAP_IMPORTED_CONFIG_DEBUG Release
+                    MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
+                    MAP_IMPORTED_CONFIG_MINSIZEREL Release)
+            endif()
+        endforeach()
     endif()
 endif()
 #----------------------------------------------------------------------------------------------------------------------
@@ -174,7 +225,7 @@ endif()
 set(RTXPT_D3D_AGILITY_SDK_VERSION_NAME "1.619.0" CACHE STRING "Optional Agility SDK version to download")
 set_property(CACHE RTXPT_D3D_AGILITY_SDK_VERSION_NAME PROPERTY STRINGS "1.619.0" "1.717.0-preview" "1.719.0-preview" "")
 
-if (RTXPT_D3D_AGILITY_SDK_VERSION_NAME)
+if (WIN32 AND RTXPT_D3D_AGILITY_SDK_VERSION_NAME)
     # Extract the numeric SDK version (e.g. "1.717.0-preview" -> "717")
     string(REGEX MATCH "^[0-9]+\\.([0-9]+)\\." _agility_ver_match "${RTXPT_D3D_AGILITY_SDK_VERSION_NAME}")
     set(_agility_numeric_ver "${CMAKE_MATCH_1}")
@@ -192,18 +243,29 @@ else()
 endif()
 
 #----------------------------------------------------------------------------------------------------------------------
-option(NVRHI_WITH_NVAPI "Include NVAPI support (requires NVAPI SDK)" ON)
+if (WIN32)
+    set(RTXPT_DEFAULT_WITH_NVAPI ON)
+else()
+    set(RTXPT_DEFAULT_WITH_NVAPI OFF)
+endif()
+option(NVRHI_WITH_NVAPI "Include NVAPI support (requires NVAPI SDK)" ${RTXPT_DEFAULT_WITH_NVAPI})
 set(NVAPI_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/External/nvapi/" CACHE STRING "Path to NVAPI include headers/shaders" )
 set(NVAPI_LIBRARY "${CMAKE_SOURCE_DIR}/External/nvapi/amd64/nvapi64.lib" CACHE STRING "Path to NVAPI .lib file")
 
-set(DXC_PATH "${DXC_CUSTOM_PATH}/dxc.exe" CACHE STRING "Path to embedded dxc file for DX12")
-set(DXC_DXIL_EXECUTABLE "${DXC_CUSTOM_PATH}/dxc.exe" CACHE STRING "Path to embedded dxc file for DX12")
-set(DXC_SPIRV_PATH "${DXC_CUSTOM_PATH}/dxc.exe" CACHE STRING "Path to embedded dxc file for SPIRV")
+if (WIN32)
+    set(DXC_PATH "${DXC_CUSTOM_PATH}/dxc.exe" CACHE STRING "Path to embedded dxc file for DX12")
+    set(DXC_DXIL_EXECUTABLE "${DXC_CUSTOM_PATH}/dxc.exe" CACHE STRING "Path to embedded dxc file for DX12")
+    set(DXC_SPIRV_PATH "${DXC_CUSTOM_PATH}/dxc.exe" CACHE STRING "Path to embedded dxc file for SPIRV")
+else()
+    set(DXC_PATH "" CACHE STRING "Path to embedded dxc file for DX12")
+    set(DXC_DXIL_EXECUTABLE "" CACHE STRING "Path to embedded dxc file for DX12")
+    set(DXC_SPIRV_PATH "${RTXPT_DXC_SPIRV_EXECUTABLE}" CACHE STRING "Path to dxc file for SPIRV")
+endif()
 
 set(SHADERMAKE_FIND_DXC OFF CACHE BOOL  "" FORCE)
 set(SHADERMAKE_FIND_DXC_VK OFF CACHE BOOL "" FORCE)
 set(SHADERMAKE_DXC_PATH "${DXC_PATH}" CACHE STRING "" FORCE)
-set(SHADERMAKE_DXC_VK_PATH "${DXC_PATH}" CACHE STRING "" FORCE)
+set(SHADERMAKE_DXC_VK_PATH "${DXC_SPIRV_PATH}" CACHE STRING "" FORCE)
 
 # option(USE_RAY_TRACING_DENOISER "Include NRD as part of the sample." ON)
 

@@ -30,7 +30,7 @@
 #include "Bindings/LightingBindings.hlsli"
 #include "Bindings/SamplerBindings.hlsli"
 
-#include "Libraries\MicroRng.hlsli"
+#include "Libraries/MicroRng.hlsli"
 #include "HybridGaussianShadow.hlsli"
 
 
@@ -996,7 +996,7 @@ bool Bridge::AlphaTestVisibilityRay(uint instanceID, uint instanceIndex, uint ge
 // Consider simplifying alpha testing - perhaps splitting it up from the main geometry path, load it with fewer indirections or something like that.
 bool Bridge::traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pathVertexIndex, DebugContext debug)
 {
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS> rayQuery;
+    RTXPT_RayQuery(RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS) rayQuery;
     rayQuery.TraceRayInline(SceneBVH, RAY_FLAG_NONE, 0xff, ray);
 
     while (rayQuery.Proceed())
@@ -1057,7 +1057,7 @@ bool Bridge::traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pa
     return visibilityResult;
 }
 
-void Bridge::traceScatterRay(const PathState path, inout RayQuery<RAY_FLAG_NONE, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS> rayQuery, const float2 tMinMax, DebugContext debug)
+void Bridge::traceScatterRay(const PathState path, inout RTXPT_RayQuery(RAY_FLAG_NONE, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS) rayQuery, const float2 tMinMax, DebugContext debug)
 {
     RayDesc ray = path.getScatterRay().toRayDesc();
     ray.TMin = tMinMax.x;

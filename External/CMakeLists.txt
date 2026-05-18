@@ -97,17 +97,22 @@ util_generate_shader_config_file(
     "-D NRD_COMPILER_DXC=1 -D NRD_NORMAL_ENCODING=${NRD_NORMAL_ENCODING} -D NRD_ROUGHNESS_ENCODING=${NRD_ROUGHNESS_ENCODING}"
 )
 
-# Compile all shaders in nrd_shaders.cfg 
-donut_compile_shaders(
+# Compile all shaders in nrd_shaders.cfg
+set(nrd_shader_compile_args
     TARGET nrd_shaders
     CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/Nrd.cfg
     SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/Nrd/Shaders/Include
     FOLDER "NRD"
-    DXIL ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/nrd/dxil
     SPIRV_DXC ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/nrd/spirv
     CFLAGS "-WX -O3 -enable-16bit-types -all_resources_bound"
     INCLUDES ${CMAKE_BINARY_DIR}/_deps/mathlib-src ${CMAKE_CURRENT_SOURCE_DIR}/Nrd/Shaders/Include ${CMAKE_CURRENT_SOURCE_DIR}/Nrd/Shaders/Resources
 )
+if (WIN32)
+    list(APPEND nrd_shader_compile_args
+        DXIL ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/nrd/dxil
+    )
+endif()
+donut_compile_shaders(${nrd_shader_compile_args})
 
 ##########################################################################
 ########################### Opacity Micro-Map SDK ########################
@@ -130,15 +135,20 @@ util_generate_shader_config_file(
     "-D COMPILER_DXC=1"
 )
 
-# Compile all shaders in omm.cfg 
-donut_compile_shaders(
+# Compile all shaders in omm.cfg
+set(omm_shader_compile_args
     TARGET omm_shaders
     CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/Omm.cfg
     SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/Omm/libraries/omm-lib/include
     FOLDER "Opacity Micro-Map SDK"
-    DXIL ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/omm/dxil
     SPIRV_DXC ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/omm/spirv
 )
+if (WIN32)
+    list(APPEND omm_shader_compile_args
+        DXIL ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/omm/dxil
+    )
+endif()
+donut_compile_shaders(${omm_shader_compile_args})
 
 ##########################################################################
 ################################ RTXDI SDK ###############################

@@ -54,7 +54,11 @@ public:
         int         width             = 1920;
         int         height            = 1080;
         bool        headless          = true;     // render into offscreen back buffers
+#if DONUT_WITH_DX12
         bool        useVulkan         = false;    // false => DX12
+#else
+        bool        useVulkan         = true;     // Vulkan is the only backend on Linux/WSL
+#endif
         int         adapterIndex      = -1;       // -1 => default
         bool        debug             = false;
         bool        nonInteractive    = true;     // do not popup blocking dialogs

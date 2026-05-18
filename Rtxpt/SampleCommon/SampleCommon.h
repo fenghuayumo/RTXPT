@@ -17,6 +17,7 @@
 #include <assert.h>
 #include <mutex>
 #include <map>
+#include <optional>
 #include <nvrhi/nvrhi.h>
 #include <nvrhi/utils.h>
 #include <donut/core/math/math.h>

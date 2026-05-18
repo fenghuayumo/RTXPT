@@ -260,8 +260,12 @@ NB_MODULE(rtxpt, m)
              nb::rv_policy::reference,
              "Live `Settings` mirror (same object as rtxpt.settings()).")
 
-        .def("__enter__", [](PyRenderer& self) -> PyRenderer& { return self; })
-        .def("__exit__",  [](PyRenderer& self, nb::object, nb::object, nb::object) { self.Close(); });
+        .def("__enter__", [](PyRenderer& self) -> PyRenderer* { return &self; },
+             nb::rv_policy::reference)
+        .def("__exit__",  [](PyRenderer& self, nb::object, nb::object, nb::object) -> bool {
+             self.Close();
+             return false;
+        }, nb::arg().none(), nb::arg().none(), nb::arg().none());
 
     m.def("app", []() -> Sample* { return &RequireCurrentSample(); },
           nb::rv_policy::reference,

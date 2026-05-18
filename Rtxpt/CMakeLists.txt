@@ -26,6 +26,13 @@ if (rtxpt_python_sources)
     list(REMOVE_ITEM shared_sources ${rtxpt_python_sources})
 endif()
 
+if (NOT WIN32)
+    list(REMOVE_ITEM shared_sources
+        "${CMAKE_CURRENT_SOURCE_DIR}/SampleCommon/SplashScreen.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SampleCommon/SplashScreen.h"
+    )
+endif()
+
 # The two NB_MODULE entry points are mutually exclusive (one defines the
 # embed-mode `rtxpt` module that lives inside Rtxpt.exe, the other defines
 # the Python extension `rtxpt.pyd`).  They are added to their respective
@@ -52,7 +59,8 @@ else()
 # DXIL is irrelevant on Linux
 set(SHADERMAKE_OPTIONS_DXIL "")
 # Don't enable DebugPrint with Linux DXC because that leads to segfaults in the compiler (as of v1.8.2407)
-set(SHADERMAKE_OPTIONS_SPIRV "")
+# Disable DX12-only OMM ray-query flags for SPIR-V (see shaders.cfg OMM variants).
+set(SHADERMAKE_OPTIONS_SPIRV "-D NVRHI_D3D12_WITH_DXR12_OPACITY_MICROMAP=0 -D SPIRV")
 endif()
 
 if(DONUT_WITH_AFTERMATH OR DONUT_EMBED_SHADER_PDBS)
@@ -67,18 +75,32 @@ if(RTXPT_D3D_AGILITY_SDK_VERSION AND (RTXPT_D3D_AGILITY_SDK_VERSION GREATER_EQUA
     set(shadermake_options "-m 6_9")
 endif()
 
-donut_compile_shaders(
+# SPIR-V builds cannot compile the DX12 OMM shader variants in shaders.cfg.
+set(rtxpt_shader_config "${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg")
+if (NOT WIN32)
+    file(READ "${rtxpt_shader_config}" rtxpt_shader_config_contents)
+    string(REGEX REPLACE "[^\n]*NVRHI_D3D12_WITH_DXR12_OPACITY_MICROMAP=1[^\n]*\n?" "" rtxpt_shader_config_contents "${rtxpt_shader_config_contents}")
+    set(rtxpt_shader_config "${CMAKE_CURRENT_SOURCE_DIR}/shaders_vk.cfg")
+    file(WRITE "${rtxpt_shader_config}" "${rtxpt_shader_config_contents}")
+endif()
+
+set(rtxpt_shader_compile_args
     TARGET rtxpt_shaders
-    CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg
+    CONFIG ${rtxpt_shader_config}
     SOURCES ${shaders}
     FOLDER ${folder}
-    DXIL ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/${project}/dxil
     SPIRV_DXC ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/${project}/spirv
     INCLUDES ${CMAKE_SOURCE_DIR}/External/Nrd/Shaders/Include ${CMAKE_SOURCE_DIR}/External/Rtxdi/Include ${CMAKE_SOURCE_DIR}/External
     SHADERMAKE_OPTIONS ${shadermake_options}
     SHADERMAKE_OPTIONS_DXIL ${SHADERMAKE_OPTIONS_DXIL}
     SHADERMAKE_OPTIONS_SPIRV ${SHADERMAKE_OPTIONS_SPIRV}
 )
+if (WIN32)
+    list(APPEND rtxpt_shader_compile_args
+        DXIL ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/${project}/dxil
+    )
+endif()
+donut_compile_shaders(${rtxpt_shader_compile_args})
 
 
 ##########################################################################
@@ -87,11 +109,19 @@ set(DYNSH_COPY1_MARKER "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderDynamic/Tools/co
 set(DYNSH_COPY2_MARKER "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderDynamic/Tools/copyDX.marker")
 set(DYNSH_COPY3_MARKER "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderDynamic/Source/copy.marker")
 
-# vulkan SDK dxc (optional)
+# vulkan SDK / SPIR-V dxc (optional)
 if (DXC_SPIRV_PATH)
 get_filename_component(DXC_SPIRV_PATH_MINUS_EXE ${DXC_SPIRV_PATH} DIRECTORY)
-file(GLOB FILES_TO_COPY_2 "${DXC_SPIRV_PATH_MINUS_EXE}/*.exe" "${DXC_SPIRV_PATH_MINUS_EXE}/*.dll" "${DXC_SPIRV_PATH_MINUS_EXE}/*.json")
+if (WIN32)
+    file(GLOB FILES_TO_COPY_2 "${DXC_SPIRV_PATH_MINUS_EXE}/*.exe" "${DXC_SPIRV_PATH_MINUS_EXE}/*.dll" "${DXC_SPIRV_PATH_MINUS_EXE}/*.json")
+else()
+    file(GLOB FILES_TO_COPY_2 "${DXC_SPIRV_PATH}" "${DXC_SPIRV_PATH_MINUS_EXE}/*.so" "${DXC_SPIRV_PATH_MINUS_EXE}/*.json")
+    get_filename_component(DXC_SPIRV_ROOT_DIR ${DXC_SPIRV_PATH_MINUS_EXE} DIRECTORY)
+    file(GLOB FILES_TO_COPY_2_LIB "${DXC_SPIRV_ROOT_DIR}/lib/*.so" "${DXC_SPIRV_ROOT_DIR}/lib/*.so.*")
+endif()
 set(DEST_DIR_2 "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderDynamic/Tools/vk/x64")
+set(DEST_LIB_DIR_2 "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderDynamic/Tools/vk/lib")
+if (WIN32)
 add_custom_command(
     OUTPUT "${DYNSH_COPY1_MARKER}"
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderDynamic
@@ -100,14 +130,24 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E touch "${DYNSH_COPY1_MARKER}"
     COMMENT "Copying ${DXC_SPIRV_PATH_MINUS_EXE} to ${DEST_DIR_2}"
 )
+else()
+add_custom_command(
+    OUTPUT "${DYNSH_COPY1_MARKER}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderDynamic
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DEST_DIR_2}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DEST_LIB_DIR_2}
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FILES_TO_COPY_2} ${DEST_DIR_2}
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FILES_TO_COPY_2_LIB} ${DEST_LIB_DIR_2}
+    COMMAND ${CMAKE_COMMAND} -E touch "${DYNSH_COPY1_MARKER}"
+    COMMENT "Copying ${DXC_SPIRV_PATH_MINUS_EXE} to ${DEST_DIR_2}"
+)
+endif()
 endif()
 
-# d3d12 dxc
+# d3d12 dxc (Windows only)
+if (WIN32)
 set(SOURCE_DIR_1 "${DXC_CUSTOM_PATH}")
 set(DEST_DIR_1 "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderDynamic/Tools/d3d12/x64")
-# d3d12 linux dxc
-# ...
-
 add_custom_command(
     OUTPUT "${DYNSH_COPY2_MARKER}"
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderDynamic
@@ -116,6 +156,13 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E touch "${DYNSH_COPY2_MARKER}"
     COMMENT "Copying ${SOURCE_DIR_1} to ${DEST_DIR_1}"
 )
+else()
+add_custom_command(
+    OUTPUT "${DYNSH_COPY2_MARKER}"
+    COMMAND ${CMAKE_COMMAND} -E touch "${DYNSH_COPY2_MARKER}"
+    COMMENT "Skipping D3D12 DXC copy on non-Windows"
+)
+endif()
 
 # shader files - main rtxpt
 set(SOURCE_DIR_RTXPT_SHADERS "${PROJECT_SOURCE_DIR}/Rtxpt/Shaders")
@@ -140,12 +187,30 @@ add_custom_target(ShaderDynamicAssets_CopyAlways
     COMMENT "Copying shader sources"
 )
 
-add_custom_target(ShaderDynamicAssets ALL DEPENDS "${DYNSH_COPY1_MARKER}" "${DYNSH_COPY2_MARKER}")
+if (WIN32)
+    set(shader_dynamic_copy_deps "${DYNSH_COPY1_MARKER}" "${DYNSH_COPY2_MARKER}")
+elseif (DXC_SPIRV_PATH)
+    set(shader_dynamic_copy_deps "${DYNSH_COPY1_MARKER}")
+else()
+    set(shader_dynamic_copy_deps "")
+endif()
+add_custom_target(ShaderDynamicAssets ALL DEPENDS ${shader_dynamic_copy_deps})
 
 ##########################################################################
 
 # Create a static library for shared code (used by both samples)
 add_library(RtxptCore STATIC ${shared_sources})
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(RtxptCore PRIVATE
+        -Wno-error=deprecated-declarations
+        -Wno-error=changes-meaning
+        -Wno-error=attributes
+        -Wno-error=format-security
+        -Wno-error=format-zero-length
+        $<$<CXX_COMPILER_ID:GNU>:-Wno-error=stringop-overflow>
+        $<$<CXX_COMPILER_ID:GNU>:-Wno-error=unused-result>
+    )
+endif()
 target_link_libraries(RtxptCore PUBLIC cxxopts donut_render donut_app donut_engine NRD Rtxdi omm-lib omm-gpu-nvrhi)
 target_include_directories(RtxptCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "../External/Nrd/Include" ${CMAKE_SOURCE_DIR}/External/Rtxdi/Include)
 target_compile_definitions(RtxptCore PUBLIC RTXPT_D3D12_WITH_NVAPI=$<BOOL:${NVRHI_WITH_NVAPI}>)
@@ -203,7 +268,11 @@ if (RTXPT_D3D_AGILITY_SDK_PATH AND RTXPT_D3D_AGILITY_SDK_VERSION)
 endif()
 
 if (RTXPT_WITH_OIDN)
-    file(GLOB RTXPT_OIDN_RUNTIME_DLLS "${RTXPT_OIDN_BIN_DIR}/*.dll")
+    if (WIN32)
+        file(GLOB RTXPT_OIDN_RUNTIME_LIBS "${RTXPT_OIDN_LIBRARY_DIR}/*.dll")
+    else()
+        file(GLOB RTXPT_OIDN_RUNTIME_LIBS "${RTXPT_OIDN_LIBRARY_DIR}/*.so*")
+    endif()
 endif()
 
 # Macro to create sample executables with common settings
@@ -216,6 +285,17 @@ macro(add_rtxpt_sample TARGET_NAME MAIN_SOURCE)
         list(APPEND _extra_sources "${CMAKE_CURRENT_SOURCE_DIR}/Python/PythonBindings_Embed.cpp")
     endif()
     add_executable(${TARGET_NAME} WIN32 ${MAIN_SOURCE} ${_extra_sources})
+    if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${TARGET_NAME} PRIVATE
+            -Wno-error=deprecated-declarations
+            -Wno-error=changes-meaning
+            -Wno-error=attributes
+            -Wno-error=format-security
+            -Wno-error=format-zero-length
+            $<$<CXX_COMPILER_ID:GNU>:-Wno-error=stringop-overflow>
+            $<$<CXX_COMPILER_ID:GNU>:-Wno-error=unused-result>
+        )
+    endif()
     target_link_libraries(${TARGET_NAME} PRIVATE RtxptCore)
     add_dependencies(${TARGET_NAME} rtxpt_shaders nrd_shaders omm_shaders ShaderDynamicAssets ShaderDynamicAssets_CopyAlways)
     set_target_properties(${TARGET_NAME} PROPERTIES 
@@ -227,7 +307,7 @@ macro(add_rtxpt_sample TARGET_NAME MAIN_SOURCE)
     if (RTXPT_WITH_OIDN)
         add_custom_command(
             TARGET ${TARGET_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RTXPT_OIDN_RUNTIME_DLLS} "$<TARGET_FILE_DIR:${TARGET_NAME}>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RTXPT_OIDN_RUNTIME_LIBS} "$<TARGET_FILE_DIR:${TARGET_NAME}>"
             COMMAND_EXPAND_LISTS
         )
     endif()
@@ -290,7 +370,7 @@ if (RTXPT_WITH_PYTHON AND TARGET nanobind-static)
     if (RTXPT_WITH_OIDN)
         add_custom_command(
             TARGET rtxpt_py POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RTXPT_OIDN_RUNTIME_DLLS} "$<TARGET_FILE_DIR:rtxpt_py>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RTXPT_OIDN_RUNTIME_LIBS} "$<TARGET_FILE_DIR:rtxpt_py>"
             COMMAND_EXPAND_LISTS
         )
     endif()

@@ -115,7 +115,7 @@ void postProcessHit(inout PathState path, const PathTracer::WorkingContext worki
 void nextHit(inout PathState path, inout float2 tMinMax, const PathTracer::WorkingContext workingContext)
 {
 #if defined(SER_HIT_OBJECT) || defined(__INTELLISENSE__)
-    RayQuery<RAY_FLAG_NONE, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS> rayQuery;
+    RTXPT_RayQuery(RAY_FLAG_NONE, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS) rayQuery;
     Bridge::traceScatterRay(path, rayQuery, tMinMax, workingContext.Debug);   // this outputs ray and rayQuery; if there was a hit, ray.TMax is rayQuery.ComittedRayT
 
     SER_HIT_OBJECT hit;

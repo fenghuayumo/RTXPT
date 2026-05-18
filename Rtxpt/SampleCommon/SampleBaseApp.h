@@ -20,7 +20,7 @@
 
 #define RTXPT_ENABLE_VIDEO_MEMORY_INFO 1
 
-#if RTXPT_ENABLE_VIDEO_MEMORY_INFO
+#if RTXPT_ENABLE_VIDEO_MEMORY_INFO && defined(_WIN32)
 #include <dxgi1_4.h>    // IDXGIAdapter3 (DXGI 1.4)
 #include <wrl/client.h> // Microsoft::WRL::ComPtr
 #endif
@@ -78,7 +78,7 @@ private:
 	std::unique_ptr<Sample> m_MainSceneRender; // 3d render of the scene. Where Path Tracing happens
 	std::unique_ptr<SampleUI> m_UIRender;
 
-#if RTXPT_ENABLE_VIDEO_MEMORY_INFO // & DX12
+#if RTXPT_ENABLE_VIDEO_MEMORY_INFO && defined(_WIN32)
     Microsoft::WRL::ComPtr<IDXGIAdapter3>   m_d3dAdapter;
 #endif
 

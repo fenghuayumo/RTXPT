@@ -11,7 +11,9 @@
 #include "AdvancedSample.h"
 #include <SampleCommon/SampleBaseApp.h>
 
+#ifdef _WIN32
 #include "SampleCommon/SplashScreen.h"
+#endif
 
 class AdvancedSample : public SampleBaseApp
 {
@@ -27,15 +29,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 int main(int __argc, const char** __argv)
 #endif
 {
+#ifdef _WIN32
     SplashScreen splashScreen;
     splashScreen.Start(L"loading_splash.png");
+#endif
 
     AdvancedSample example;
 
     // Run the sample app
     const auto status = example.Init(__argc, __argv);
     
+#ifdef _WIN32
     splashScreen.Stop();
+#endif
 
     if (status == SampleBaseApp::InitReturnCodes::Success)
     {

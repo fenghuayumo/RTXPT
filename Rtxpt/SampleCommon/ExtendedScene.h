@@ -120,7 +120,7 @@ class GameSettings : public donut::engine::SceneGraphLeaf
 {
     std::string                 jsonData;
 
-    virtual [[nodiscard]] std::shared_ptr<SceneGraphLeaf> Clone() override;
+    [[nodiscard]] virtual std::shared_ptr<SceneGraphLeaf> Clone() override;
     virtual void                Load(const Json::Value& node) override;
 
 public:

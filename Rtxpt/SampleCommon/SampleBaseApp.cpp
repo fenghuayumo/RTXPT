@@ -10,6 +10,8 @@
 
 #include "SampleBaseApp.h"
 
+#include <algorithm>
+#include <cctype>
 #include <string>
 #include "../Misc/Korgi.h"
 #include "../SampleUI.h"
@@ -42,6 +44,91 @@ static void __stdcall myValidationMessageCallback(void* pUserData, NVAPI_D3D12_R
 #endif
 #endif
 
+namespace
+{
+    std::string LowerAscii(std::string value)
+    {
+        std::transform(value.begin(), value.end(), value.begin(),
+            [](unsigned char c) { return char(std::tolower(c)); });
+        return value;
+    }
+
+    bool IsTrueOptionValue(const std::string& value)
+    {
+        return value.empty()
+            || value == "1"
+            || value == "true"
+            || value == "yes"
+            || value == "on";
+    }
+
+    bool TryParseBackendName(const std::string& value, nvrhi::GraphicsAPI& api)
+    {
+        const std::string backend = LowerAscii(value);
+        if (backend == "vk" || backend == "vulkan")
+        {
+            api = nvrhi::GraphicsAPI::VULKAN;
+            return true;
+        }
+        if (backend == "dx12" || backend == "d3d12" || backend == "directx12" || backend == "directx")
+        {
+            api = nvrhi::GraphicsAPI::D3D12;
+            return true;
+        }
+        return false;
+    }
+
+    nvrhi::GraphicsAPI GetRtxptGraphicsAPIFromCommandLine(int argc, const char* const* argv)
+    {
+#if defined(_WIN32)
+        nvrhi::GraphicsAPI api = donut::app::GetGraphicsAPIFromCommandLine(argc, argv);
+
+        for (int n = 1; n < argc; ++n)
+        {
+            std::string arg = argv[n] ? argv[n] : "";
+            std::string key = arg;
+            std::string value;
+
+            const size_t equals = key.find('=');
+            if (equals != std::string::npos)
+            {
+                value = LowerAscii(key.substr(equals + 1));
+                key = key.substr(0, equals);
+            }
+
+            key = LowerAscii(key);
+
+            if (key == "-vk" || key == "--vk" || key == "-vulkan" || key == "--vulkan")
+            {
+                if (IsTrueOptionValue(value))
+                    api = nvrhi::GraphicsAPI::VULKAN;
+            }
+            else if (key == "-d3d12" || key == "--d3d12" || key == "-dx12" || key == "--dx12")
+            {
+                if (IsTrueOptionValue(value))
+                    api = nvrhi::GraphicsAPI::D3D12;
+            }
+            else if (key == "--backend" || key == "--api" || key == "--graphicsapi")
+            {
+                std::string backend = value;
+                if (backend.empty() && n + 1 < argc)
+                    backend = argv[++n] ? argv[n] : "";
+
+                nvrhi::GraphicsAPI parsedApi;
+                if (TryParseBackendName(backend, parsedApi))
+                    api = parsedApi;
+                else
+                    donut::log::warning("Unknown render backend '%s'. Falling back to the default backend.", backend.c_str());
+            }
+        }
+
+        return api;
+#else
+        return nvrhi::GraphicsAPI::VULKAN;
+#endif
+    }
+}
+
 
 SampleBaseApp::SampleBaseApp()
 {
@@ -49,8 +136,12 @@ SampleBaseApp::SampleBaseApp()
 
     korgi::Init(); // MIDI Input for parameter control
 
-    // Init graphics API
-    nvrhi::GraphicsAPI api = donut::app::GetGraphicsAPIFromCommandLine(__argc, __argv);
+    // Init graphics API (command line parsed later in Init)
+#if defined(_WIN32)
+    nvrhi::GraphicsAPI api = GetRtxptGraphicsAPIFromCommandLine(__argc, __argv);
+#else
+    nvrhi::GraphicsAPI api = GetRtxptGraphicsAPIFromCommandLine(0, nullptr);
+#endif
     m_DeviceManager = std::unique_ptr<donut::app::DeviceManager>(donut::app::DeviceManager::Create(api));
 
     m_DeviceManager->SetFrameTimeUpdateInterval(1.0f);
@@ -121,6 +212,10 @@ SampleBaseApp::InitReturnCodes SampleBaseApp::Init(int argc, const char* const* 
         m_UIRender->Init(m_ShaderFactory);
         m_DeviceManager->AddRenderPassToBack(m_UIRender.get());
     }
+    else
+    {
+        InitializeSampleUIDataFromCommandLine(g_sampleUIData, m_CmdLine);
+    }
 
     // Register GLFW drag-and-drop callback
     if (!m_CmdLine.noWindow && m_DeviceManager->GetWindow())
@@ -134,7 +229,7 @@ SampleBaseApp::InitReturnCodes SampleBaseApp::Init(int argc, const char* const* 
 
     LocalConfig::PostAppInit(g_sampleUIData);
 
-#if RTXPT_ENABLE_VIDEO_MEMORY_INFO // & DX12
+#if RTXPT_ENABLE_VIDEO_MEMORY_INFO && defined(_WIN32)
     auto device = m_DeviceManager->GetDevice();
     if (device->getGraphicsAPI() == nvrhi::GraphicsAPI::D3D12)
     {
@@ -153,7 +248,7 @@ SampleBaseApp::InitReturnCodes SampleBaseApp::Init(int argc, const char* const* 
 
 bool SampleBaseApp::QueryVideoMemoryInfo(uint64_t& outBudget, uint64_t& outCurrentUsage, uint64_t& outAvailableForReservation, uint64_t& outCurrentReservation)
 {
-#if RTXPT_ENABLE_VIDEO_MEMORY_INFO // & DX12
+#if RTXPT_ENABLE_VIDEO_MEMORY_INFO && defined(_WIN32)
     DXGI_QUERY_VIDEO_MEMORY_INFO info;
     if (FAILED(m_d3dAdapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info)))
         return false;
@@ -313,7 +408,7 @@ bool SampleBaseApp::ProcessCommandLine(int argc, char const* const* argv,
         m_CmdLine.height = 1440;
     }
 #endif
-    if (!m_CmdLine.InitFromCommandLine(__argc, __argv))
+    if (!m_CmdLine.InitFromCommandLine(argc, argv))
     {
         return false;
     }

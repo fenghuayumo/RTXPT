@@ -62,7 +62,9 @@
 
 #include "SampleGame/GameScene.h"
 
+#if RTXPT_WITH_PYTHON
 #include "Python/PythonScripting.h"
+#endif
 
 using namespace donut;
 using namespace donut::math;
@@ -186,19 +188,23 @@ Sample::Sample(donut::app::DeviceManager& deviceManager,
 
     m_captureScriptManager = std::make_unique<CaptureScriptManager>(*this, m_ui, m_cmdLine);
 
+#if RTXPT_WITH_PYTHON
     // Embedded Python scripting host - we always create the wrapper but the
     // interpreter itself is initialized on demand the first time a script
     // gets queued.  This keeps cold-start overhead at zero when scripting is
     // unused even if the executable was built with RTXPT_WITH_PYTHON=ON.
     m_pythonScripting = std::make_unique<PythonScripting>(*this);
+#endif
 }
 
 Sample::~Sample()
 {
+#if RTXPT_WITH_PYTHON
     // Tear down the Python interpreter first so that any nb::class_<>-bound
     // C++ objects (materials, lights, ...) are released while their owning
     // C++ data is still alive.
     m_pythonScripting.reset();
+#endif
 }
 
 void Sample::DebugDrawLine( float3 start, float3 stop, float4 col1, float4 col2 )
@@ -820,6 +826,7 @@ void Sample::SceneLoaded( )
 
     m_asyncLoadingInProgress = true;
 
+#if RTXPT_WITH_PYTHON
     // Initialize the embedded Python interpreter (lazily) and queue the
     // command-line scripts/expressions so that they execute against a fully
     // populated scene.  Actual execution happens during Animate() below.
@@ -833,6 +840,7 @@ void Sample::SceneLoaded( )
                 m_pythonScripting->QueueScriptString(m_cmdLine.pythonExpr, "<--pythonExpr>");
         }
     }
+#endif
 }
 
 bool Sample::KeyboardUpdate(int key, int scancode, int action, int mods)
@@ -931,11 +939,13 @@ void Sample::Animate(float fElapsedTimeSeconds)
 
     m_captureScriptManager->PreAnim(fElapsedTimeSeconds);
 
+#if RTXPT_WITH_PYTHON
     // Drain any pending Python scripts. We do this on the renderer thread so
     // bindings observe a coherent scene state and so they can mutate UI
     // settings before rendering for the current frame happens.
     if (m_pythonScripting && IsSceneLoaded())
         m_pythonScripting->ProcessPendingScripts();
+#endif
 
     m_lastDeltaTime = fElapsedTimeSeconds;
 

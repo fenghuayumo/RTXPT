@@ -16,7 +16,7 @@
 #include <donut/engine/BindingCache.h>
 #include <nvrhi/nvrhi.h>
 #include <donut/core/math/math.h>
-#include <donut\engine\SceneTypes.h>
+#include <donut/engine/SceneTypes.h>
 
 #include "../SampleCommon/ComputePass.h"
 #include "../Shaders/SubInstanceData.h"

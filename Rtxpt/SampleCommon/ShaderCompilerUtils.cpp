@@ -53,8 +53,14 @@ namespace ShaderCompilerUtils
         const std::filesystem::path runtimeDirectory = GetRuntimeDirectory();
         const std::filesystem::path sourceRootDirectory = runtimeDirectory.parent_path();
         
+    #if defined(_WIN32)
+        const char* dxcExecutableName = "dxc.exe";
+    #else
+        const char* dxcExecutableName = "dxc";
+    #endif
+
         ShaderCompilerPath = std::filesystem::absolute(
-            runtimeDirectory / "ShaderDynamic/Tools" / graphicsAPIName / platformName / "dxc.exe");
+            runtimeDirectory / "ShaderDynamic/Tools" / graphicsAPIName / platformName / dxcExecutableName);
         
         if (!std::filesystem::exists(ShaderCompilerPath))
         {

@@ -17,7 +17,7 @@
 #include "../Shaders/Libraries/ShaderDebug/ShaderDebug.hlsl"
 #endif
 
-#include "..\Shaders\Libraries\NEE-AT\NEEATBaker.hlsli"
+#include "../Shaders/Libraries/NEE-AT/NEEATBaker.hlsli"
 
 #if !defined(__cplusplus) || defined(__INTELLISENSE__)
 

@@ -12,6 +12,8 @@
 
 #include <string>
 #include <optional>
+#include <cstdint>
+#include <cfloat>
 
 struct CommandLineOptions
 {
@@ -23,6 +25,7 @@ struct CommandLineOptions
 	uint32_t height = 1080;
 	bool fullscreen = false;
 	std::string adapter;
+    std::string graphicsBackend;
     int adapterIndex = -1;
 	bool useVulkan = false;
     bool stopAnimations = false;
