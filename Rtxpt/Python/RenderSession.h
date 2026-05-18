@@ -113,6 +113,7 @@ public:
                    const donut::math::float3& dir,
                    const donut::math::float3& up);
     void SetCameraFOV(float verticalFovDegrees);
+    void SetCameraIntrinsics(float fx, float fy, float cx, float cy, float width, float height);
 
     Sample*       GetSample()       { return reinterpret_cast<Sample*>(m_renderer.get()); }
     const Sample* GetSample() const { return reinterpret_cast<const Sample*>(m_renderer.get()); }

@@ -567,4 +567,10 @@ void RenderSession::SetCameraFOV(float verticalFovDegrees)
         m_renderer->SetCameraVerticalFOV(donut::math::radians(verticalFovDegrees));
 }
 
+void RenderSession::SetCameraIntrinsics(float fx, float fy, float cx, float cy, float width, float height)
+{
+    if (m_renderer)
+        m_renderer->SetCameraIntrinsics(fx, fy, cx, cy, width, height);
+}
+
 #endif // RTXPT_WITH_PYTHON

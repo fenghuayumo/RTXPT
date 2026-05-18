@@ -140,6 +140,32 @@ python .\Rtxpt\Python\Examples\3dgs_example.py ^
     --side front
 ```
 
+### COLMAP Camera 3DGS Alignment Test
+
+`render_gs_colmap_views.py` renders a 3DGS PLY from COLMAP `cameras.bin/images.bin` views. It is useful for comparing RTXPT output against gsplat output from the same camera poses.
+
+By default, it reads:
+
+```text
+D:/ProgramCode/Python/demo_gsplat&blender/GS/gaussians.ply
+D:/ProgramCode/Python/demo_gsplat&blender/GS/sparse
+```
+
+Example:
+
+```powershell
+python .\Rtxpt\Python\Examples\render_gs_colmap_views.py ^
+    --max-views 8 ^
+    --frames-per-view 8 ^
+    --warmup-frames 4 ^
+    --mip-antialiasing ^
+    --out-dir "D:\ProgramCode\Python\demo_gsplat&blender\GS\rtxpt_rendered_intrinsics_mipaa"
+```
+
+The script passes full COLMAP pinhole intrinsics (`fx`, `fy`, `cx`, `cy`) through `Renderer.set_camera_intrinsics(...)`. This keeps off-center principal points aligned with gsplat. Use `--symmetric-fov` only when intentionally testing the older vertical-FOV-only path.
+
+When `--convert-rdf-to-donut` is enabled, which is the default, both the PLY loader and the COLMAP camera pose are converted from RDF/COLMAP coordinates into RTXPT/Donut coordinates. `--mip-antialiasing` is enabled by default and can be disabled with `--no-mip-antialiasing`.
+
 ### Edit Materials
 
 ```python
@@ -319,6 +345,7 @@ rtxpt.Renderer(
 | `save_screenshot(output_path)` | `bool` | Save current backbuffer to PNG/JPG/BMP/TGA. |
 | `set_camera(position, direction, up=(0, 1, 0))` | `bool` | Triples can be lists/tuples of 3 floats. |
 | `set_camera_fov(vertical_fov_degrees)` | `None` | Set vertical FOV in degrees. |
+| `set_camera_intrinsics(fx, fy, cx, cy, width, height)` | `None` | Set an off-center pinhole projection from pixel-space intrinsics. This overrides the symmetric FOV projection until `set_camera_fov(...)` is called. |
 | `app` | `Sample` | Underlying renderer instance. |
 | `settings` | `Settings` | Live UI/settings state. |
 
@@ -375,6 +402,7 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | `get_camera_pos_dir_up()` | `str` | Comma-separated `pos.xyz,dir.xyz,up.xyz`. |
 | `set_camera_pos_dir_up(pos_dir_up)` | `bool` | Input format matches `get_camera_pos_dir_up()`. |
 | `set_camera_fov(vertical_fov_degrees)` | `None` | Takes degrees. |
+| `set_camera_intrinsics(fx, fy, cx, cy, width, height)` | `None` | Uses pixel-space pinhole intrinsics for the active projection. Useful for COLMAP/OpenCV cameras with non-centered `cx/cy`. |
 | `get_camera_fov()` | `float` | Returns current internal value in radians. |
 | `save_current_camera()` | `None` | Save camera through app's camera persistence path. |
 | `load_current_camera()` | `None` | Restore saved camera. |
@@ -737,6 +765,7 @@ For windowed extension usage:
 | `Rtxpt/Python/Examples/offline_render.py` | Headless reference render and screenshot. |
 | `Rtxpt/Python/Examples/test_splat_interactive.py` | Windowed or headless 3DGS rasterization test. |
 | `Rtxpt/Python/Examples/3dgs_example.py` | Batch 3DGS Reference/OIDN and Realtime/DLSS-RR render test. |
+| `Rtxpt/Python/Examples/render_gs_colmap_views.py` | Render 3DGS from COLMAP camera poses with full pinhole intrinsics and optional Mip antialiasing. |
 | `Rtxpt/Python/Examples/example_basic.py` | Basic embedded scripting. |
 | `Rtxpt/Python/Examples/example_modes_dlss_oidn.py` | Realtime/reference mode, DLSS, OIDN settings. |
 | `Rtxpt/Python/Examples/example_animate_lights.py` | Per-frame light edits. |

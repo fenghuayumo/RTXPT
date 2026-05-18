@@ -133,6 +133,23 @@ namespace
         objectToWorld *= dm::translation(ui.GaussianSplatTranslation);
         return dm::affineToHomogeneous(objectToWorld);
     }
+
+    float4x4 MakePinholeIntrinsicsProjection(float fx, float fy, float cx, float cy, float width, float height, float zNear)
+    {
+        width = std::max(width, 1.0f);
+        height = std::max(height, 1.0f);
+
+        const float xScale = 2.0f * fx / width;
+        const float yScale = 2.0f * fy / height;
+        const float xOffset = 2.0f * cx / width - 1.0f;
+        const float yOffset = 1.0f - 2.0f * cy / height;
+
+        return float4x4(
+            xScale, 0.0f, 0.0f, 0.0f,
+            0.0f, yScale, 0.0f, 0.0f,
+            xOffset, yOffset, 0.0f, 1.0f,
+            0.0f, 0.0f, zNear, 0.0f);
+    }
 }
 
 #if defined(RTXPT_D3D_AGILITY_SDK_VERSION)
@@ -639,7 +656,17 @@ void Sample::UpdateViews( nvrhi::IFramebuffer* framebuffer )
     nvrhi::Viewport windowViewport(float(m_renderSize.x), float(m_renderSize.y));
     m_view->SetViewport(windowViewport);
     float outputAspectRatio = m_displayAspectRatio; //windowViewport.width() / windowViewport.height();    // render and display outputs might not match in case of lower DLSS/etc resolution rounding!
-    m_view->SetMatrices(m_camera.GetWorldToViewMatrix(), perspProjD3DStyleReverse(m_cameraVerticalFOV, outputAspectRatio, m_cameraZNear));
+    const float4x4 projection = m_cameraUseCustomIntrinsics
+        ? MakePinholeIntrinsicsProjection(
+            m_cameraIntrinsics.x,
+            m_cameraIntrinsics.y,
+            m_cameraIntrinsics.z,
+            m_cameraIntrinsics.w,
+            m_cameraIntrinsicsViewport.x,
+            m_cameraIntrinsicsViewport.y,
+            m_cameraZNear)
+        : perspProjD3DStyleReverse(m_cameraVerticalFOV, outputAspectRatio, m_cameraZNear);
+    m_view->SetMatrices(m_camera.GetWorldToViewMatrix(), projection);
     m_view->SetPixelOffset(ComputeCameraJitter(m_sampleIndex));
     m_view->UpdateCache();
     if ((m_frameIndex & 0xFFFFFFFF) == 0)
@@ -1095,6 +1122,34 @@ bool Sample::SetCurrentCameraPosDirUp(const std::string & val)
     if (ok)
         m_camera.LookAt( worldPos, worldPos + worldDir, worldUp );
     return ok;
+}
+
+void Sample::SetCameraVerticalFOV(float cameraFOV)
+{
+    m_cameraVerticalFOV = cameraFOV;
+    m_cameraUseCustomIntrinsics = false;
+    m_ui.ResetAccumulation = true;
+    m_gaussianSplatTemporalReset = true;
+}
+
+void Sample::SetCameraIntrinsics(float fx, float fy, float cx, float cy, float width, float height)
+{
+    if (fx <= 0.0f || fy <= 0.0f || width <= 0.0f || height <= 0.0f)
+        return;
+
+    m_cameraIntrinsics = dm::float4(fx, fy, cx, cy);
+    m_cameraIntrinsicsViewport = dm::float2(width, height);
+    m_cameraVerticalFOV = 2.0f * std::atan(height / (2.0f * fy));
+    m_cameraUseCustomIntrinsics = true;
+    m_ui.ResetAccumulation = true;
+    m_gaussianSplatTemporalReset = true;
+}
+
+void Sample::ClearCameraIntrinsics()
+{
+    m_cameraUseCustomIntrinsics = false;
+    m_ui.ResetAccumulation = true;
+    m_gaussianSplatTemporalReset = true;
 }
 
 void Sample::SaveCurrentCamera() const

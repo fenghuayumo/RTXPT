@@ -99,7 +99,9 @@ public:
     bool                                    SetCurrentCameraPosDirUp(const std::string & val);
 
     float                                   GetCameraVerticalFOV() const            { return m_cameraVerticalFOV; }
-    void                                    SetCameraVerticalFOV(float cameraFOV)   { m_cameraVerticalFOV = cameraFOV; }
+    void                                    SetCameraVerticalFOV(float cameraFOV);
+    void                                    SetCameraIntrinsics(float fx, float fy, float cx, float cy, float width, float height);
+    void                                    ClearCameraIntrinsics();
 
     float                                   GetAvgTimePerFrame() const;
 
@@ -314,6 +316,9 @@ private:
     float                                       m_cameraVerticalFOV = 60.0f;
     float                                       m_cameraZNear = 0.001f;
     float                                       m_cameraZFar = 100000.0f;
+    bool                                        m_cameraUseCustomIntrinsics = false;
+    dm::float4                                  m_cameraIntrinsics = dm::float4(0.f); // fx, fy, cx, cy
+    dm::float2                                  m_cameraIntrinsicsViewport = dm::float2(0.f);
     dm::float3                                  m_lastCamPos = { 0,0,0 };
     dm::float3                                  m_lastCamDir = { 0,0,0 };
     dm::float3                                  m_lastCamUp = { 0,0,0 };

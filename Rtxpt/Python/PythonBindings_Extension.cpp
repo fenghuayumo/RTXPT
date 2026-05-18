@@ -156,6 +156,10 @@ public:
         if (m_session) m_session->SetCameraFOV(fov);
     }
 
+    void SetCameraIntrinsics(float fx, float fy, float cx, float cy, float width, float height) {
+        if (m_session) m_session->SetCameraIntrinsics(fx, fy, cx, cy, width, height);
+    }
+
     Sample* GetApp() {
         return m_session ? m_session->GetSample() : nullptr;
     }
@@ -249,6 +253,11 @@ NB_MODULE(rtxpt, m)
 
         .def("set_camera_fov", &PyRenderer::SetCameraFOV,
              nb::arg("vertical_fov_degrees"))
+
+        .def("set_camera_intrinsics", &PyRenderer::SetCameraIntrinsics,
+             nb::arg("fx"), nb::arg("fy"), nb::arg("cx"), nb::arg("cy"),
+             nb::arg("width"), nb::arg("height"),
+             "Set an off-center pinhole projection from pixel-space camera intrinsics.")
 
         .def_prop_ro("app",
              [](PyRenderer& self) -> Sample* { return self.GetApp(); },

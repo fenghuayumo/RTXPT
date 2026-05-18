@@ -704,6 +704,12 @@ void RegisterCoreBindings(nb::module_& m)
         .def("set_camera_fov", [](Sample& self, float fov) { self.SetCameraVerticalFOV(donut::math::radians(fov)); },
             nb::arg("vertical_fov_degrees"))
 
+        .def("set_camera_intrinsics",
+            [](Sample& self, float fx, float fy, float cx, float cy, float width, float height) {
+                self.SetCameraIntrinsics(fx, fy, cx, cy, width, height);
+            },
+            nb::arg("fx"), nb::arg("fy"), nb::arg("cx"), nb::arg("cy"), nb::arg("width"), nb::arg("height"))
+
         .def("get_camera_fov", [](Sample& self) { return self.GetCameraVerticalFOV(); })
 
         .def("save_current_camera",  [](Sample& self) { self.SaveCurrentCamera(); })
