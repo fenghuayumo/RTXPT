@@ -167,6 +167,12 @@ public:
 
     const std::vector<donut::engine::SceneImportResult> & GetModels() const               { return m_Models; }
 
+protected:
+    bool LoadModelFile(
+        const std::filesystem::path& fileName,
+        donut::engine::ThreadPool* threadPool,
+        donut::engine::SceneImportResult& result) override;
+
 private:
     // maybe switch to SceneGraphWalker?
     void ProcessNodesRecursive(std::shared_ptr<donut::engine::SceneGraphNode> node);

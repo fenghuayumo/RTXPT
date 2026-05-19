@@ -3718,7 +3718,11 @@ bool Sample::LoadGltfMeshFile(const std::filesystem::path& filePath)
     return true;
 }
 
-bool Sample::LoadObjMeshFile(const std::filesystem::path& filePath)
+static bool LoadObjModelFile(
+    const std::filesystem::path& filePath,
+    const std::shared_ptr<TextureCache>& textureCache,
+    const std::shared_ptr<SceneTypeFactory>& sceneTypeFactory,
+    SceneImportResult& result)
 {
     std::ifstream file(filePath);
     if (!file)
@@ -3726,8 +3730,6 @@ bool Sample::LoadObjMeshFile(const std::filesystem::path& filePath)
         log::error("OBJ file could not be opened: '%s'", filePath.string().c_str());
         return false;
     }
-
-    auto sceneTypeFactory = std::make_shared<ExtendedSceneTypeFactory>();
 
     std::vector<dm::float3> positions;
     std::vector<dm::float2> texcoords;
@@ -3915,7 +3917,7 @@ bool Sample::LoadObjMeshFile(const std::filesystem::path& filePath)
             return nullptr;
         }
 
-        return m_TextureCache->LoadTextureFromFileDeferred(texturePath, sRGB);
+        return textureCache->LoadTextureFromFileDeferred(texturePath, sRGB);
     };
 
     for (const ObjGroup& group : groups)
@@ -3990,10 +3992,35 @@ bool Sample::LoadObjMeshFile(const std::filesystem::path& filePath)
     importedRoot->SetName(filePath.stem().string());
     importedRoot->SetLeaf(sceneTypeFactory->CreateMeshInstance(mesh));
 
-    importedRoot = m_scene->GetSceneGraph()->Attach(m_scene->GetSceneGraph()->GetRootNode(), importedRoot);
+    result.rootNode = importedRoot;
+    return true;
+}
+
+bool Sample::LoadObjMeshFile(const std::filesystem::path& filePath)
+{
+    SceneImportResult importResult;
+    auto sceneTypeFactory = std::make_shared<ExtendedSceneTypeFactory>();
+    if (!LoadObjModelFile(filePath, m_TextureCache, sceneTypeFactory, importResult))
+        return false;
+
+    auto importedRoot = m_scene->GetSceneGraph()->Attach(m_scene->GetSceneGraph()->GetRootNode(), importResult.rootNode);
     FinalizeRuntimeSceneMutation(importedRoot);
 
     return true;
+}
+
+bool ExtendedScene::LoadModelFile(
+    const std::filesystem::path& fileName,
+    ThreadPool* threadPool,
+    SceneImportResult& result)
+{
+    std::string ext = fileName.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+
+    if (ext == ".obj")
+        return LoadObjModelFile(fileName, m_TextureCache, m_SceneTypeFactory, result);
+
+    return Scene::LoadModelFile(fileName, threadPool, result);
 }
 
 void Sample::FinalizeRuntimeSceneMutation(const std::shared_ptr<donut::engine::SceneGraphNode>& importedRoot)

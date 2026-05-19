@@ -22,15 +22,7 @@ MINIMAL_ASSET_FILES = [
     "README.md",
     "default.json",
     "loading_splash.png",
-    "nvidia-logo.png",
-    "EnvironmentMaps/simplebluesky.exr",
 ]
-
-
-OPTIONAL_MINIMAL_ASSET_FILES = [
-    "Models/Default/default-primitives.gltf",
-]
-
 
 def copy_file(src: Path, dst: Path) -> None:
     if not src.exists():
@@ -140,8 +132,6 @@ def copy_runtime_files(package_dir: Path, *, dynamic_shaders: str, shader_api: s
     if assets == "minimal":
         for relative in MINIMAL_ASSET_FILES:
             copy_file(ROOT / "Assets" / relative, package_dir / "Assets" / relative)
-        for relative in OPTIONAL_MINIMAL_ASSET_FILES:
-            copy_optional_file(ROOT / "Assets" / relative, package_dir / "Assets" / relative)
         copy_tree(ROOT / "Assets" / "Fonts", package_dir / "Assets" / "Fonts")
     elif assets == "full":
         copy_tree(ROOT / "Assets", package_dir / "Assets")

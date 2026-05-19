@@ -16,7 +16,7 @@
 {
   "models": [
     "builtin:plane",
-    "D:/ScanVideo/models/antman_merged.glb"
+    "D:/ScanVideo/models/antman_merged.obj"
   ],
   "graph": [
     {
@@ -109,7 +109,7 @@
 ```
 
 ```json
-"D:/ScanVideo/models/antman_merged.glb"
+"D:/ScanVideo/models/antman_merged.obj"
 ```
 
 ```json
@@ -136,7 +136,8 @@
 - scene 文件中的相对模型路径相对于该 scene JSON 文件所在目录解析。
 - 放在 `Assets/` 下的 scene 通常写 `Models/...`。
 - 绝对路径也可以使用，建议使用 `/`，例如 `D:/ScanVideo/models/foo.glb`。
-- 静态 `models` 加载路径目前主要面向 `.gltf` 和 `.glb`。`.obj` 可以通过运行时 `load_mesh_file()` 加载；如果要写进 scene JSON，建议先转成 `.glb`。
+- 静态 `models` 加载路径支持 `.gltf`、`.glb` 和 `.obj`。`.gltf/.glb` 使用 Donut glTF importer，`.obj` 使用 RTXPT OBJ importer。
+- 如果仍然把 OBJ 转成 GLB，要按 OBJ 的 `(position, texcoord, normal)` 三元组生成顶点，不能只按 position 合并顶点；否则 UV seam 会被破坏，表现为贴图已加载但 atlas 块贴错。OBJ 的 `vt.y` 通常还需要转换为 `1 - v`，与 RTXPT runtime OBJ importer 的行为保持一致。
 
 ## `graph` 节点通用字段
 
@@ -482,7 +483,7 @@ scene JSON 本身不推荐直接写材质参数。当前 `MaterialPatch` 已废�
 
 `model-name` 规则：
 
-- 普通 glTF/GLB 模型：模型文件名去掉扩展名，例如 `antman_merged.glb` -> `antman_merged`。
+- 普通文件模型：模型文件名去掉扩展名，例如 `antman_merged.obj` -> `antman_merged`。
 - builtin 模型：`builtin_` 加 builtin 名，例如 `builtin:plane` -> `builtin_plane`。
 
 示例：
@@ -491,7 +492,7 @@ scene JSON 本身不推荐直接写材质参数。当前 `MaterialPatch` 已废�
 Assets/Materials/default/antman_merged.antman_merged_0.material.json
 ```
 
-对应模型 `antman_merged.glb` 中名为 `antman_merged_0` 的材质。
+对应模型 `antman_merged.obj` 中名为 `antman_merged_0` 的材质。
 
 ### 材质 JSON 示例
 
@@ -592,7 +593,7 @@ Assets/Materials/default/antman_merged.antman_merged_0.material.json
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `path` | string | 贴图路径，相对于 `Assets/`。 |
+| `path` | string | 贴图路径；可以是相对于 `Assets/` 的路径，也可以是绝对路径。 |
 | `sRGB` | bool | 是否按 sRGB 读取。 |
 | `NormalMap` | bool | 是否是法线贴图。 |
 
@@ -604,7 +605,7 @@ Assets/Materials/default/antman_merged.antman_merged_0.material.json
 
 - JSON 文件不能写注释。
 - scene JSON 中的 Transform 是节点 Transform；材质参数走 `.material.json`。
-- `.obj` 运行时加载支持存在，但 scene JSON 静态 `models` 推荐使用 `.gltf` 或 `.glb`。
+- scene JSON 静态 `models` 已支持 `.gltf`、`.glb`、`.obj`；新增格式时应扩展模型 importer 分发，而不是把所有格式强制转成 glTF。
 - `rotation` 是四元数 XYZW；`verticalFov` 和 `euler` 是弧度；灯光的 `angularSize`、`innerAngle`、`outerAngle` 是度。
 - 3DGS 的外观、排序、阴影等渲染选项目前是全局设置，不是每个 3DGS 节点的独立 scene JSON 字段。
 - scene-specific material 目录名来自文件 stem。`foo.scene.json` 对应 `Assets/Materials/foo.scene/`，不是 `foo/`。
