@@ -82,7 +82,7 @@ GTC presentation [How to Build a Real-time Path Tracer](https://www.nvidia.com/g
 
 ## Build
 
-At the moment, only Windows builds are fully supported. We are going to add Linux support in the future.
+Windows is the primary supported platform. Linux/WSL builds use the Vulkan backend and can enable OIDN reference-mode denoising.
 
 1. Clone the repository **with all submodules recursively**:
    
@@ -108,10 +108,35 @@ At the moment, only Windows builds are fully supported. We are going to add Linu
 
 ## Building Vulkan
 
-Due to interaction with various included libraries, Vulkan support is not enabled by default and needs a couple of additional tweaks on the user side; please find the recommended steps below:
+Due to interaction with various included libraries, Vulkan support is not enabled by default on Windows and needs a couple of additional tweaks on the user side; please find the recommended steps below:
  * Install Vulkan SDK (we tested with VulkanSDK-1.3.290.0) and clear CMake cache (if applicable) to make sure the correct dxc.exe path from Vulkan SDK is set for SPIRV compilation
  * Set DONUT_WITH_VULKAN and NVRHI_WITH_VULKAN CMake variables to ON. DXC_SPIRV_PATH should already have automatically picked up the location of the DXC compiler in the Vulkan SDK during config; if not, please set it manually
  * To run with Vulkan use `--vk` command line parameter
+
+## Building Linux / WSL
+
+Linux and WSL builds default to Vulkan and disable Windows-only integrations such as DirectX 12 Agility SDK, NVAPI, and Streamline. OIDN is downloaded from the official x86_64 Linux package when `RTXPT_WITH_OIDN=ON`.
+
+Recommended WSL setup:
+
+```
+sudo apt update
+sudo apt install -y build-essential cmake ninja-build python3-dev xorg-dev libwayland-dev wayland-protocols
+```
+
+Install the Linux Vulkan SDK and make sure `dxc` is on `PATH` or set `DXC_SPIRV_PATH` explicitly. Then configure and build:
+
+```
+cmake -S . -B build-linux -G Ninja \
+  -DDONUT_WITH_VULKAN=ON \
+  -DNVRHI_WITH_VULKAN=ON \
+  -DRTXPT_WITH_OIDN=ON \
+  -DDXC_SPIRV_PATH="$VULKAN_SDK/bin/dxc"
+
+cmake --build build-linux --config Release
+```
+
+DLSS/DLSS-RR in this sample currently goes through Streamline, whose integration in this codebase is Windows-only. Linux builds therefore compile without Streamline/DLSS for now; realtime denoising still uses NRD and reference-mode denoising can use OIDN.
  
 
  ## DirectX 12 Agility SDK

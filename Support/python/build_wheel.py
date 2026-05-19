@@ -24,6 +24,10 @@ MINIMAL_ASSET_FILES = [
     "loading_splash.png",
     "nvidia-logo.png",
     "EnvironmentMaps/simplebluesky.exr",
+]
+
+
+OPTIONAL_MINIMAL_ASSET_FILES = [
     "Models/Default/default-primitives.gltf",
 ]
 
@@ -33,6 +37,13 @@ def copy_file(src: Path, dst: Path) -> None:
         raise FileNotFoundError(src)
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
+
+
+def copy_optional_file(src: Path, dst: Path) -> None:
+    if not src.exists():
+        print(f"WARNING: optional runtime asset not found, skipping: {src}")
+        return
+    copy_file(src, dst)
 
 
 def copy_tree(
@@ -129,6 +140,8 @@ def copy_runtime_files(package_dir: Path, *, dynamic_shaders: str, shader_api: s
     if assets == "minimal":
         for relative in MINIMAL_ASSET_FILES:
             copy_file(ROOT / "Assets" / relative, package_dir / "Assets" / relative)
+        for relative in OPTIONAL_MINIMAL_ASSET_FILES:
+            copy_optional_file(ROOT / "Assets" / relative, package_dir / "Assets" / relative)
         copy_tree(ROOT / "Assets" / "Fonts", package_dir / "Assets" / "Fonts")
     elif assets == "full":
         copy_tree(ROOT / "Assets", package_dir / "Assets")
@@ -253,6 +266,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+
+    if os.name != "nt" and args.shader_api == "d3d12":
+        raise ValueError("D3D12 shader payload is only valid for Windows wheels. Use --shader-api vulkan on Linux.")
 
     if not BIN_DIR.exists():
         raise FileNotFoundError(f"{BIN_DIR} does not exist. Build RTXPT first.")
