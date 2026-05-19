@@ -368,6 +368,7 @@ struct SampleUIData
     float                               GaussianSplatShadowSoftRadius = 0.08f;
     int                                 GaussianSplatShadowSoftSampleCount = 1;
     uint32_t                            GaussianSplatCount = 0;
+    uint32_t                            GaussianSplatObjectCount = 0;
     std::string                         GaussianSplatFileName;
     bool                                SelectedGaussianSplat = false;
     dm::float3                          GaussianSplatTranslation = dm::float3(0.0f);

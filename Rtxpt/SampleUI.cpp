@@ -175,9 +175,19 @@ namespace
         return node != nullptr && std::dynamic_pointer_cast<donut::engine::MeshInstance>(node->GetLeaf()) != nullptr;
     }
 
+    bool IsGaussianSplatNode(donut::engine::SceneGraphNode* node)
+    {
+        return node != nullptr && std::dynamic_pointer_cast<GaussianSplat>(node->GetLeaf()) != nullptr;
+    }
+
+    bool IsInspectableSceneNode(donut::engine::SceneGraphNode* node)
+    {
+        return IsMeshInstanceNode(node) || IsGaussianSplatNode(node);
+    }
+
     bool HasHierarchyEntity(donut::engine::SceneGraphNode* node)
     {
-        if (IsMeshInstanceNode(node))
+        if (IsInspectableSceneNode(node))
             return true;
 
         if (node == nullptr)
@@ -196,6 +206,7 @@ namespace
             return;
 
         const bool isMeshNode = IsMeshInstanceNode(node);
+        const bool isGaussianSplatNode = IsGaussianSplatNode(node);
         bool hasVisibleChildren = false;
         for (size_t i = 0; i < node->GetNumChildren(); i++)
         {
@@ -213,17 +224,23 @@ namespace
             flags |= ImGuiTreeNodeFlags_Selected;
 
         std::string nodeName = node->GetName().empty() ? "<unnamed>" : node->GetName();
-        std::string label = isMeshNode ? "[Mesh] " + nodeName : "[Group] " + nodeName;
+        std::string label = isMeshNode ? "[Mesh] " + nodeName : (isGaussianSplatNode ? "[3DGS] " + nodeName : "[Group] " + nodeName);
         if (isMeshNode)
         {
             auto meshInstance = std::dynamic_pointer_cast<donut::engine::MeshInstance>(node->GetLeaf());
             if (meshInstance && meshInstance->GetMesh())
                 label += "  (" + meshInstance->GetMesh()->name + ")";
         }
+        else if (isGaussianSplatNode)
+        {
+            auto splat = std::dynamic_pointer_cast<GaussianSplat>(node->GetLeaf());
+            if (splat && splat->loadedSplatCount > 0)
+                label += "  (" + std::to_string(splat->loadedSplatCount) + " splats)";
+        }
 
         const bool open = ImGui::TreeNodeEx(node, flags, "%s", label.c_str());
 
-        if (isMeshNode && ImGui::IsItemClicked())
+        if (IsInspectableSceneNode(node) && ImGui::IsItemClicked())
         {
             ui.SelectedNode = node->shared_from_this();
             ui.SelectedGaussianSplat = false;
@@ -231,6 +248,8 @@ namespace
 
         if (isMeshNode && ImGui::IsItemHovered())
             ImGui::SetTooltip("Mesh instance. Click to open it in Inspector.");
+        if (isGaussianSplatNode && ImGui::IsItemHovered())
+            ImGui::SetTooltip("3D Gaussian Splat scene object. Click to open it in Inspector.");
 
         if (open && hasVisibleChildren)
         {
@@ -2129,6 +2148,14 @@ void SampleUI::buildUI(void)
         auto meshInstance = std::dynamic_pointer_cast<donut::engine::MeshInstance>(node->GetLeaf());
         if (meshInstance && meshInstance->GetMesh())
             ImGui::Text("Mesh: %s", meshInstance->GetMesh()->name.c_str());
+        auto gaussianSplat = std::dynamic_pointer_cast<GaussianSplat>(node->GetLeaf());
+        if (gaussianSplat)
+        {
+            ImGui::Text("Type: 3D Gaussian Splats");
+            ImGui::Text("Splats: %u", gaussianSplat->loadedSplatCount);
+            const std::string source = gaussianSplat->resolvedPath.empty() ? gaussianSplat->path : gaussianSplat->resolvedPath;
+            ImGui::TextWrapped("Source: %s", source.c_str());
+        }
 
         ImGui::Separator();
 
@@ -2181,109 +2208,39 @@ void SampleUI::buildUI(void)
             }
         }
 
-        ImGui::PopItemWidth();
-        ImGui::End();
-    }
-
-    if (m_ui.SelectedGaussianSplat && m_ui.GaussianSplatCount > 0 && m_ui.ShowInspector)
-    {
-        ImGui::SetNextWindowPos(ImVec2(float(scaledWidth) - 10.f, 10.f), ImGuiCond_Appearing, ImVec2(1.f, 0.f));
-        ImGui::SetNextWindowSize(ImVec2(defWindowWidth, 0), ImGuiCond_Appearing);
-        ImGui::Begin("Inspector");
-        ImGui::PushItemWidth(defItemWidth);
-
-        const std::filesystem::path splatPath(m_ui.GaussianSplatFileName);
-        const std::string splatName = splatPath.filename().empty() ? m_ui.GaussianSplatFileName : splatPath.filename().string();
-        ImGui::Text("Node: %s", splatName.c_str());
-        ImGui::Text("Type: 3D Gaussian Splats");
-        ImGui::Text("Splats: %u", m_ui.GaussianSplatCount);
-        ImGui::TextWrapped("Source: %s", m_ui.GaussianSplatFileName.c_str());
-        ImGui::Separator();
-
-        if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
+        if (gaussianSplat)
         {
-            RESET_ON_CHANGE(ImGui::DragFloat3("Position", (float*)&m_ui.GaussianSplatTranslation.x, 0.01f));
-            RESET_ON_CHANGE(ImGui::DragFloat3("Rotation (deg)", (float*)&m_ui.GaussianSplatRotationEulerDeg.x, 0.5f, -360.0f, 360.0f, "%.1f"));
-            RESET_ON_CHANGE(ImGui::DragFloat3("Scale", (float*)&m_ui.GaussianSplatObjectScale.x, 0.01f, 0.001f, 1000.0f));
-        }
-
-        if (ImGui::CollapsingHeader("Properties", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            RESET_ON_CHANGE(ImGui::Checkbox("Enabled", &m_ui.EnableGaussianSplats));
-            if (ImGui::DragFloat("Footprint Scale", &m_ui.GaussianSplatScale, 0.01f, 0.01f, 10.0f, "%.2f"))
+            if (ImGui::CollapsingHeader("3D Gaussian Splats", ImGuiTreeNodeFlags_DefaultOpen))
             {
-                if (ResolveGaussianSplatShadowMode(m_ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED)
+                if (ImGui::Checkbox("Enabled", &gaussianSplat->enabled))
+                {
                     m_ui.AccelerationStructRebuildRequested = true;
-                m_ui.ResetAccumulation = true;
-            }
-            RESET_ON_CHANGE(ImGui::DragFloat("Alpha", &m_ui.GaussianSplatAlphaScale, 0.01f, 0.0f, 4.0f, "%.2f"));
-            RESET_ON_CHANGE(ImGui::DragFloat("Brightness", &m_ui.GaussianSplatBrightness, 0.01f, 0.0f, 16.0f, "%.2f"));
-            RESET_ON_CHANGE(ImGui::InputFloat3("Tint Color", (float*)&m_ui.GaussianSplatTintColor.x));
-            ImGui::SeparatorText("Emission");
-            RESET_ON_CHANGE(ImGui::Checkbox("As Emitter", &m_ui.GaussianSplatAsEmitter));
-            ImGui::BeginDisabled(!m_ui.GaussianSplatAsEmitter);
-            RESET_ON_CHANGE(ImGui::DragFloat("Emission Intensity", &m_ui.GaussianSplatEmissionIntensity, 0.01f, 0.0f, 100.0f, "%.2f"));
-            if (ImGui::InputInt("Emission Proxy Limit", &m_ui.GaussianSplatEmissionMaxProxyCount, 256, 4096))
-            {
-                m_ui.GaussianSplatEmissionMaxProxyCount = dm::clamp(m_ui.GaussianSplatEmissionMaxProxyCount, 0, 262144);
-                m_ui.ResetAccumulation = true;
-            }
-            ImGui::EndDisabled();
-            RESET_ON_CHANGE(ImGui::DragFloat("Alpha Cull", &m_ui.GaussianSplatAlphaCullThreshold, 0.001f, 0.0f, 0.25f, "%.3f"));
-            if (ResolveGaussianSplatShadowMode(m_ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED)
-                RESET_ON_CHANGE(ImGui::DragFloat("Shadow Strength", &m_ui.GaussianSplatShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f"));
-        }
+                    m_ui.ResetAccumulation = true;
+                }
+                if (ImGui::DragFloat("Footprint Scale", &m_ui.GaussianSplatScale, 0.01f, 0.01f, 10.0f, "%.2f"))
+                {
+                    if (ResolveGaussianSplatShadowMode(m_ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED)
+                        m_ui.AccelerationStructRebuildRequested = true;
+                    m_ui.ResetAccumulation = true;
+                }
+                RESET_ON_CHANGE(ImGui::DragFloat("Alpha", &m_ui.GaussianSplatAlphaScale, 0.01f, 0.0f, 4.0f, "%.2f"));
+                RESET_ON_CHANGE(ImGui::DragFloat("Brightness", &m_ui.GaussianSplatBrightness, 0.01f, 0.0f, 16.0f, "%.2f"));
+                RESET_ON_CHANGE(ImGui::InputFloat3("Tint Color", (float*)&m_ui.GaussianSplatTintColor.x));
 
-        if (ImGui::CollapsingHeader("Splat Set Format in VRAM", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            if (ImGui::Button("Reset##GaussianFormat"))
-            {
-                m_ui.GaussianSplatSHFormat = 2;
-                m_ui.GaussianSplatRGBAFormat = 2;
-                m_ui.ResetAccumulation = true;
-            }
-            RESET_ON_CHANGE(GaussianSplatFormatCombo("SH format", &m_ui.GaussianSplatSHFormat));
-            RESET_ON_CHANGE(GaussianSplatFormatCombo("RGBA format", &m_ui.GaussianSplatRGBAFormat));
-        }
+                RESET_ON_CHANGE(ImGui::Checkbox("As Emitter", &m_ui.GaussianSplatAsEmitter));
+                ImGui::BeginDisabled(!m_ui.GaussianSplatAsEmitter);
+                RESET_ON_CHANGE(ImGui::DragFloat("Emission Intensity", &m_ui.GaussianSplatEmissionIntensity, 0.01f, 0.0f, 100.0f, "%.2f"));
+                if (ImGui::InputInt("Emission Proxy Limit", &m_ui.GaussianSplatEmissionMaxProxyCount, 256, 4096))
+                {
+                    m_ui.GaussianSplatEmissionMaxProxyCount = dm::clamp(m_ui.GaussianSplatEmissionMaxProxyCount, 0, 262144);
+                    m_ui.ResetAccumulation = true;
+                }
+                ImGui::EndDisabled();
 
-        if (ImGui::CollapsingHeader("RTX acceleration structures", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            if (ImGui::Button("Reset##GaussianRTX"))
-            {
-                m_ui.GaussianSplatUseAABBs = false;
-                m_ui.GaussianSplatUseTLASInstances = true;
-                m_ui.GaussianSplatBlasCompaction = true;
-                m_ui.AccelerationStructRebuildRequested = true;
-                m_ui.ResetAccumulation = true;
+                RESET_ON_CHANGE(ImGui::DragFloat("Alpha Cull", &m_ui.GaussianSplatAlphaCullThreshold, 0.001f, 0.0f, 0.25f, "%.3f"));
+                if (ResolveGaussianSplatShadowMode(m_ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED)
+                    RESET_ON_CHANGE(ImGui::DragFloat("Shadow Strength", &m_ui.GaussianSplatShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f"));
             }
-
-            bool asChanged = ImGui::Checkbox("Use AABBs", &m_ui.GaussianSplatUseAABBs);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Use procedural AABB primitives. When disabled, a non-opaque icosahedron triangle BLAS is used as the acceleration proxy.");
-            if (m_ui.GaussianSplatUseAABBs && !m_ui.GaussianSplatUseTLASInstances)
-            {
-                m_ui.GaussianSplatUseTLASInstances = true;
-                asChanged = true;
-            }
-            ImGui::BeginDisabled(m_ui.GaussianSplatUseAABBs);
-            asChanged |= ImGui::Checkbox("Use TLAS instances", &m_ui.GaussianSplatUseTLASInstances);
-            ImGui::EndDisabled();
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Use one TLAS instance per splat with a shared unit proxy BLAS. When disabled, all splat proxies are built into one BLAS.");
-            if (asChanged)
-            {
-                m_ui.AccelerationStructRebuildRequested = true;
-                m_ui.ResetAccumulation = true;
-            }
-
-            bool blasCompactionChanged = ImGui::Checkbox("BLAS Compaction", &m_ui.GaussianSplatBlasCompaction);
-            if (blasCompactionChanged)
-            {
-                m_ui.AccelerationStructRebuildRequested = true;
-                m_ui.ResetAccumulation = true;
-            }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Requests NVRHI BLAS compaction on the next Gaussian shadow acceleration-structure rebuild.");
         }
 
         ImGui::PopItemWidth();
@@ -2294,7 +2251,7 @@ void SampleUI::buildUI(void)
     std::shared_ptr<PTMaterial> material = PTMaterial::SafeCast(m_ui.SelectedMaterial);
     if (material != nullptr && m_app.GetMaterialsBaker() != nullptr && m_ui.ShowMaterialEditor)
     {
-        const bool inspectorVisible = (m_ui.SelectedNode != nullptr || m_ui.SelectedGaussianSplat) && m_ui.ShowInspector;
+        const bool inspectorVisible = m_ui.SelectedNode != nullptr && m_ui.ShowInspector;
         ImGui::SetNextWindowPos(ImVec2(float(scaledWidth) - 10.f, inspectorVisible ? 350.f : 10.f), ImGuiCond_Appearing, ImVec2(1.f, 0.f));
         ImGui::SetNextWindowSize(ImVec2(defWindowWidth, 0), ImGuiCond_Appearing);
         ImGui::Begin("Material Editor");
@@ -2538,10 +2495,9 @@ void SampleUI::buildUI(void)
         auto sceneGraph = scene ? scene->GetSceneGraph() : nullptr;
         auto rootNode = sceneGraph ? sceneGraph->GetRootNode() : nullptr;
 
-        const uint32_t splatEntityCount = m_ui.GaussianSplatCount > 0 ? 1u : 0u;
         if (sceneGraph && rootNode)
         {
-            ImGui::Text("Objects: %zu mesh, %u 3DGS", sceneGraph->GetMeshInstances().size(), splatEntityCount);
+            ImGui::Text("Objects: %zu mesh, %u 3DGS", sceneGraph->GetMeshInstances().size(), m_ui.GaussianSplatObjectCount);
             ImGui::Separator();
 
             if (ImGui::TreeNodeEx("Scene", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth))
@@ -2553,30 +2509,6 @@ void SampleUI::buildUI(void)
         else
         {
             ImGui::TextDisabled("No scene loaded.");
-        }
-
-        if (ImGui::TreeNodeEx("3D Gaussian Splats", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth))
-        {
-            if (m_ui.GaussianSplatCount > 0)
-            {
-                const std::filesystem::path splatPath(m_ui.GaussianSplatFileName);
-                const std::string splatName = splatPath.filename().empty() ? m_ui.GaussianSplatFileName : splatPath.filename().string();
-                const std::string label = "[3DGS] " + splatName + " (" + std::to_string(m_ui.GaussianSplatCount) + " splats)";
-                if (ImGui::Selectable(label.c_str(), m_ui.SelectedGaussianSplat))
-                {
-                    m_ui.SelectedGaussianSplat = true;
-                    m_ui.SelectedNode = nullptr;
-                    m_ui.SelectedMaterial = nullptr;
-                }
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("3D Gaussian Splat object. Click to open it in Inspector.");
-            }
-            else
-            {
-                m_ui.SelectedGaussianSplat = false;
-                ImGui::TextDisabled("No 3DGS object loaded.");
-            }
-            ImGui::TreePop();
         }
     }
 

@@ -116,6 +116,8 @@ while r.step(-1.0):
     pass
 ```
 
+`gaussian_splat_file` attaches a `GaussianSplat` node to the initial scene. 3DGS objects now live in the scene graph like mesh model nodes, so multiple splat nodes can coexist. Calling `load_scene(...)` replaces the current scene graph and destroys the previous scene's splat nodes; load the splats again after switching scenes, or declare them in the target scene JSON.
+
 ### 3DGS Reference / Realtime Batch Test
 
 `3dgs_example.py` renders the same PLY twice:
@@ -330,7 +332,7 @@ rtxpt.Renderer(
 | `scene` | Scene file path/name, `builtin:*` primitive reference, or inline scene JSON string. Relative file paths are resolved from `Assets/`. |
 | `realtime` | Start in realtime mode if `True`, reference mode if `False`. |
 | `accumulation_target` | Reference SPP target. |
-| `gaussian_splat_*` | Optional 3DGS PLY overlay and rasterization settings. |
+| `gaussian_splat_*` | Optional startup 3DGS scene object path plus shared rasterization/loading settings. |
 
 ### Methods / Properties
 
@@ -338,7 +340,7 @@ rtxpt.Renderer(
 | --- | --- | --- |
 | `close()` | `None` | Tears down renderer/device. Also called by destructor/context manager. |
 | `load_scene(scene_name, wait_until_ready=True)` | `bool` | Switch scene. |
-| `load_gaussian_splats(file_name, convert_rdf_to_donut=True)` | `bool` | Load a `.ply` 3DGS overlay. |
+| `load_gaussian_splats(file_name, convert_rdf_to_donut=True)` | `bool` | Append a `.ply` 3DGS scene object under the current scene root. |
 | `step(dt=-1.0)` | `bool` | Render one frame. Returns `False` on failure or when window close is requested. |
 | `step_n(frames)` | `bool` | Render exactly N frames unless `step()` fails. |
 | `step_until_accumulated(max_frames=0)` | `int` | Reset accumulation and step until accumulation completes, or until `max_frames` if positive. |
@@ -375,6 +377,36 @@ scene = rtxpt.builtin_scene_json("plane_cube")
 r = rtxpt.Renderer(headless=True, scene=scene)
 ```
 
+Scene JSON may also declare one or more 3DGS nodes directly:
+
+```python
+scene = r"""
+{
+  "graph": [
+    {
+      "name": "ScanA",
+      "type": "GaussianSplat",
+      "path": "D:/ScanVideo/chuan/splats_a.ply",
+      "translation": [0.0, 0.0, 0.0],
+      "scaling": 1.0,
+      "convertRdfToDonut": true,
+      "enabled": true
+    },
+    {
+      "name": "ScanB",
+      "type": "GaussianSplat",
+      "path": "D:/ScanVideo/chuan/splats_b.ply",
+      "translation": [2.0, 0.0, 0.0],
+      "scaling": 0.75
+    }
+  ]
+}
+"""
+r = rtxpt.Renderer(headless=False, realtime=True, scene=scene)
+```
+
+For scene files, relative 3DGS paths are resolved relative to the scene JSON file. `path`, `file`, and `fileName` are accepted aliases.
+
 ## `Sample` Class
 
 Top-level renderer instance. In extension mode, access it through `renderer.app`; in embed mode, use `rtxpt.app()`.
@@ -386,8 +418,9 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | `settings` | `Settings` | Live settings object. |
 | `scene_name` | `str` | Current scene name. |
 | `available_scenes` | `list[str]` | Scene files discovered by the app. |
-| `gaussian_splat_count` | `int` | Loaded 3DGS splat count. |
-| `gaussian_splat_file_name` | `str` | Loaded 3DGS file path. |
+| `gaussian_splat_object_count` | `int` | Number of loaded 3DGS scene objects. |
+| `gaussian_splat_count` | `int` | Total loaded splat count across current 3DGS scene objects. |
+| `gaussian_splat_file_name` | `str` | Single loaded 3DGS path, or a summary when multiple 3DGS objects are present. |
 | `accumulation_completed` | `bool` | Whether reference accumulation is complete. |
 | `accumulation_sample_index` | `int` | Current accumulation sample index. |
 
@@ -396,7 +429,7 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | API | Return | Notes |
 | --- | --- | --- |
 | `set_scene(scene_name, force_reload=False)` | `None` | Switch scene. |
-| `load_gaussian_splats(file_name, convert_rdf_to_donut=True)` | `bool` | Load 3DGS `.ply`. |
+| `load_gaussian_splats(file_name, convert_rdf_to_donut=True)` | `bool` | Append a 3DGS `.ply` node to the current scene. |
 | `set_environment_map(path)` | `None` | Override scene environment map source. |
 
 ### Materials
@@ -532,11 +565,15 @@ app.set_reference_mode(
 
 ### 3D Gaussian Splats
 
-The table below lists the Python-facing 3DGS settings that are currently wired into the renderer. Some legacy UI/Python fields still exist in the bindings for compatibility, but are no longer consumed by the render path and are intentionally omitted here.
+3DGS data is scene-owned. `gaussian_splat_file` in `Renderer(...)` creates one `GaussianSplat` node in the startup scene, `load_gaussian_splats(...)` appends another node to the current scene, and scene JSON can contain any number of `GaussianSplat`, `GaussianSplats`, or `3DGaussianSplat` nodes. Switching scenes clears the old scene graph, including its 3DGS objects.
+
+Rasterization runs over all enabled 3DGS scene objects. Emissive proxy sampling also combines all enabled 3DGS objects into one world-space proxy list. The current RTX/path-tracing splat shadow binding still has one global resource slot, so splat shadows use the first enabled 3DGS object as the primary shadow source.
+
+The table below lists the Python-facing 3DGS settings that are currently wired into the renderer. Rasterization, culling, emission, and shadow settings are shared render settings. The node transform in the scene graph controls placement; `gaussian_splat_translation`, `gaussian_splat_rotation_euler_deg`, and `gaussian_splat_object_scale` are only used as the initial transform when Python attaches a new 3DGS node through `gaussian_splat_file` or `load_gaussian_splats(...)`.
 
 | Property | Type | Notes |
 | --- | --- | --- |
-| `enable_gaussian_splats` | `bool` | Enables splat overlay. |
+| `enable_gaussian_splats` | `bool` | Enables rendering for 3DGS scene objects. |
 | `gaussian_splat_depth_test` | `bool` | Test against scene depth. |
 | `gaussian_splat_sorting_mode` | `int/GaussianSplatSortMode` | `GpuSort` or `StochasticSplats`. |
 | `gaussian_splat_sh_format` | `int/GaussianSplatStorageFormat` | SH payload storage format. |
@@ -557,9 +594,9 @@ The table below lists the Python-facing 3DGS settings that are currently wired i
 | `gaussian_splat_emission_intensity` | `float` | Emissive proxy intensity multiplier. |
 | `gaussian_splat_emission_max_proxy_count` | `int` | Emissive proxy budget. |
 | `gaussian_splat_alpha_cull_threshold` | `float` | Cull low-alpha splats. |
-| `gaussian_splat_translation` | `(x, y, z)` | World-space splat object translation. |
-| `gaussian_splat_rotation_euler_deg` | `(x, y, z)` | Splat object Euler rotation in degrees. |
-| `gaussian_splat_object_scale` | `(x, y, z)` | Splat object non-uniform scale. |
+| `gaussian_splat_translation` | `(x, y, z)` | Initial translation for newly attached Python 3DGS nodes. |
+| `gaussian_splat_rotation_euler_deg` | `(x, y, z)` | Initial Euler rotation in degrees for newly attached Python 3DGS nodes. |
+| `gaussian_splat_object_scale` | `(x, y, z)` | Initial non-uniform scale for newly attached Python 3DGS nodes. |
 | `gaussian_splat_shadows` | `bool` | Enable splat shadow integration. |
 | `gaussian_splat_hybrid_shadows` | `bool` | Alias for `gaussian_splat_shadows`. |
 | `gaussian_splat_shadows_mode` | `int/GaussianSplatShadowMode` | Disabled, hard, or soft splat shadows. |
@@ -569,8 +606,9 @@ The table below lists the Python-facing 3DGS settings that are currently wired i
 | `gaussian_splat_rtx_kernel_degree` | `int` | RTX splat kernel degree. |
 | `gaussian_splat_rtx_adaptive_clamp` | `bool` | Enable adaptive RTX alpha clamp. |
 | `gaussian_splat_rtx_particle_shadow_offset` | `float` | RTX particle shadow offset. |
-| `gaussian_splat_count` | `int` | Read-only. |
-| `gaussian_splat_file_name` | `str` | Read-only. |
+| `gaussian_splat_object_count` | `int` | Read-only 3DGS scene object count. |
+| `gaussian_splat_count` | `int` | Read-only total splat count across current 3DGS scene objects. |
+| `gaussian_splat_file_name` | `str` | Read-only single path or multi-object summary. |
 
 ### Realtime AA / DLSS / Reflex
 

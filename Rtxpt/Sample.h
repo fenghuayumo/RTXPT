@@ -33,6 +33,7 @@
 #include "ProcessingPasses/PostProcess.h"
 #include "Shaders/SampleConstantBuffer.h"
 #include "ProcessingPasses/AccumulationPass.h"
+#include "ProcessingPasses/GaussianSplatEmissionProxy.h"
 #include "SampleCommon/ExtendedScene.h"
 
 #include "Lighting/Distant/EnvMapBaker.h"
@@ -109,6 +110,7 @@ public:
     void                                    SetCurrentScene(const std::string& sceneName, bool forceReload = false);
     bool                                    LoadGaussianSplatFile(const std::filesystem::path& fileName, bool convertRdfToDonut = true);
     uint32_t                                GetGaussianSplatCount() const;
+    uint32_t                                GetGaussianSplatObjectCount() const;
     const std::string&                      GetGaussianSplatFileName() const;
 
     virtual void                            SceneUnloading() override;
@@ -241,6 +243,8 @@ protected:
 #endif
 
 private:
+    struct GaussianSplatSceneObject;
+
     void                                    UpdateCameraFromScene( const std::shared_ptr<donut::engine::PerspectiveCamera> & sceneCamera );
     void                                    UpdateViews( nvrhi::IFramebuffer* framebuffer );
     void                                    DenoisedScreenshot( nvrhi::ITexture * framebufferTexture ) const;
@@ -248,10 +252,28 @@ private:
     void                                    ApplyReferenceOIDN();
     void                                    PostProcessPreToneMapping(nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView);
     void                                    PostProcessPostToneMapping(nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView);
+    void                                    LoadGaussianSplatsFromScene();
+    bool                                    AttachGaussianSplatToScene(const std::filesystem::path& fileName, bool convertRdfToDonut);
+    void                                    PrepareGaussianSplatPass(GaussianSplatPass& pass);
+    void                                    UpdateGaussianSplatUIState();
+    uint32_t                                GetTotalGaussianSplatCount() const;
     void                                    RenderGaussianSplats(bool renderToOutputColor);
     void                                    AccumulateGaussianSplats(const donut::engine::IView& splatView);
+    void                                    BuildGaussianSplatEmissionProxyList();
 
 private:
+    struct GaussianSplatSceneObject
+    {
+        std::shared_ptr<GaussianSplat> splat;
+        std::weak_ptr<donut::engine::SceneGraphNode> node;
+        std::unique_ptr<GaussianSplatPass> pass;
+    };
+
+    std::filesystem::path                       ResolveGaussianSplatPath(const GaussianSplat& splat) const;
+    donut::math::float4x4                       GetGaussianSplatObjectToWorld(const GaussianSplatSceneObject& object) const;
+    GaussianSplatSceneObject*                   GetPrimaryGaussianSplatObject();
+    const GaussianSplatSceneObject*             GetPrimaryGaussianSplatObject() const;
+
     std::shared_ptr<donut::vfs::RootFileSystem> m_RootFS;
 
     // scene
@@ -300,7 +322,10 @@ private:
 
     // utility
     std::shared_ptr<class GPUSort>              m_gpuSort;
-    std::unique_ptr<GaussianSplatPass>          m_gaussianSplatPass;
+    std::vector<GaussianSplatSceneObject>       m_gaussianSplatSceneObjects;
+    std::vector<GaussianSplatEmissionProxy>     m_gaussianSplatEmissionProxies;
+    std::string                                 m_gaussianSplatFileNameSummary;
+    bool                                        m_initialGaussianSplatAttached = false;
     nvrhi::TextureHandle                        m_gaussianSplatCurrentColor;
     nvrhi::TextureHandle                        m_gaussianSplatAccumulatedColor;
     std::unique_ptr<AccumulationPass>           m_gaussianSplatAccumulationPass;

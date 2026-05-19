@@ -30,6 +30,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -128,23 +129,31 @@ namespace
         return uint32_t(std::clamp(proxyCount, 0, 262144));
     }
 
+    std::string MakeUniqueChildNodeName(const SceneGraphNode& parent, const std::string& desiredName)
+    {
+        const std::string baseName = desiredName.empty() ? "GaussianSplat" : desiredName;
+
+        std::unordered_set<std::string> existingNames;
+        for (size_t childIndex = 0; childIndex < parent.GetNumChildren(); childIndex++)
+            existingNames.insert(parent.GetChild(childIndex)->GetName());
+
+        if (existingNames.find(baseName) == existingNames.end())
+            return baseName;
+
+        for (uint32_t suffix = 2; ; suffix++)
+        {
+            std::string candidate = baseName + " (" + std::to_string(suffix) + ")";
+            if (existingNames.find(candidate) == existingNames.end())
+                return candidate;
+        }
+    }
+
     bool IsGaussianSplatEmissionEnabled(const SampleUIData& ui)
     {
         return ui.EnableGaussianSplats
             && ui.GaussianSplatAsEmitter
             && ui.GaussianSplatEmissionIntensity > 0.0f
-            && ui.GaussianSplatEmissionMaxProxyCount > 0
-            && ui.GaussianSplatCount > 0;
-    }
-
-    float4x4 MakeGaussianSplatObjectToWorld(const SampleUIData& ui)
-    {
-        constexpr float deg2rad = 3.14159265358979323846f / 180.0f;
-        const dm::float3 eulerRadians = ui.GaussianSplatRotationEulerDeg * deg2rad;
-        dm::affine3 objectToWorld = dm::scaling(ui.GaussianSplatObjectScale);
-        objectToWorld *= dm::rotationQuat(eulerRadians).toAffine();
-        objectToWorld *= dm::translation(ui.GaussianSplatTranslation);
-        return dm::affineToHomogeneous(objectToWorld);
+            && ui.GaussianSplatEmissionMaxProxyCount > 0;
     }
 
     float4x4 MakePinholeIntrinsicsProjection(float fx, float fy, float cx, float cy, float width, float height, float zNear)
@@ -254,7 +263,7 @@ void Sample::Init(const std::string& preferredScene,
     m_CommonPasses = std::make_shared<engine::CommonRenderPasses>(GetDevice(), m_shaderFactory);
     m_bindingCache = std::make_unique<engine::BindingCache>(GetDevice());
 
-    m_ui.EnableGaussianSplats = !m_cmdLine.GaussianSplatFileName.empty();
+    m_ui.EnableGaussianSplats = true;
     m_ui.GaussianSplatDepthTest = m_cmdLine.GaussianSplatDepthTest;
     m_ui.GaussianSplatScale = m_cmdLine.GaussianSplatScale;
     m_ui.GaussianSplatAlphaScale = m_cmdLine.GaussianSplatAlphaScale;
@@ -263,8 +272,6 @@ void Sample::Init(const std::string& preferredScene,
     m_ui.GaussianSplatEmissionIntensity = m_cmdLine.GaussianSplatEmissionIntensity;
     m_ui.GaussianSplatEmissionMaxProxyCount = m_cmdLine.GaussianSplatEmissionMaxProxyCount;
     m_ui.GaussianSplatAlphaCullThreshold = m_cmdLine.GaussianSplatAlphaCullThreshold;
-    if (!m_cmdLine.GaussianSplatFileName.empty())
-        LoadGaussianSplatFile(m_cmdLine.GaussianSplatFileName, m_cmdLine.GaussianSplatConvertRdfToDonut);
     
     m_sampleGame = std::make_unique<GameScene>(*this, m_cmdLine);
     m_progressLoading.Set(95);
@@ -569,6 +576,130 @@ void Sample::SetCurrentScene( const std::string & sceneName, bool forceReload )
 
 bool Sample::LoadGaussianSplatFile(const std::filesystem::path& fileName, bool convertRdfToDonut)
 {
+    return AttachGaussianSplatToScene(fileName, convertRdfToDonut);
+}
+
+std::filesystem::path Sample::ResolveGaussianSplatPath(const GaussianSplat& splat) const
+{
+    if (splat.path.empty())
+        return {};
+
+    std::filesystem::path splatPath = splat.path;
+    if (splatPath.is_absolute())
+        return splatPath;
+
+    const std::filesystem::path sceneFolder = m_currentScenePath.parent_path();
+    if (!sceneFolder.empty() && m_currentScenePath != std::filesystem::path(c_InlineSceneSentinel))
+        return sceneFolder / splatPath;
+
+    return std::filesystem::absolute(splatPath);
+}
+
+void Sample::PrepareGaussianSplatPass(GaussianSplatPass& pass)
+{
+    if (m_renderTargets == nullptr || m_shaderDebug == nullptr)
+        return;
+
+    if (m_gpuSort == nullptr)
+        m_gpuSort = std::make_shared<GPUSort>(GetDevice(), m_shaderFactory);
+    m_gpuSort->CreateRenderPasses(m_CommonPasses, m_shaderDebug);
+    pass.SetGpuSort(m_gpuSort);
+    pass.CreatePipeline(*m_renderTargets);
+}
+
+uint32_t Sample::GetTotalGaussianSplatCount() const
+{
+    uint64_t total = 0;
+    for (const auto& object : m_gaussianSplatSceneObjects)
+    {
+        if (object.pass != nullptr)
+            total += object.pass->GetSplatCount();
+    }
+    return uint32_t(std::min<uint64_t>(total, std::numeric_limits<uint32_t>::max()));
+}
+
+void Sample::UpdateGaussianSplatUIState()
+{
+    m_ui.GaussianSplatObjectCount = uint32_t(m_gaussianSplatSceneObjects.size());
+    m_ui.GaussianSplatCount = GetTotalGaussianSplatCount();
+
+    m_gaussianSplatFileNameSummary.clear();
+    if (m_gaussianSplatSceneObjects.size() == 1 && m_gaussianSplatSceneObjects.front().pass != nullptr)
+    {
+        m_gaussianSplatFileNameSummary = m_gaussianSplatSceneObjects.front().pass->GetSourceFileName();
+    }
+    else if (!m_gaussianSplatSceneObjects.empty())
+    {
+        m_gaussianSplatFileNameSummary = std::to_string(m_gaussianSplatSceneObjects.size()) + " scene Gaussian Splat objects";
+    }
+    m_ui.GaussianSplatFileName = m_gaussianSplatFileNameSummary;
+
+    if (m_ui.GaussianSplatObjectCount == 0)
+        m_ui.SelectedGaussianSplat = false;
+}
+
+void Sample::LoadGaussianSplatsFromScene()
+{
+    m_gaussianSplatSceneObjects.clear();
+    m_gaussianSplatEmissionProxies.clear();
+
+    if (!m_scene || !m_scene->GetSceneGraph() || !m_shaderFactory)
+    {
+        UpdateGaussianSplatUIState();
+        return;
+    }
+
+    SceneGraphWalker walker(m_scene->GetSceneGraph()->GetRootNode().get());
+    while (walker)
+    {
+        auto splat = std::dynamic_pointer_cast<GaussianSplat>(walker->GetLeaf());
+        if (splat != nullptr)
+        {
+            splat->loadedSplatCount = 0;
+            splat->resolvedPath.clear();
+
+            const std::filesystem::path splatPath = ResolveGaussianSplatPath(*splat);
+            if (splatPath.empty())
+            {
+                log::error("Gaussian Splat node '%s' has no path/file field.", walker->GetName().c_str());
+            }
+            else
+            {
+                auto pass = std::make_unique<GaussianSplatPass>(GetDevice(), m_shaderFactory);
+                if (pass->LoadFromFile(splatPath, splat->convertRdfToDonut))
+                {
+                    splat->resolvedPath = splatPath.string();
+                    splat->loadedSplatCount = pass->GetSplatCount();
+                    PrepareGaussianSplatPass(*pass);
+
+                    GaussianSplatSceneObject object;
+                    object.splat = splat;
+                    object.node = walker->shared_from_this();
+                    object.pass = std::move(pass);
+                    m_gaussianSplatSceneObjects.push_back(std::move(object));
+                }
+                else
+                {
+                    log::error("Failed to load Gaussian Splat node '%s' from '%s'.",
+                        walker->GetName().c_str(), splatPath.string().c_str());
+                }
+            }
+        }
+
+        walker.Next(true);
+    }
+
+    UpdateGaussianSplatUIState();
+    m_gaussianSplatTemporalReset = true;
+}
+
+bool Sample::AttachGaussianSplatToScene(const std::filesystem::path& fileName, bool convertRdfToDonut)
+{
+    if (!m_scene || !m_scene->GetSceneGraph() || !m_scene->GetSceneGraph()->GetRootNode())
+    {
+        log::error("Cannot load Gaussian splats before a scene is loaded.");
+        return false;
+    }
     if (!m_shaderFactory)
     {
         log::error("Cannot load Gaussian splats before the shader factory is initialized.");
@@ -579,40 +710,160 @@ bool Sample::LoadGaussianSplatFile(const std::filesystem::path& fileName, bool c
     if (!splatPath.is_absolute())
         splatPath = std::filesystem::absolute(splatPath);
 
-    if (m_gaussianSplatPass == nullptr)
-        m_gaussianSplatPass = std::make_unique<GaussianSplatPass>(GetDevice(), m_shaderFactory);
-
-    if (!m_gaussianSplatPass->LoadFromFile(splatPath, convertRdfToDonut))
-        return false;
-
-    m_ui.GaussianSplatFileName = splatPath.string();
-    m_ui.GaussianSplatCount = m_gaussianSplatPass->GetSplatCount();
-    m_ui.EnableGaussianSplats = true;
-    m_ui.AccelerationStructRebuildRequested = true;
-    m_ui.ResetAccumulation = true;
-    m_gaussianSplatTemporalReset = true;
-
-    if (m_renderTargets != nullptr && m_shaderDebug != nullptr)
+    if (!std::filesystem::exists(splatPath))
     {
-        if (m_gpuSort == nullptr)
-            m_gpuSort = std::make_shared<GPUSort>(GetDevice(), m_shaderFactory);
-        m_gpuSort->CreateRenderPasses(m_CommonPasses, m_shaderDebug);
-        m_gaussianSplatPass->SetGpuSort(m_gpuSort);
-        m_gaussianSplatPass->CreatePipeline(*m_renderTargets);
+        log::error("Gaussian Splat file does not exist: '%s'", splatPath.string().c_str());
+        return false;
     }
 
+    auto pass = std::make_unique<GaussianSplatPass>(GetDevice(), m_shaderFactory);
+    if (!pass->LoadFromFile(splatPath, convertRdfToDonut))
+    {
+        log::error("Failed to load Gaussian Splat file '%s'.", splatPath.string().c_str());
+        return false;
+    }
+    if (pass->GetSplatCount() == 0)
+    {
+        log::error("Gaussian Splat file '%s' contains no splats.", splatPath.string().c_str());
+        return false;
+    }
+
+    auto splat = std::make_shared<GaussianSplat>();
+    splat->path = splatPath.string();
+    splat->resolvedPath = splatPath.string();
+    splat->convertRdfToDonut = convertRdfToDonut;
+    splat->enabled = true;
+    splat->loadedSplatCount = pass->GetSplatCount();
+
+    auto node = std::make_shared<SceneGraphNode>();
+    auto sceneGraph = m_scene->GetSceneGraph();
+    auto rootNode = sceneGraph->GetRootNode();
+    node->SetName(MakeUniqueChildNodeName(*rootNode, splatPath.filename().string()));
+    node->SetLeaf(splat);
+
+    constexpr double deg2rad = 3.14159265358979323846 / 180.0;
+    node->SetTranslation(dm::double3(
+        double(m_ui.GaussianSplatTranslation.x),
+        double(m_ui.GaussianSplatTranslation.y),
+        double(m_ui.GaussianSplatTranslation.z)));
+    node->SetRotation(dm::rotationQuat(dm::double3(
+        double(m_ui.GaussianSplatRotationEulerDeg.x) * deg2rad,
+        double(m_ui.GaussianSplatRotationEulerDeg.y) * deg2rad,
+        double(m_ui.GaussianSplatRotationEulerDeg.z) * deg2rad)));
+    node->SetScaling(dm::double3(
+        double(m_ui.GaussianSplatObjectScale.x),
+        double(m_ui.GaussianSplatObjectScale.y),
+        double(m_ui.GaussianSplatObjectScale.z)));
+
+    auto attachedNode = sceneGraph->Attach(rootNode, node);
+    m_scene->RefreshSceneGraph(GetFrameIndex());
+
+    PrepareGaussianSplatPass(*pass);
+
+    GaussianSplatSceneObject object;
+    object.splat = splat;
+    object.node = attachedNode;
+    object.pass = std::move(pass);
+    m_gaussianSplatSceneObjects.push_back(std::move(object));
+
+    m_ui.EnableGaussianSplats = true;
+    UpdateGaussianSplatUIState();
+    m_gaussianSplatTemporalReset = true;
+    RequestFullRebuild();
     return true;
 }
 
 uint32_t Sample::GetGaussianSplatCount() const
 {
-    return m_gaussianSplatPass ? m_gaussianSplatPass->GetSplatCount() : 0;
+    return GetTotalGaussianSplatCount();
+}
+
+uint32_t Sample::GetGaussianSplatObjectCount() const
+{
+    return uint32_t(m_gaussianSplatSceneObjects.size());
 }
 
 const std::string& Sample::GetGaussianSplatFileName() const
 {
-    static const std::string empty;
-    return m_gaussianSplatPass ? m_gaussianSplatPass->GetSourceFileName() : empty;
+    return m_gaussianSplatFileNameSummary;
+}
+
+Sample::GaussianSplatSceneObject* Sample::GetPrimaryGaussianSplatObject()
+{
+    for (auto& object : m_gaussianSplatSceneObjects)
+    {
+        if (object.splat != nullptr && object.splat->enabled && object.pass != nullptr && object.pass->HasSplats())
+            return &object;
+    }
+    return nullptr;
+}
+
+const Sample::GaussianSplatSceneObject* Sample::GetPrimaryGaussianSplatObject() const
+{
+    for (const auto& object : m_gaussianSplatSceneObjects)
+    {
+        if (object.splat != nullptr && object.splat->enabled && object.pass != nullptr && object.pass->HasSplats())
+            return &object;
+    }
+    return nullptr;
+}
+
+float4x4 Sample::GetGaussianSplatObjectToWorld(const GaussianSplatSceneObject& object) const
+{
+    auto node = object.node.lock();
+    if (node == nullptr)
+        return float4x4::identity();
+
+    return dm::affineToHomogeneous(node->GetLocalToWorldTransformFloat());
+}
+
+void Sample::BuildGaussianSplatEmissionProxyList()
+{
+    m_gaussianSplatEmissionProxies.clear();
+
+    if (!IsGaussianSplatEmissionEnabled(m_ui))
+        return;
+
+    const uint32_t maxProxyCount = ClampGaussianSplatEmissionProxyCount(m_ui.GaussianSplatEmissionMaxProxyCount);
+    for (auto& object : m_gaussianSplatSceneObjects)
+    {
+        if (object.splat == nullptr || !object.splat->enabled || object.pass == nullptr || !object.pass->HasSplats())
+            continue;
+
+        const uint32_t remainingProxyCount = maxProxyCount > m_gaussianSplatEmissionProxies.size()
+            ? maxProxyCount - uint32_t(m_gaussianSplatEmissionProxies.size())
+            : 0u;
+        if (remainingProxyCount == 0)
+            break;
+
+        object.pass->BuildEmissionProxies(
+            remainingProxyCount,
+            m_ui.GaussianSplatScale,
+            uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5)),
+            m_ui.GaussianSplatRtxAdaptiveClamp,
+            m_ui.GaussianSplatTintColor,
+            m_ui.GaussianSplatAlphaCullThreshold);
+
+        auto node = object.node.lock();
+        const dm::affine3 objectToWorld = node != nullptr
+            ? node->GetLocalToWorldTransformFloat()
+            : dm::affine3::identity();
+
+        const float radiusScale = std::max({
+            length(objectToWorld.transformVector(float3(1.0f, 0.0f, 0.0f))),
+            length(objectToWorld.transformVector(float3(0.0f, 1.0f, 0.0f))),
+            length(objectToWorld.transformVector(float3(0.0f, 0.0f, 1.0f))) });
+
+        const auto& proxies = object.pass->GetEmissionProxies();
+        m_gaussianSplatEmissionProxies.reserve(m_gaussianSplatEmissionProxies.size() + proxies.size());
+        for (const GaussianSplatEmissionProxy& proxy : proxies)
+        {
+            GaussianSplatEmissionProxy transformed = proxy;
+            transformed.center = objectToWorld.transformPoint(proxy.center);
+            transformed.radius = proxy.radius * radiusScale;
+            m_gaussianSplatEmissionProxies.push_back(transformed);
+        }
+    }
 }
 
 void Sample::SceneUnloading( )
@@ -627,6 +878,9 @@ void Sample::SceneUnloading( )
     m_ui.SelectedMaterial = nullptr;
     m_ui.SelectedNode = nullptr;
     m_ui.SelectedGaussianSplat = false;
+    m_gaussianSplatSceneObjects.clear();
+    m_gaussianSplatEmissionProxies.clear();
+    UpdateGaussianSplatUIState();
     m_gaussianSplatTemporalReset = true;
     m_ui.EnvironmentMapParams = EnvironmentMapRuntimeParameters();
     m_envMapBaker = nullptr;
@@ -755,6 +1009,14 @@ void Sample::SceneLoaded( )
 
     m_sceneTime = 0.f;
     m_scene->FinishedLoading( GetFrameIndex( ) );
+
+    LoadGaussianSplatsFromScene();
+
+    if (!m_initialGaussianSplatAttached && !m_cmdLine.GaussianSplatFileName.empty())
+    {
+        m_initialGaussianSplatAttached = true;
+        (void)AttachGaussianSplatToScene(m_cmdLine.GaussianSplatFileName, m_cmdLine.GaussianSplatConvertRdfToDonut);
+    }
 
     m_progressLoading.Set(65);
 
@@ -1406,10 +1668,13 @@ void Sample::CreateAccelStructs(nvrhi::ICommandList* commandList)
     if(m_ommBaker) m_ommBaker->CreateOpacityMicromaps(*m_scene);
     CreateBlases(commandList);
     CreateTlas(commandList);
-    if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->HasSplats())
+    for (auto& object : m_gaussianSplatSceneObjects)
     {
+        if (object.splat == nullptr || !object.splat->enabled || object.pass == nullptr || !object.pass->HasSplats())
+            continue;
+
         if (ResolveGaussianSplatShadowMode(m_ui) != GAUSSIAN_SPLAT_SHADOWS_DISABLED)
-            m_gaussianSplatPass->BuildAccelerationStructures(
+            object.pass->BuildAccelerationStructures(
                 commandList,
                 m_ui.GaussianSplatUseAABBs,
                 m_ui.GaussianSplatUseTLASInstances,
@@ -1418,7 +1683,7 @@ void Sample::CreateAccelStructs(nvrhi::ICommandList* commandList)
                 uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5)),
                 m_ui.GaussianSplatRtxAdaptiveClamp);
         else
-            m_gaussianSplatPass->ReleaseAccelerationStructures();
+            object.pass->ReleaseAccelerationStructures();
     }
 }
 
@@ -1648,13 +1913,13 @@ void Sample::CreateRenderPasses( bool& exposureResetRequired, nvrhi::CommandList
     m_envMapBaker->GenerateBRDFLUT(initializeCommandList.Get(), *m_bindingCache);  // One-time BRDF LUT generation
     m_lightsBaker->CreateRenderPasses(m_shaderFactory, m_bindlessLayout, m_CommonPasses, m_shaderDebug, screenResolution, m_envMapBaker->GetImportanceSampling()->GetImportanceMapResolution());
 
-    if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->HasSplats())
+    if (!m_gaussianSplatSceneObjects.empty())
     {
-        if (m_gpuSort == nullptr)
-            m_gpuSort = std::make_shared<GPUSort>(GetDevice(), m_shaderFactory);
-        m_gpuSort->CreateRenderPasses(m_CommonPasses, m_shaderDebug);
-        m_gaussianSplatPass->SetGpuSort(m_gpuSort);
-        m_gaussianSplatPass->CreatePipeline(*m_renderTargets);
+        for (auto& object : m_gaussianSplatSceneObjects)
+        {
+            if (object.pass != nullptr && object.pass->HasSplats())
+                PrepareGaussianSplatPass(*object.pass);
+        }
     }
 
     m_denoisingGuidesBaker = std::make_shared<DenoisingGuidesBaker>(GetDevice(), m_shaderFactory, m_renderTargets, m_shaderDebug, m_bindingLayout);
@@ -1736,18 +2001,11 @@ void Sample::UpdateLighting(nvrhi::CommandListHandle commandList)
         settings.EnvMapParams = LightsBakerEnvMapParams{ .Transform = m_envMapSceneParams.Transform, .InvTransform = m_envMapSceneParams.InvTransform, .ColorMultiplier = m_envMapSceneParams.ColorMultiplier, .Enabled = m_envMapSceneParams.Enabled };
         settings.FrameIndex = m_frameIndex;
 
-        if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->HasSplats() && IsGaussianSplatEmissionEnabled(m_ui))
+        BuildGaussianSplatEmissionProxyList();
+        if (!m_gaussianSplatEmissionProxies.empty() && IsGaussianSplatEmissionEnabled(m_ui))
         {
-            m_gaussianSplatPass->BuildEmissionProxies(
-                ClampGaussianSplatEmissionProxyCount(m_ui.GaussianSplatEmissionMaxProxyCount),
-                m_ui.GaussianSplatScale,
-                uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5)),
-                m_ui.GaussianSplatRtxAdaptiveClamp,
-                m_ui.GaussianSplatTintColor,
-                m_ui.GaussianSplatAlphaCullThreshold);
-
-            settings.GaussianSplatEmissionProxies = &m_gaussianSplatPass->GetEmissionProxies();
-            settings.GaussianSplatEmissionObjectToWorld = MakeGaussianSplatObjectToWorld(m_ui);
+            settings.GaussianSplatEmissionProxies = &m_gaussianSplatEmissionProxies;
+            settings.GaussianSplatEmissionObjectToWorld = float4x4::identity();
             settings.GaussianSplatEmissionIntensity = m_ui.GaussianSplatEmissionIntensity;
         }
 
@@ -1920,18 +2178,11 @@ void Sample::RtxdiSetupFrame(nvrhi::IFramebuffer* framebuffer, PathTracerCameraD
 
     bridgeParameters.userSettings.restirDI.initialSamplingParams.environmentMapImportanceSampling = envMapPresent;
 
-    if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->HasSplats() && IsGaussianSplatEmissionEnabled(m_ui))
+    BuildGaussianSplatEmissionProxyList();
+    if (!m_gaussianSplatEmissionProxies.empty() && IsGaussianSplatEmissionEnabled(m_ui))
     {
-        m_gaussianSplatPass->BuildEmissionProxies(
-            ClampGaussianSplatEmissionProxyCount(m_ui.GaussianSplatEmissionMaxProxyCount),
-            m_ui.GaussianSplatScale,
-            uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5)),
-            m_ui.GaussianSplatRtxAdaptiveClamp,
-            m_ui.GaussianSplatTintColor,
-            m_ui.GaussianSplatAlphaCullThreshold);
-
-        bridgeParameters.gaussianSplatEmissionProxies = &m_gaussianSplatPass->GetEmissionProxies();
-        bridgeParameters.gaussianSplatEmissionObjectToWorld = MakeGaussianSplatObjectToWorld(m_ui);
+        bridgeParameters.gaussianSplatEmissionProxies = &m_gaussianSplatEmissionProxies;
+        bridgeParameters.gaussianSplatEmissionObjectToWorld = float4x4::identity();
         bridgeParameters.gaussianSplatEmissionIntensity = m_ui.GaussianSplatEmissionIntensity;
     }
 
@@ -2255,7 +2506,7 @@ void Sample::PostProcessPostToneMapping(nvrhi::ICommandList* commandList, const 
 
 void Sample::RenderGaussianSplats(bool renderToOutputColor)
 {
-    if (m_gaussianSplatPass == nullptr || !m_gaussianSplatPass->HasSplats())
+    if (!m_ui.EnableGaussianSplats || m_gaussianSplatSceneObjects.empty())
         return;
 
     const bool stochasticSplats = m_ui.EnableGaussianSplats && m_ui.GaussianSplatSortingMode == 1;
@@ -2297,8 +2548,6 @@ void Sample::RenderGaussianSplats(bool renderToOutputColor)
         settings.stochasticFrameIndex = uint32_t(m_sampleIndex >= 0
             ? uint32_t(m_sampleIndex)
             : uint32_t(m_frameIndex & 0xffffffffu));
-    settings.objectToWorld = MakeGaussianSplatObjectToWorld(m_ui);
-
     for (const auto& light : m_lights)
     {
         std::shared_ptr<DirectionalLight> dirLight = std::dynamic_pointer_cast<DirectionalLight>(light);
@@ -2319,9 +2568,18 @@ void Sample::RenderGaussianSplats(bool renderToOutputColor)
     }
     splatView.UpdateCache();
 
-    m_gaussianSplatPass->Render(m_commandList, splatView, m_topLevelAS.Get(), *m_renderTargets, settings);
+    bool renderedAny = false;
+    for (auto& object : m_gaussianSplatSceneObjects)
+    {
+        if (object.splat == nullptr || !object.splat->enabled || object.pass == nullptr || !object.pass->HasSplats())
+            continue;
 
-    if (stochasticSplats && !renderToOutputColor)
+        settings.objectToWorld = GetGaussianSplatObjectToWorld(object);
+        object.pass->Render(m_commandList, splatView, m_topLevelAS.Get(), *m_renderTargets, settings);
+        renderedAny = true;
+    }
+
+    if (renderedAny && stochasticSplats && !renderToOutputColor)
         AccumulateGaussianSplats(splatView);
 }
 
@@ -2610,19 +2868,21 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
         UpdatePathTracerConstants(constants.ptConsts, cameraData);
         constants.MaterialCount = m_materialsBaker->GetMaterialDataCount(); // m_scene->GetSceneGraph()->GetMaterials().size();
         const uint32_t gaussianSplatShadowMode = ResolveGaussianSplatShadowMode(m_ui);
+        const GaussianSplatSceneObject* primaryGaussianSplat = GetPrimaryGaussianSplatObject();
+        GaussianSplatPass* primaryGaussianSplatPass = primaryGaussianSplat != nullptr ? primaryGaussianSplat->pass.get() : nullptr;
         constants.GaussianSplatShadowCount = (m_ui.EnableGaussianSplats
                 && gaussianSplatShadowMode != GAUSSIAN_SPLAT_SHADOWS_DISABLED
-                && m_gaussianSplatPass != nullptr
-                && m_gaussianSplatPass->GetTopLevelAS() != nullptr)
-            ? m_gaussianSplatPass->GetSplatCount()
+                && primaryGaussianSplatPass != nullptr
+                && primaryGaussianSplatPass->GetTopLevelAS() != nullptr)
+            ? primaryGaussianSplatPass->GetSplatCount()
             : 0;
         constants.GaussianSplatShadowsEnabled = constants.GaussianSplatShadowCount > 0 ? 1u : 0u;
         constants.GaussianSplatShadowScale = m_ui.GaussianSplatScale;
         constants.GaussianSplatShadowAlphaThreshold = m_ui.GaussianSplatAlphaCullThreshold;
         constants.GaussianSplatShadowUseTLASInstances =
-            (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->GetShadowUsesTLASInstances()) ? 1u : 0u;
+            (primaryGaussianSplatPass != nullptr && primaryGaussianSplatPass->GetShadowUsesTLASInstances()) ? 1u : 0u;
         constants.GaussianSplatShadowPrimitiveCountPerSplat =
-            m_gaussianSplatPass != nullptr ? m_gaussianSplatPass->GetShadowPrimitiveCountPerSplat() : 1u;
+            primaryGaussianSplatPass != nullptr ? primaryGaussianSplatPass->GetShadowPrimitiveCountPerSplat() : 1u;
         constants.GaussianSplatShadowMode = constants.GaussianSplatShadowsEnabled != 0
             ? gaussianSplatShadowMode
             : GAUSSIAN_SPLAT_SHADOWS_DISABLED;
@@ -2634,7 +2894,9 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
         constants.GaussianSplatShadowKernelMinResponse = kGaussianSplatKernelMinResponse;
         constants.GaussianSplatShadowKernelDegree = uint32_t(std::clamp(m_ui.GaussianSplatRtxKernelDegree, 0, 5));
         constants.GaussianSplatShadowAdaptiveClamp = m_ui.GaussianSplatRtxAdaptiveClamp ? 1u : 0u;
-        constants.GaussianSplatShadowWorldToObject = inverse(MakeGaussianSplatObjectToWorld(m_ui));
+        constants.GaussianSplatShadowWorldToObject = primaryGaussianSplat != nullptr
+            ? inverse(GetGaussianSplatObjectToWorld(*primaryGaussianSplat))
+            : float4x4::identity();
 
         constants.envMapSceneParams = m_envMapSceneParams;
         constants.envMapImportanceSamplingParams = m_envMapBaker->GetImportanceSampling()->GetShaderParams();
@@ -2828,10 +3090,12 @@ void Sample::RecreateBindingSet()
 	// WARNING: this must match the layout of the m_bindingLayout (or switch to CreateBindingSetAndLayout)
     nvrhi::rt::IAccelStruct* gaussianSplatAS = m_topLevelAS;
     nvrhi::IBuffer* gaussianSplatBuffer = m_materialsBaker->GetMaterialDataBuffer();
-    if (m_gaussianSplatPass != nullptr && m_gaussianSplatPass->GetTopLevelAS() != nullptr && m_gaussianSplatPass->GetSplatBuffer() != nullptr)
+    const GaussianSplatSceneObject* primaryGaussianSplat = GetPrimaryGaussianSplatObject();
+    const GaussianSplatPass* primaryGaussianSplatPass = primaryGaussianSplat != nullptr ? primaryGaussianSplat->pass.get() : nullptr;
+    if (primaryGaussianSplatPass != nullptr && primaryGaussianSplatPass->GetTopLevelAS() != nullptr && primaryGaussianSplatPass->GetSplatBuffer() != nullptr)
     {
-        gaussianSplatAS = m_gaussianSplatPass->GetTopLevelAS();
-        gaussianSplatBuffer = m_gaussianSplatPass->GetSplatBuffer();
+        gaussianSplatAS = primaryGaussianSplatPass->GetTopLevelAS();
+        gaussianSplatBuffer = primaryGaussianSplatPass->GetSplatBuffer();
     }
 
     // Fixed resources that do not change between binding sets
@@ -3376,7 +3640,7 @@ void Sample::HandleDroppedFiles()
         {
             log::info("Drag-drop: loading Gaussian Splat file '%s'", filePath.c_str());
             if (LoadGaussianSplatFile(path))
-                log::info("Gaussian Splat loaded successfully: %d splats", GetGaussianSplatCount());
+                log::info("Gaussian Splat loaded successfully: %d splats across %d objects", GetGaussianSplatCount(), GetGaussianSplatObjectCount());
             else
                 log::error("Failed to load Gaussian Splat file '%s'", filePath.c_str());
         }

@@ -85,6 +85,19 @@ public:
     bool SetProperty(const std::string& name, const dm::float4& value) override { assert( false ); return false; }    // not yet implemented, never needed
 };
 
+class GaussianSplat : public donut::engine::SceneGraphLeaf
+{
+public:
+    std::string path;
+    std::string resolvedPath;
+    bool convertRdfToDonut = true;
+    bool enabled = true;
+    uint32_t loadedSplatCount = 0;
+
+    [[nodiscard]] std::shared_ptr<SceneGraphLeaf> Clone() override;
+    void Load(const Json::Value& node) override;
+};
+
 class PerspectiveCameraEx : public donut::engine::PerspectiveCamera
 {
 public:

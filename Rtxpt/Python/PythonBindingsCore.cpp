@@ -534,6 +534,7 @@ void RegisterCoreBindings(nb::module_& m)
                 s.ResetAccumulation = true;
             })
         .def_ro("gaussian_splat_count",          &SampleUIData::GaussianSplatCount)
+        .def_ro("gaussian_splat_object_count",   &SampleUIData::GaussianSplatObjectCount)
         .def_ro("gaussian_splat_file_name",      &SampleUIData::GaussianSplatFileName)
 
         // --- AA / DLSS / DLSS-RR / DLSS-G / Reflex (realtime only) -------
@@ -639,6 +640,7 @@ void RegisterCoreBindings(nb::module_& m)
             "Load a 3DGS .ply file and rasterize it over the current scene.")
 
         .def_prop_ro("gaussian_splat_count", [](Sample& self) { return self.GetGaussianSplatCount(); })
+        .def_prop_ro("gaussian_splat_object_count", [](Sample& self) { return self.GetGaussianSplatObjectCount(); })
         .def_prop_ro("gaussian_splat_file_name", [](Sample& self) { return self.GetGaussianSplatFileName(); })
 
         .def("get_materials", [](Sample& self) {

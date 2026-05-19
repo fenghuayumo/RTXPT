@@ -108,6 +108,29 @@ void EnvironmentLight::Load(const Json::Value& node)
     node["rotation"] >> rotation;
     node["path"] >> path;
 }
+
+std::shared_ptr<SceneGraphLeaf> GaussianSplat::Clone()
+{
+    auto copy = std::make_shared<GaussianSplat>();
+    copy->path = path;
+    copy->resolvedPath = resolvedPath;
+    copy->convertRdfToDonut = convertRdfToDonut;
+    copy->enabled = enabled;
+    copy->loadedSplatCount = loadedSplatCount;
+    return copy;
+}
+
+void GaussianSplat::Load(const Json::Value& node)
+{
+    node["path"] >> path;
+    if (path.empty())
+        node["file"] >> path;
+    if (path.empty())
+        node["fileName"] >> path;
+    node["convertRdfToDonut"] >> convertRdfToDonut;
+    node["enabled"] >> enabled;
+}
+
 std::shared_ptr<donut::engine::SceneGraphLeaf> ExtendedSceneTypeFactory::CreateLeaf(const std::string& type)
 {
     if (type == "EnvironmentLight")
@@ -138,6 +161,10 @@ std::shared_ptr<donut::engine::SceneGraphLeaf> ExtendedSceneTypeFactory::CreateL
     if (type == "GameSettings")
     {
         return std::make_shared<GameSettings>();
+    } else
+    if (type == "GaussianSplat" || type == "GaussianSplats" || type == "3DGaussianSplat")
+    {
+        return std::make_shared<GaussianSplat>();
     }
     return SceneTypeFactory::CreateLeaf(type);
 }
