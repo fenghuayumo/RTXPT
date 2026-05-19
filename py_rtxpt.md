@@ -114,18 +114,29 @@ finally:
 
 ### Load 3D Gaussian Splats
 
+3DGS objects are scene graph objects. Prefer declaring them in the scene JSON:
+
 ```python
 import rtxpt
 
-r = rtxpt.Renderer(
-    width=1280,
-    height=720,
-    headless=False,
-    realtime=True,
-    scene="bistro-programmer-art.scene.json",
-    gaussian_splat_file=r"D:\ScanVideo\chuan\splats.ply",
-    gaussian_splat_convert_rdf_to_donut=True,
-)
+scene = r'''
+{
+  "models": ["builtin:plane"],
+  "graph": [
+    { "name": "Ground", "model": 0 },
+    {
+      "name": "Scan",
+      "type": "GaussianSplat",
+      "path": "D:/ScanVideo/chuan/splats.ply",
+      "convertRdfToDonut": true,
+      "translation": [0, 0, 0],
+      "scaling": [1, 1, 1]
+    }
+  ]
+}
+'''
+
+r = rtxpt.Renderer(width=1280, height=720, headless=False, realtime=True, scene=scene)
 
 s = r.settings
 s.enable_gaussian_splats = True
@@ -140,7 +151,7 @@ while r.step(-1.0):
     pass
 ```
 
-`gaussian_splat_file` attaches a `GaussianSplat` node to the initial scene. 3DGS objects now live in the scene graph like mesh model nodes, so multiple splat nodes can coexist. Calling `load_scene(...)` replaces the current scene graph and destroys the previous scene's splat nodes; load the splats again after switching scenes, or declare them in the target scene JSON.
+For script-driven workflows, `load_gaussian_splats(path, convert_rdf_to_donut=True)` appends a `GaussianSplat` node to the current scene root. Calling `load_scene(...)` replaces the current scene graph and destroys previously appended splat nodes, so load them again after switching scenes or declare them in the target scene JSON.
 
 ### 3DGS Reference / Realtime Batch Test
 
@@ -334,17 +345,6 @@ rtxpt.Renderer(
     scene="",
     realtime=False,
     accumulation_target=64,
-    gaussian_splat_file="",
-    gaussian_splat_convert_rdf_to_donut=True,
-    gaussian_splat_depth_test=True,
-    gaussian_splat_scale=1.0,
-    gaussian_splat_alpha_scale=1.0,
-    gaussian_splat_brightness=1.0,
-    gaussian_splat_tint_color=(1.0, 1.0, 1.0),
-    gaussian_splat_as_emitter=False,
-    gaussian_splat_emission_intensity=1.0,
-    gaussian_splat_emission_max_proxy_count=8192,
-    gaussian_splat_alpha_cull_threshold=1.0 / 255.0,
 )
 ```
 
@@ -358,7 +358,6 @@ rtxpt.Renderer(
 | `scene` | Scene file path/name, `builtin:*` primitive reference, or inline scene JSON string. Relative file paths are resolved from `Assets/`. |
 | `realtime` | Start in realtime mode if `True`, reference mode if `False`. |
 | `accumulation_target` | Reference SPP target. |
-| `gaussian_splat_*` | Optional startup 3DGS scene object path plus shared rasterization/loading settings. |
 
 ### Methods / Properties
 
@@ -626,11 +625,11 @@ app.set_reference_mode(
 
 ### 3D Gaussian Splats
 
-3DGS data is scene-owned. `gaussian_splat_file` in `Renderer(...)` creates one `GaussianSplat` node in the startup scene, `load_gaussian_splats(...)` appends another node to the current scene, and scene JSON can contain any number of `GaussianSplat`, `GaussianSplats`, or `3DGaussianSplat` nodes. Switching scenes clears the old scene graph, including its 3DGS objects.
+3DGS data is scene-owned. Scene JSON can contain any number of `GaussianSplat`, `GaussianSplats`, or `3DGaussianSplat` nodes. `load_gaussian_splats(...)` is a convenience method that appends another `GaussianSplat` node to the current scene root. Switching scenes clears the old scene graph, including its 3DGS objects.
 
 Rasterization runs over all enabled 3DGS scene objects. Emissive proxy sampling also combines all enabled 3DGS objects into one world-space proxy list. The current RTX/path-tracing splat shadow binding still has one global resource slot, so splat shadows use the first enabled 3DGS object as the primary shadow source.
 
-The table below lists the Python-facing 3DGS settings that are currently wired into the renderer. Rasterization, culling, emission, and shadow settings are shared render settings. The node transform in the scene graph controls placement; `gaussian_splat_translation`, `gaussian_splat_rotation_euler_deg`, and `gaussian_splat_object_scale` are only used as the initial transform when Python attaches a new 3DGS node through `gaussian_splat_file` or `load_gaussian_splats(...)`.
+The table below lists the Python-facing 3DGS settings that are currently wired into the renderer. Rasterization, culling, emission, and shadow settings are shared render settings. Object placement belongs to the scene graph node transform. `gaussian_splat_translation`, `gaussian_splat_rotation_euler_deg`, and `gaussian_splat_object_scale` are only used as the initial transform when Python appends a new 3DGS node through `load_gaussian_splats(...)`.
 
 | Property | Type | Notes |
 | --- | --- | --- |

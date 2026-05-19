@@ -120,7 +120,7 @@ def configure_camera(renderer, args: argparse.Namespace, ply_path: Path) -> None
 
 
 def make_renderer(rtxpt, args: argparse.Namespace, scene: str, ply_path: Path, realtime: bool):
-    return rtxpt.Renderer(
+    renderer = rtxpt.Renderer(
         width=args.width,
         height=args.height,
         headless=True,
@@ -129,14 +129,11 @@ def make_renderer(rtxpt, args: argparse.Namespace, scene: str, ply_path: Path, r
         scene=scene,
         realtime=realtime,
         accumulation_target=args.frames,
-        gaussian_splat_file=str(ply_path),
-        gaussian_splat_convert_rdf_to_donut=args.rdf_to_donut,
-        gaussian_splat_depth_test=args.depth_test,
-        gaussian_splat_scale=args.splat_scale,
-        gaussian_splat_alpha_scale=args.alpha_scale,
-        gaussian_splat_brightness=args.brightness,
-        gaussian_splat_alpha_cull_threshold=args.alpha_cull,
     )
+    if not renderer.load_gaussian_splats(str(ply_path), args.rdf_to_donut):
+        renderer.close()
+        raise RuntimeError(f"Failed to load Gaussian splat: {ply_path}")
+    return renderer
 
 
 def save_or_raise(renderer, path: Path) -> None:

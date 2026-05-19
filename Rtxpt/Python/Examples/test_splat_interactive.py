@@ -276,13 +276,6 @@ def main() -> int:
         scene=scene,
         realtime=True,
         accumulation_target=1,
-        gaussian_splat_file=str(ply_path),
-        gaussian_splat_convert_rdf_to_donut=args.rdf_to_donut,
-        gaussian_splat_depth_test=args.depth_test,
-        gaussian_splat_scale=args.splat_scale,
-        gaussian_splat_alpha_scale=args.alpha_scale,
-        gaussian_splat_brightness=args.brightness,
-        gaussian_splat_alpha_cull_threshold=args.alpha_cull,
     )
 
     try:
@@ -297,6 +290,8 @@ def main() -> int:
         settings.enable_tone_mapping = args.tonemap
         settings.enable_bloom = args.bloom
         settings.realtime_aa = rtxpt.RealtimeAA.Off
+        if not renderer.load_gaussian_splats(str(ply_path), args.rdf_to_donut):
+            raise RuntimeError(f"Failed to load Gaussian splat: {ply_path}")
         renderer.set_camera(cam_pos, cam_dir, cam_up)
         renderer.set_camera_fov(args.fov)
 

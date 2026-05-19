@@ -387,16 +387,6 @@ RenderSession::RenderSession(const Config& cfg)
     m_cmdLine.OverrideToReferenceMode = !cfg.realtimeMode;
     m_cmdLine.OverrideToRealtimeMode  =  cfg.realtimeMode;
     m_cmdLine.ReferenceSamplesPerPixel = cfg.accumulationTarget;
-    m_cmdLine.GaussianSplatFileName = cfg.gaussianSplatFile;
-    m_cmdLine.GaussianSplatConvertRdfToDonut = cfg.gaussianSplatConvertRdfToDonut;
-    m_cmdLine.GaussianSplatDepthTest = cfg.gaussianSplatDepthTest;
-    m_cmdLine.GaussianSplatScale = cfg.gaussianSplatScale;
-    m_cmdLine.GaussianSplatAlphaScale = cfg.gaussianSplatAlphaScale;
-    m_cmdLine.GaussianSplatBrightness = cfg.gaussianSplatBrightness;
-    m_cmdLine.GaussianSplatAsEmitter = cfg.gaussianSplatAsEmitter;
-    m_cmdLine.GaussianSplatEmissionIntensity = cfg.gaussianSplatEmissionIntensity;
-    m_cmdLine.GaussianSplatEmissionMaxProxyCount = cfg.gaussianSplatEmissionMaxProxyCount;
-    m_cmdLine.GaussianSplatAlphaCullThreshold = cfg.gaussianSplatAlphaCullThreshold;
 
     if (cfg.nonInteractive)
     {
@@ -526,7 +516,6 @@ bool RenderSession::InitRenderer()
         ? std::string("default.json")
         : m_config.scene;
 
-    g_sampleUIData.GaussianSplatTintColor = m_config.gaussianSplatTintColor;
     m_renderer->Init(preferredScene, m_shaderFactory);
     m_deviceManager->AddRenderPassToBack(m_renderer.get());
 

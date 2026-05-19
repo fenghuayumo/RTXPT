@@ -43,12 +43,6 @@ def render(args):
         adapter_index=args.adapter_index,
         scene=args.scene,
         accumulation_target=args.spp,
-        gaussian_splat_file=args.gaussian_splat or "",
-        gaussian_splat_convert_rdf_to_donut=args.gaussian_splat_convert_rdf_to_donut,
-        gaussian_splat_depth_test=args.gaussian_splat_depth_test,
-        gaussian_splat_scale=args.gaussian_splat_scale,
-        gaussian_splat_alpha_scale=args.gaussian_splat_alpha_scale,
-        gaussian_splat_brightness=args.gaussian_splat_brightness,
     )
 
     print(f"[rtxpt] Loaded scene: {renderer.app.scene_name}")
@@ -69,7 +63,16 @@ def render(args):
     s.use_restir_gi = False
     if args.gaussian_splat:
         s.enable_gaussian_splats = True
+        s.gaussian_splat_depth_test = args.gaussian_splat_depth_test
+        s.gaussian_splat_scale = args.gaussian_splat_scale
+        s.gaussian_splat_alpha_scale = args.gaussian_splat_alpha_scale
+        s.gaussian_splat_brightness = args.gaussian_splat_brightness
         s.gaussian_splat_alpha_cull_threshold = args.gaussian_splat_alpha_cull
+        if not renderer.load_gaussian_splats(
+            args.gaussian_splat,
+            args.gaussian_splat_convert_rdf_to_donut,
+        ):
+            raise RuntimeError(f"Failed to load Gaussian splat: {args.gaussian_splat}")
     s.oidn_enabled = args.oidn
     s.oidn_use_gpu = args.oidn_gpu
     s.oidn_quality = args.oidn_quality
