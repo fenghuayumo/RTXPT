@@ -2876,7 +2876,7 @@ void SampleUI::BuildPythonScriptingUI(float indent)
 
     // ---- Inline expression / snippet ------------------------------------
     ImGui::TextUnformatted("Inline expression:");
-    static char inlineBuffer[8192] = "import rtxpt\nfor mat in rtxpt.app().get_materials():\n    print(mat.name, mat.base_color)\n";
+    static char inlineBuffer[8192] = "import rtxpt\nfor mat in rtxpt.app().scene.get_materials():\n    print(mat.name, mat.base_color)\n";
     ImGui::InputTextMultiline("##PythonInline", inlineBuffer, sizeof(inlineBuffer),
         ImVec2(-1.0f, ImGui::GetTextLineHeight() * 6.0f));
     if (ImGui::Button("Run inline"))

@@ -79,11 +79,12 @@ entries may use `builtin:plane`, `builtin:cube`, `builtin:sphere`, or
 | `rtxpt.builtin_scene_json(...)` | Inline JSON for a builtin primitive scene     |
 | `rtxpt.app()`                   | Returns the current `Sample` renderer         |
 | `rtxpt.settings()`              | Shortcut for `rtxpt.app().settings`           |
+| `Sample.scene`                  | Current loaded `Scene`                        |
 | `Sample.set_realtime_mode(...)` | Switch to realtime mode + AA + denoiser       |
 | `Sample.set_reference_mode(...)`| Switch to reference accumulation + OIDN       |
-| `Sample.get_materials()`        | List of `PTMaterial` in the current scene     |
-| `Sample.find_material(name)`    | Lookup by `Name` or `UniqueName`              |
-| `Sample.get_lights()`           | List of `Light` (Directional/Spot/Point/Env)  |
+| `Scene.get_materials()`         | List of `PTMaterial` in the current scene     |
+| `Scene.find_material(name)`     | Lookup by `Name` or `UniqueName`              |
+| `Scene.get_lights()`            | List of `Light` (Directional/Spot/Point/Env)  |
 | `Sample.set_environment_map`    | Override the scene's HDRI                     |
 | `Sample.set_camera_fov`         | Override vertical FOV (degrees)               |
 | `Settings.path_tracer_mode`     | rtxpt.PathTracerMode (Realtime / Reference)   |

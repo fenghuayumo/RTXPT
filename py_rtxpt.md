@@ -174,7 +174,8 @@ When `--convert-rdf-to-donut` is enabled, which is the default, both the PLY loa
 import rtxpt
 
 r = rtxpt.Renderer(scene="bistro-programmer-art.scene.json", headless=True)
-mat = r.app.find_material("SomeMaterialName")
+scene = r.app.scene
+mat = scene.find_material("SomeMaterialName")
 if mat:
     mat.base_color = (1.0, 0.2, 0.1)
     mat.roughness = 0.35
@@ -192,11 +193,12 @@ r.close()
 import rtxpt
 
 r = rtxpt.Renderer(scene="bistro-programmer-art.scene.json", headless=True)
-for light in r.app.get_lights():
+scene = r.app.scene
+for light in scene.get_lights():
     print(light.name, light.light_type)
     light.color = (1.0, 0.9, 0.75)
 
-sun = r.app.find_light("Sun")
+sun = scene.find_light("Sun")
 if sun:
     sun.direction = (0.0, -1.0, 0.2)
 
@@ -416,6 +418,7 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | Property | Type | Notes |
 | --- | --- | --- |
 | `settings` | `Settings` | Live settings object. |
+| `scene` | `Scene | None` | Current loaded scene, matching the C++ `GetScene()` entry point. |
 | `scene_name` | `str` | Current scene name. |
 | `available_scenes` | `list[str]` | Scene files discovered by the app. |
 | `gaussian_splat_object_count` | `int` | Number of loaded 3DGS scene objects. |
@@ -431,21 +434,28 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | `set_scene(scene_name, force_reload=False)` | `None` | Switch scene. |
 | `load_gaussian_splats(file_name, convert_rdf_to_donut=True)` | `bool` | Append a 3DGS `.ply` node to the current scene. |
 | `set_environment_map(path)` | `None` | Override scene environment map source. |
+| `get_scene()` | `Scene | None` | Return the current loaded scene. |
 
-### Materials
-
-| API | Return | Notes |
-| --- | --- | --- |
-| `get_materials()` | `list[Material]` | All `PTMaterial` materials in the current scene. |
-| `find_material(name)` | `Material | None` | Match by `Name` or `UniqueName`. |
-| `find_material_by_id(material_id)` | `Material | None` | Lookup by material ID. |
-
-### Lights
+### Scene Materials
 
 | API | Return | Notes |
 | --- | --- | --- |
-| `get_lights()` | `list[Light]` | All lights in current scene. |
-| `find_light(name)` | `Light | None` | Match by scene node name. |
+| `scene.get_materials()` | `list[Material]` | All `PTMaterial` materials in the current scene. |
+| `scene.find_material(name)` | `Material | None` | Match by `Name` or `UniqueName`. |
+| `scene.find_material_by_id(material_id)` | `Material | None` | Lookup by material ID. |
+| `scene.material_count` | `int` | Number of PT materials in the current scene. |
+
+`Sample.get_materials()`, `Sample.find_material()`, and `Sample.find_material_by_id()` remain available as compatibility aliases.
+
+### Scene Lights
+
+| API | Return | Notes |
+| --- | --- | --- |
+| `scene.get_lights()` | `list[Light]` | All lights in current scene. |
+| `scene.find_light(name)` | `Light | None` | Match by scene node name. |
+| `scene.light_count` | `int` | Number of lights in the current scene. |
+
+`Sample.get_lights()` and `Sample.find_light()` remain available as compatibility aliases.
 
 ### Camera
 
@@ -677,7 +687,7 @@ Reference / OIDN:
 
 ## `Material` Class
 
-Returned by `Sample.get_materials()`, `Sample.find_material()`, and `Sample.find_material_by_id()`.
+Returned by `Scene.get_materials()`, `Scene.find_material()`, and `Scene.find_material_by_id()`.
 
 Read-only identifiers:
 

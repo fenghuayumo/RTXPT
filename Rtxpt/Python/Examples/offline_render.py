@@ -52,8 +52,9 @@ def render(args):
     )
 
     print(f"[rtxpt] Loaded scene: {renderer.app.scene_name}")
-    print(f"[rtxpt] Materials in scene: {len(renderer.app.get_materials())}")
-    print(f"[rtxpt] Lights in scene   : {len(renderer.app.get_lights())}")
+    scene = renderer.app.scene
+    print(f"[rtxpt] Materials in scene: {scene.material_count}")
+    print(f"[rtxpt] Lights in scene   : {scene.light_count}")
 
     # --- Configure rendering --------------------------------------------------
     s = renderer.settings
@@ -87,7 +88,7 @@ def render(args):
     if args.material_overrides:
         for spec in args.material_overrides:
             name, color = spec
-            mat = renderer.app.find_material(name)
+            mat = scene.find_material(name)
             if mat is not None:
                 mat.base_color = color
                 print(f"[rtxpt] Overrode '{name}' base_color to {color}")

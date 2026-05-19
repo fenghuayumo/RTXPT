@@ -97,6 +97,76 @@ namespace
             throw std::runtime_error("Expected an iterable of 3 floats");
         return double3(v[0], v[1], v[2]);
     }
+
+    std::shared_ptr<SceneGraph> SceneGraphFromScene(const std::shared_ptr<Scene>& scene)
+    {
+        return scene ? scene->GetSceneGraph() : nullptr;
+    }
+
+    std::vector<std::shared_ptr<PTMaterial>> GetSceneMaterials(const std::shared_ptr<SceneGraph>& sceneGraph)
+    {
+        std::vector<std::shared_ptr<PTMaterial>> result;
+        if (!sceneGraph)
+            return result;
+
+        for (const auto& mat : sceneGraph->GetMaterials())
+        {
+            if (auto pt = PTMaterial::SafeCast(mat))
+                result.push_back(pt);
+        }
+        return result;
+    }
+
+    std::shared_ptr<PTMaterial> FindSceneMaterial(const std::shared_ptr<SceneGraph>& sceneGraph, const std::string& name)
+    {
+        if (!sceneGraph)
+            return nullptr;
+
+        for (const auto& mat : sceneGraph->GetMaterials())
+        {
+            auto pt = PTMaterial::SafeCast(mat);
+            if (pt && (pt->Name == name || pt->UniqueName == name))
+                return pt;
+        }
+        return nullptr;
+    }
+
+    std::shared_ptr<PTMaterial> FindSceneMaterialById(const std::shared_ptr<SceneGraph>& sceneGraph, int materialId)
+    {
+        if (!sceneGraph)
+            return nullptr;
+
+        for (const auto& mat : sceneGraph->GetMaterials())
+        {
+            if (mat && mat->materialID == materialId)
+                return PTMaterial::SafeCast(mat);
+        }
+        return nullptr;
+    }
+
+    std::vector<std::shared_ptr<Light>> GetSceneLights(const std::shared_ptr<SceneGraph>& sceneGraph)
+    {
+        std::vector<std::shared_ptr<Light>> result;
+        if (!sceneGraph)
+            return result;
+
+        for (const auto& light : sceneGraph->GetLights())
+            result.push_back(light);
+        return result;
+    }
+
+    std::shared_ptr<Light> FindSceneLight(const std::shared_ptr<SceneGraph>& sceneGraph, const std::string& name)
+    {
+        if (!sceneGraph)
+            return nullptr;
+
+        for (const auto& light : sceneGraph->GetLights())
+        {
+            if (light && light->GetNode() && light->GetNode()->GetName() == name)
+                return light;
+        }
+        return nullptr;
+    }
 }
 
 namespace rtxpt_py
@@ -389,6 +459,47 @@ void RegisterCoreBindings(nb::module_& m)
         .def_rw("rotation", &EnvironmentLight::rotation)
         .def_rw("path", &EnvironmentLight::path);
 
+    // --- Scene ------------------------------------------------------------
+    nb::class_<Scene>(m, "Scene",
+        "Loaded RTXPT scene. Material and light access lives here so Python\n"
+        "scripts can follow the same shape as the C++ Sample::GetScene() path.")
+        .def("get_materials", [](Scene& self) {
+                return GetSceneMaterials(self.GetSceneGraph());
+            }, "Return every PTMaterial in this scene.")
+
+        .def("find_material", [](Scene& self, const std::string& name) {
+                return FindSceneMaterial(self.GetSceneGraph(), name);
+            }, nb::arg("name"), "Look up a material by Name or UniqueName.")
+
+        .def("find_material_by_id", [](Scene& self, int materialId) {
+                return FindSceneMaterialById(self.GetSceneGraph(), materialId);
+            }, nb::arg("material_id"), "Look up a material by Donut material ID.")
+
+        .def("get_lights", [](Scene& self) {
+                return GetSceneLights(self.GetSceneGraph());
+            }, "Return every Light in this scene.")
+
+        .def("find_light", [](Scene& self, const std::string& name) {
+                return FindSceneLight(self.GetSceneGraph(), name);
+            }, nb::arg("name"), "Look up a light by scene node name.")
+
+        .def_prop_ro("material_count", [](Scene& self) {
+                auto sceneGraph = self.GetSceneGraph();
+                return sceneGraph ? GetSceneMaterials(sceneGraph).size() : size_t(0);
+            }, "Number of PTMaterial instances in this scene.")
+        .def_prop_ro("light_count", [](Scene& self) {
+                auto sceneGraph = self.GetSceneGraph();
+                return sceneGraph ? sceneGraph->GetLights().size() : size_t(0);
+            }, "Number of lights in this scene.")
+
+        .def("__repr__", [](Scene& self) {
+                auto sceneGraph = self.GetSceneGraph();
+                const auto materialCount = sceneGraph ? GetSceneMaterials(sceneGraph).size() : size_t(0);
+                const auto lightCount = sceneGraph ? sceneGraph->GetLights().size() : size_t(0);
+                return std::string("<rtxpt.Scene materials=") + std::to_string(materialCount)
+                    + " lights=" + std::to_string(lightCount) + ">";
+            });
+
     // --- Runtime UI / sampling parameters --------------------------------
     nb::class_<EnvironmentMapRuntimeParameters>(m, "EnvironmentMapParams",
         "Runtime tweakables applied on top of the EnvironmentLight in the\n"
@@ -621,9 +732,16 @@ void RegisterCoreBindings(nb::module_& m)
                 return &g_sampleUIData;
             }, nb::rv_policy::reference,
             "Live `Settings` mirror of the current UI state.")
+        .def_prop_ro("scene", [](Sample& self) {
+                return self.GetScene();
+            }, "Current loaded `Scene`, or None before a scene is available.")
 
         .def_prop_ro("scene_name",  [](Sample& self) { return self.GetCurrentSceneName(); })
         .def_prop_ro("available_scenes", [](Sample& self) { return self.GetAvailableScenes(); })
+
+        .def("get_scene", [](Sample& self) {
+                return self.GetScene();
+            }, "Return the current loaded Scene, matching the C++ GetScene() entry point.")
 
         .def("set_scene", [](Sample& self, const std::string& name, bool forceReload)
             {
@@ -644,52 +762,24 @@ void RegisterCoreBindings(nb::module_& m)
         .def_prop_ro("gaussian_splat_file_name", [](Sample& self) { return self.GetGaussianSplatFileName(); })
 
         .def("get_materials", [](Sample& self) {
-                std::vector<std::shared_ptr<PTMaterial>> result;
-                if (!self.GetScene())
-                    return result;
-                for (const auto& mat : self.GetScene()->GetSceneGraph()->GetMaterials())
-                {
-                    if (auto pt = PTMaterial::SafeCast(mat))
-                        result.push_back(pt);
-                }
-                return result;
-            }, "Return every PTMaterial in the current scene.")
+                return GetSceneMaterials(SceneGraphFromScene(self.GetScene()));
+            }, "Compatibility alias for `sample.scene.get_materials()`.")
 
         .def("find_material", [](Sample& self, const std::string& name) -> std::shared_ptr<PTMaterial> {
-                if (!self.GetScene())
-                    return nullptr;
-                for (const auto& mat : self.GetScene()->GetSceneGraph()->GetMaterials())
-                {
-                    auto pt = PTMaterial::SafeCast(mat);
-                    if (pt && (pt->Name == name || pt->UniqueName == name))
-                        return pt;
-                }
-                return nullptr;
-            }, nb::arg("name"), "Look up a material by Name or UniqueName.")
+                return FindSceneMaterial(SceneGraphFromScene(self.GetScene()), name);
+            }, nb::arg("name"), "Compatibility alias for `sample.scene.find_material(name)`.")
 
         .def("find_material_by_id", [](Sample& self, int materialId) -> std::shared_ptr<PTMaterial> {
-                return PTMaterial::SafeCast(self.FindMaterial(materialId));
-            }, nb::arg("material_id"))
+                return FindSceneMaterialById(SceneGraphFromScene(self.GetScene()), materialId);
+            }, nb::arg("material_id"), "Compatibility alias for `sample.scene.find_material_by_id(material_id)`.")
 
         .def("get_lights", [](Sample& self) {
-                std::vector<std::shared_ptr<Light>> out;
-                if (!self.GetScene())
-                    return out;
-                for (const auto& l : self.GetScene()->GetSceneGraph()->GetLights())
-                    out.push_back(l);
-                return out;
-            }, "Return every Light in the current scene.")
+                return GetSceneLights(SceneGraphFromScene(self.GetScene()));
+            }, "Compatibility alias for `sample.scene.get_lights()`.")
 
         .def("find_light", [](Sample& self, const std::string& name) -> std::shared_ptr<Light> {
-                if (!self.GetScene())
-                    return nullptr;
-                for (const auto& l : self.GetScene()->GetSceneGraph()->GetLights())
-                {
-                    if (l->GetNode() && l->GetNode()->GetName() == name)
-                        return l;
-                }
-                return nullptr;
-            }, nb::arg("name"))
+                return FindSceneLight(SceneGraphFromScene(self.GetScene()), name);
+            }, nb::arg("name"), "Compatibility alias for `sample.scene.find_light(name)`.")
 
         .def("set_environment_map", [](Sample& self, const std::string& path) {
                 self.SetEnvMapOverrideSource(path);

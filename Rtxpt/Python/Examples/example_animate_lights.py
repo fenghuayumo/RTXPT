@@ -15,6 +15,7 @@ import time
 import rtxpt
 
 app = rtxpt.app()
+scene = app.scene
 
 phase = (time.monotonic() % (2.0 * math.pi))
 
@@ -25,7 +26,8 @@ palette = [
     (1.0, 0.9, 0.2),   # yellow
 ]
 
-for i, light in enumerate(app.get_lights()):
+lights = scene.get_lights()
+for i, light in enumerate(lights):
     if not hasattr(light, "intensity"):
         continue
     color = palette[i % len(palette)]
@@ -34,4 +36,4 @@ for i, light in enumerate(app.get_lights()):
                    color[2] * (0.7 + 0.3 * math.sin(phase + i + 2.4)))
     light.intensity = max(50.0, light.intensity)
 
-rtxpt.log_info(f"Updated {len(app.get_lights())} lights at phase {phase:.2f}")
+rtxpt.log_info(f"Updated {len(lights)} lights at phase {phase:.2f}")
