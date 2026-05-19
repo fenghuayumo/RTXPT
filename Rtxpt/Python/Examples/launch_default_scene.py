@@ -11,6 +11,9 @@ Usage:
 
     # Non-interactive smoke test:
     python ../Rtxpt/Python/Examples/launch_default_scene.py --headless --out default_scene.png
+
+    # OBJ import smoke test:
+    python ../Rtxpt/Python/Examples/launch_default_scene.py --headless --obj-test --out antman_obj.png
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_OBJ_MODEL = Path(r"D:\ScanVideo\models\antman_merged.obj")
 
 
 def configure_import_path() -> None:
@@ -109,13 +113,87 @@ def build_default_scene_description(rtxpt) -> str:
     return json.dumps(scene, indent=2)
 
 
+def resolve_path(path: str) -> Path:
+    resolved = Path(path).expanduser()
+    if not resolved.is_absolute():
+        resolved = Path.cwd() / resolved
+    return resolved.resolve()
+
+
+def bounds_to_center_radius(
+    bounds: tuple[tuple[float, float, float], tuple[float, float, float]] | None,
+) -> tuple[tuple[float, float, float], float] | None:
+    """Convert a ((min), (max)) AABB into a (center, radius) framing helper."""
+    if not bounds:
+        return None
+    mins, maxs = bounds
+    center = tuple((lo + hi) * 0.5 for lo, hi in zip(mins, maxs))
+    extent = [hi - lo for lo, hi in zip(mins, maxs)]
+    radius = max(max(extent) * 0.5, 0.1)
+    return center, radius
+
+
+def scene_bounds_center_radius(renderer) -> tuple[tuple[float, float, float], float] | None:
+    """Pull the world-space AABB from the bound C++ Renderer helper."""
+    return bounds_to_center_radius(renderer.get_scene_bounds())
+
+
+def read_obj_bounds(path: Path) -> tuple[tuple[float, float, float], float]:
+    """Fallback: estimate (center, radius) by parsing the OBJ's `v` lines."""
+    mins = [float("inf"), float("inf"), float("inf")]
+    maxs = [float("-inf"), float("-inf"), float("-inf")]
+    vertex_count = 0
+
+    with path.open("r", encoding="utf-8", errors="ignore") as file:
+        for line in file:
+            if not line.startswith("v "):
+                continue
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            try:
+                xyz = [float(parts[1]), float(parts[2]), float(parts[3])]
+            except ValueError:
+                continue
+            vertex_count += 1
+            for axis, value in enumerate(xyz):
+                mins[axis] = min(mins[axis], value)
+                maxs[axis] = max(maxs[axis], value)
+
+    if vertex_count == 0:
+        raise RuntimeError(f"OBJ contains no readable vertex positions: {path}")
+
+    result = bounds_to_center_radius((tuple(mins), tuple(maxs)))
+    assert result is not None
+    return result
+
+
+def frame_bounds(renderer, center: tuple[float, float, float], radius: float) -> None:
+    camera_pos = (
+        center[0],
+        center[1] + radius * 0.15,
+        center[2] + radius * 3.1,
+    )
+    camera_dir = (
+        center[0] - camera_pos[0],
+        center[1] - camera_pos[1],
+        center[2] - camera_pos[2],
+    )
+    renderer.set_camera(camera_pos, camera_dir, (0.0, 1.0, 0.0))
+    renderer.set_camera_fov(45.0)
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Launch a native builtin plane + cube scene.")
+    parser = argparse.ArgumentParser(description="Launch a native builtin scene and optional OBJ import test.")
     parser.add_argument("--headless", action="store_true", help="Render offscreen and exit.")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--spp", type=int, default=16, help="Reference samples for --headless.")
     parser.add_argument("--out", default="default_scene.png", help="Screenshot path for --headless.")
+    parser.add_argument("--obj-test", action="store_true",
+                        help="Append an OBJ mesh to the default scene and frame the camera around it.")
+    parser.add_argument("--obj-path", default=str(DEFAULT_OBJ_MODEL),
+                        help="Mesh file used by --obj-test. Supports .obj, .gltf, and .glb.")
     return parser.parse_args()
 
 
@@ -126,9 +204,11 @@ def main() -> int:
     import rtxpt
 
     scene = build_default_scene_description(rtxpt)
+    obj_path = resolve_path(args.obj_path) if args.obj_test else None
 
     mode = "headless" if args.headless else "windowed"
-    print(f"[rtxpt] Launching default plane + cube scene ({mode}) ...")
+    test_name = "Antman OBJ" if args.obj_test else "default plane + cube"
+    print(f"[rtxpt] Launching {test_name} scene ({mode}) ...")
     renderer = rtxpt.Renderer(
         width=args.width,
         height=args.height,
@@ -145,6 +225,26 @@ def main() -> int:
         s.enable_tone_mapping = True
         s.realtime_aa = rtxpt.RealtimeAA.Off
 
+        if obj_path is not None:
+            if not obj_path.exists():
+                raise FileNotFoundError(f"OBJ test mesh not found: {obj_path}")
+            print(f"[rtxpt] Loading mesh: {obj_path}")
+            if not renderer.load_mesh_file(str(obj_path)):
+                raise RuntimeError(f"Failed to load mesh file: {obj_path}")
+
+            framing = scene_bounds_center_radius(renderer)
+            if framing is not None:
+                center, radius = framing
+                print(f"[rtxpt] Framed scene bounds (C++): center={center}, radius={radius:.3f}")
+            elif obj_path.suffix.lower() == ".obj":
+                center, radius = read_obj_bounds(obj_path)
+                print(f"[rtxpt] Framed OBJ bounds (fallback): center={center}, radius={radius:.3f}")
+            else:
+                center, radius = None, None
+
+            if center is not None and radius is not None:
+                frame_bounds(renderer, center, radius)
+
         if args.headless:
             print(f"[rtxpt] Rendering {args.spp} spp ...")
             frames = renderer.step_until_accumulated()
@@ -156,7 +256,10 @@ def main() -> int:
                 raise RuntimeError(f"Failed to save screenshot: {out_path}")
             print(f"[rtxpt] Saved: {out_path} ({frames} frames)")
         else:
-            print("[rtxpt] Ready. Default scene contains one plane with one cube on top.")
+            if args.obj_test:
+                print(f"[rtxpt] Ready. Scene contains the default plane + cube and mesh: {obj_path}")
+            else:
+                print("[rtxpt] Ready. Default scene contains one plane with one cube on top.")
             print("[rtxpt]   Left-click  -> Inspector (Transform)")
             print("[rtxpt]   Right-click -> Material Editor")
             print("[rtxpt]   Close window or Ctrl+C to exit.")

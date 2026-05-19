@@ -27,6 +27,10 @@
 #include "../Sample.h"
 #include "../SampleUI.h"
 
+#include <donut/engine/Scene.h>
+#include <donut/core/math/box.h>
+#include <donut/core/math/math.h>
+
 #include <stdexcept>
 
 namespace nb = nanobind;
@@ -52,6 +56,29 @@ namespace
         if (v.size() != 3)
             throw std::runtime_error("Expected an iterable of 3 floats");
         return donut::math::float3(v[0], v[1], v[2]);
+    }
+
+    nb::tuple Float3ToTuple(const donut::math::float3& v) { return nb::make_tuple(v.x, v.y, v.z); }
+
+    bool IsFiniteBox(const donut::math::box3& bounds)
+    {
+        return donut::math::all(donut::math::isfinite(bounds.m_mins))
+            && donut::math::all(donut::math::isfinite(bounds.m_maxs));
+    }
+
+    // Mirrors the helper used by Scene.bounds in the shared core bindings.
+    // Returns the C++ Scene bounds, or std::nullopt when no scene is loaded.
+    std::optional<donut::math::box3> CurrentSceneBoundingBox(Sample* app)
+    {
+        if (!app)
+            return std::nullopt;
+        auto scene = app->GetScene();
+        if (!scene)
+            return std::nullopt;
+        const donut::math::box3 bbox = scene->GetSceneBounds();
+        if (bbox.isempty() || !IsFiniteBox(bbox))
+            return std::nullopt;
+        return bbox;
     }
 }
 
@@ -152,6 +179,11 @@ public:
         return m_session->SetCamera(ToFloat3(pos), ToFloat3(dir), ToFloat3(up));
     }
 
+    bool LoadMeshFile(const std::string& fileName) {
+        Sample* app = GetApp();
+        return app ? app->LoadMeshFile(fileName) : false;
+    }
+
     void SetCameraFOV(float fov) {
         if (m_session) m_session->SetCameraFOV(fov);
     }
@@ -229,6 +261,10 @@ NB_MODULE(rtxpt, m)
              nb::arg("file_name"), nb::arg("convert_rdf_to_donut") = true,
              "Load a 3DGS .ply file and rasterize it over the scene.")
 
+        .def("load_mesh_file", &PyRenderer::LoadMeshFile,
+             nb::arg("file_name"),
+             "Append a mesh file (.gltf, .glb, or .obj) to the current scene.")
+
         .def("step", &PyRenderer::Step,
              nb::arg("dt") = -1.0f,
              "Render exactly one frame.  Returns True on success.")
@@ -258,6 +294,41 @@ NB_MODULE(rtxpt, m)
              nb::arg("fx"), nb::arg("fy"), nb::arg("cx"), nb::arg("cy"),
              nb::arg("width"), nb::arg("height"),
              "Set an off-center pinhole projection from pixel-space camera intrinsics.")
+
+        .def("get_scene_bounds",
+             [](PyRenderer& self) -> nb::object {
+                 auto bbox = CurrentSceneBoundingBox(self.GetApp());
+                 if (!bbox) return nb::none();
+                 return nb::make_tuple(Float3ToTuple(bbox->m_mins), Float3ToTuple(bbox->m_maxs));
+             },
+             "Return the active scene's world-space ((min.xyz), (max.xyz)) AABB, or None.")
+
+        .def_prop_ro("scene_bounds",
+             [](PyRenderer& self) -> nb::object {
+                 auto bbox = CurrentSceneBoundingBox(self.GetApp());
+                 if (!bbox) return nb::none();
+                 return nb::make_tuple(Float3ToTuple(bbox->m_mins), Float3ToTuple(bbox->m_maxs));
+             },
+             "World-space ((min.xyz), (max.xyz)) AABB covering all renderable\n"
+             "content in the active scene, or ``None`` when no scene is loaded.\n"
+             "Equivalent to ``self.app.scene_bounds`` / ``self.app.scene.bounds``.\n"
+             "Refreshed automatically after every ``load_scene`` / ``load_mesh_file`` call.")
+
+        .def_prop_ro("scene_bounds_center",
+             [](PyRenderer& self) -> nb::object {
+                 auto bbox = CurrentSceneBoundingBox(self.GetApp());
+                 if (!bbox) return nb::none();
+                 return Float3ToTuple(bbox->center());
+             },
+             "Center of `scene_bounds`, or ``None`` for an empty scene.")
+
+        .def_prop_ro("scene_bounds_size",
+             [](PyRenderer& self) -> nb::object {
+                 auto bbox = CurrentSceneBoundingBox(self.GetApp());
+                 if (!bbox) return nb::none();
+                 return Float3ToTuple(bbox->diagonal());
+             },
+             "Diagonal extent (max - min) of `scene_bounds`, or ``None`` for an empty scene.")
 
         .def_prop_ro("app",
              [](PyRenderer& self) -> Sample* { return self.GetApp(); },

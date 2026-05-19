@@ -167,6 +167,55 @@ namespace
         }
         return nullptr;
     }
+
+    bool IsFiniteBox(const donut::math::box3& bounds)
+    {
+        return donut::math::all(donut::math::isfinite(bounds.m_mins))
+            && donut::math::all(donut::math::isfinite(bounds.m_maxs));
+    }
+
+    // Returns the C++ Scene bounds when they are populated and finite.
+    std::optional<donut::math::box3> ValidSceneBounds(const donut::math::box3& bounds)
+    {
+        if (bounds.isempty() || !IsFiniteBox(bounds))
+            return std::nullopt;
+        return bounds;
+    }
+
+    std::optional<donut::math::box3> SceneBoundsFromScene(const Scene* scene)
+    {
+        if (!scene)
+            return std::nullopt;
+        return ValidSceneBounds(scene->GetSceneBounds());
+    }
+
+    std::optional<donut::math::box3> SceneBoundsFromScene(const std::shared_ptr<Scene>& scene)
+    {
+        return SceneBoundsFromScene(scene.get());
+    }
+
+    // Converts the Scene AABB to a ((min.xyz), (max.xyz)) Python tuple,
+    // or `None` if the scene is empty / not loaded yet.
+    nb::object SceneBoundsTuple(const std::optional<donut::math::box3>& bbox)
+    {
+        if (!bbox)
+            return nb::none();
+        return nb::make_tuple(Float3ToTuple(bbox->m_mins), Float3ToTuple(bbox->m_maxs));
+    }
+
+    nb::object SceneBoundsCenter(const std::optional<donut::math::box3>& bbox)
+    {
+        if (!bbox)
+            return nb::none();
+        return Float3ToTuple(bbox->center());
+    }
+
+    nb::object SceneBoundsSize(const std::optional<donut::math::box3>& bbox)
+    {
+        if (!bbox)
+            return nb::none();
+        return Float3ToTuple(bbox->diagonal());
+    }
 }
 
 namespace rtxpt_py
@@ -492,6 +541,33 @@ void RegisterCoreBindings(nb::module_& m)
                 return sceneGraph ? sceneGraph->GetLights().size() : size_t(0);
             }, "Number of lights in this scene.")
 
+        .def("get_bounds", [](Scene& self) {
+                return SceneBoundsTuple(SceneBoundsFromScene(&self));
+            },
+            "Return this scene's world-space ((min.xyz), (max.xyz)) AABB, or None.")
+        .def("get_scene_bounds", [](Scene& self) {
+                return SceneBoundsTuple(SceneBoundsFromScene(&self));
+            },
+            "Alias for get_bounds().")
+
+        .def_prop_ro("bounds", [](Scene& self) {
+                return SceneBoundsTuple(SceneBoundsFromScene(&self));
+            },
+            "World-space axis-aligned bounding box that covers every renderable\n"
+            "leaf in the scene graph (mesh instances, lights, splats, ...).\n"
+            "Returns ``((min_x, min_y, min_z), (max_x, max_y, max_z))`` or\n"
+            "``None`` when the scene is empty / not refreshed yet.\n"
+            "The AABB is recomputed by the engine after every scene load and\n"
+            "after each ``Renderer.load_mesh_file`` call.")
+        .def_prop_ro("bounds_center", [](Scene& self) {
+                return SceneBoundsCenter(SceneBoundsFromScene(&self));
+            },
+            "Center point of `Scene.bounds`, or ``None`` for an empty scene.")
+        .def_prop_ro("bounds_size", [](Scene& self) {
+                return SceneBoundsSize(SceneBoundsFromScene(&self));
+            },
+            "Diagonal extent (max - min) of `Scene.bounds`, or ``None`` for an empty scene.")
+
         .def("__repr__", [](Scene& self) {
                 auto sceneGraph = self.GetSceneGraph();
                 const auto materialCount = sceneGraph ? GetSceneMaterials(sceneGraph).size() : size_t(0);
@@ -757,6 +833,13 @@ void RegisterCoreBindings(nb::module_& m)
             nb::arg("file_name"), nb::arg("convert_rdf_to_donut") = true,
             "Load a 3DGS .ply file and rasterize it over the current scene.")
 
+        .def("load_mesh_file", [](Sample& self, const std::string& fileName)
+            {
+                return self.LoadMeshFile(fileName);
+            },
+            nb::arg("file_name"),
+            "Append a mesh file (.gltf, .glb, or .obj) to the current scene.")
+
         .def_prop_ro("gaussian_splat_count", [](Sample& self) { return self.GetGaussianSplatCount(); })
         .def_prop_ro("gaussian_splat_object_count", [](Sample& self) { return self.GetGaussianSplatObjectCount(); })
         .def_prop_ro("gaussian_splat_file_name", [](Sample& self) { return self.GetGaussianSplatFileName(); })
@@ -776,6 +859,23 @@ void RegisterCoreBindings(nb::module_& m)
         .def("get_lights", [](Sample& self) {
                 return GetSceneLights(SceneGraphFromScene(self.GetScene()));
             }, "Compatibility alias for `sample.scene.get_lights()`.")
+
+        .def("get_scene_bounds", [](Sample& self) {
+                return SceneBoundsTuple(SceneBoundsFromScene(self.GetScene()));
+            },
+            "Compatibility alias for `sample.scene.get_scene_bounds()`.")
+
+        .def_prop_ro("scene_bounds", [](Sample& self) {
+                return SceneBoundsTuple(SceneBoundsFromScene(self.GetScene()));
+            },
+            "Shortcut for `sample.scene.bounds`. Returns the world-space\n"
+            "((min.xyz), (max.xyz)) AABB or `None` if no scene is loaded.")
+        .def_prop_ro("scene_bounds_center", [](Sample& self) {
+                return SceneBoundsCenter(SceneBoundsFromScene(self.GetScene()));
+            }, "Shortcut for `sample.scene.bounds_center` (or `None`).")
+        .def_prop_ro("scene_bounds_size", [](Sample& self) {
+                return SceneBoundsSize(SceneBoundsFromScene(self.GetScene()));
+            }, "Shortcut for `sample.scene.bounds_size` (or `None`).")
 
         .def("find_light", [](Sample& self, const std::string& name) -> std::shared_ptr<Light> {
                 return FindSceneLight(SceneGraphFromScene(self.GetScene()), name);

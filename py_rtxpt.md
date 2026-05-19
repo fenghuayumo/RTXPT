@@ -343,6 +343,11 @@ rtxpt.Renderer(
 | `close()` | `None` | Tears down renderer/device. Also called by destructor/context manager. |
 | `load_scene(scene_name, wait_until_ready=True)` | `bool` | Switch scene. |
 | `load_gaussian_splats(file_name, convert_rdf_to_donut=True)` | `bool` | Append a `.ply` 3DGS scene object under the current scene root. |
+| `load_mesh_file(file_name)` | `bool` | Append a `.gltf`, `.glb`, or `.obj` mesh under the current scene root. |
+| `get_scene_bounds()` | `tuple | None` | Active scene world-space `((min.xyz), (max.xyz))` AABB from C++ `Scene::GetSceneBounds()`. |
+| `scene_bounds` | `tuple | None` | Property alias for `get_scene_bounds()`. |
+| `scene_bounds_center` | `tuple | None` | Center of `scene_bounds`. |
+| `scene_bounds_size` | `tuple | None` | Extent `(max - min)` of `scene_bounds`. |
 | `step(dt=-1.0)` | `bool` | Render one frame. Returns `False` on failure or when window close is requested. |
 | `step_n(frames)` | `bool` | Render exactly N frames unless `step()` fails. |
 | `step_until_accumulated(max_frames=0)` | `int` | Reset accumulation and step until accumulation completes, or until `max_frames` if positive. |
@@ -424,6 +429,9 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | `gaussian_splat_object_count` | `int` | Number of loaded 3DGS scene objects. |
 | `gaussian_splat_count` | `int` | Total loaded splat count across current 3DGS scene objects. |
 | `gaussian_splat_file_name` | `str` | Single loaded 3DGS path, or a summary when multiple 3DGS objects are present. |
+| `scene_bounds` | `tuple | None` | Shortcut for `scene.get_scene_bounds()`. |
+| `scene_bounds_center` | `tuple | None` | Center of `scene_bounds`. |
+| `scene_bounds_size` | `tuple | None` | Extent `(max - min)` of `scene_bounds`. |
 | `accumulation_completed` | `bool` | Whether reference accumulation is complete. |
 | `accumulation_sample_index` | `int` | Current accumulation sample index. |
 
@@ -433,8 +441,20 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | --- | --- | --- |
 | `set_scene(scene_name, force_reload=False)` | `None` | Switch scene. |
 | `load_gaussian_splats(file_name, convert_rdf_to_donut=True)` | `bool` | Append a 3DGS `.ply` node to the current scene. |
+| `load_mesh_file(file_name)` | `bool` | Append a `.gltf`, `.glb`, or `.obj` mesh node to the current scene. |
 | `set_environment_map(path)` | `None` | Override scene environment map source. |
 | `get_scene()` | `Scene | None` | Return the current loaded scene. |
+| `get_scene_bounds()` | `tuple | None` | Shortcut for `scene.get_scene_bounds()`. |
+
+### Scene Bounds
+
+| API | Return | Notes |
+| --- | --- | --- |
+| `scene.get_scene_bounds()` | `tuple | None` | World-space `((min.xyz), (max.xyz))` AABB from C++ `Scene::GetSceneBounds()`. |
+| `scene.get_bounds()` | `tuple | None` | Alias for `scene.get_scene_bounds()`. |
+| `scene.bounds` | `tuple | None` | Property alias for `scene.get_scene_bounds()`. |
+| `scene.bounds_center` | `tuple | None` | Center of `scene.bounds`. |
+| `scene.bounds_size` | `tuple | None` | Extent `(max - min)` of `scene.bounds`. |
 
 ### Scene Materials
 
