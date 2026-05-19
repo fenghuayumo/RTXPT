@@ -95,7 +95,7 @@ namespace ShaderCompilerUtils
         {
             ShadersPath = shaderSourcePathDevelopment;
             ShadersPathExternalIncludes1 = 
-                sourceRootDirectory / "External/Donut/Include";
+                sourceRootDirectory / "External/Donut/include";
             ShadersPathExternalIncludes2 = 
                 sourceRootDirectory / "External";
         }
