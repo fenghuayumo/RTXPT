@@ -28,6 +28,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OBJ_MODEL = Path(r"D:\ScanVideo\models\antman_merged.obj")
+IMPORTED_MODEL_TRANSLATION = (0.35, 0.2, -0.45)
+IMPORTED_MODEL_SCALING = (0.9, 0.9, 0.9)
+IMPORTED_MODEL_BASE_COLOR = (0.72, 0.84, 1.0)
 
 
 def configure_import_path() -> None:
@@ -138,6 +141,47 @@ def scene_bounds_center_radius(renderer) -> tuple[tuple[float, float, float], fl
     return bounds_to_center_radius(renderer.get_scene_bounds())
 
 
+def customize_imported_model(renderer, model_path: Path) -> None:
+    """Adjust the imported model transform and tint its materials light blue."""
+    scene = renderer.app.scene
+    if scene is None:
+        raise RuntimeError("No active scene after mesh import.")
+
+    model_name = model_path.stem
+    node = scene.find_node(model_name)
+    if node is not None:
+        node.translation = IMPORTED_MODEL_TRANSLATION
+        node.scaling = IMPORTED_MODEL_SCALING
+        print(
+            f"[rtxpt] Updated node '{model_name}' transform: "
+            f"translation={IMPORTED_MODEL_TRANSLATION}, scaling={IMPORTED_MODEL_SCALING}"
+        )
+    else:
+        print(f"[rtxpt] WARNING: scene node '{model_name}' not found, skipping transform override")
+
+    # Runtime-imported PT materials are populated on the next rebuild step.
+    renderer.step_n(1)
+
+    tinted_count = 0
+    for material in scene.get_materials():
+        if material.model_name != model_name:
+            continue
+        material.base_color = IMPORTED_MODEL_BASE_COLOR
+        material.enable_base_texture = False
+        tinted_count += 1
+
+    if tinted_count > 0:
+        print(
+            f"[rtxpt] Updated {tinted_count} material(s) for '{model_name}' "
+            f"to light blue base_color={IMPORTED_MODEL_BASE_COLOR}"
+        )
+    else:
+        print(f"[rtxpt] WARNING: no materials matched imported model '{model_name}'")
+
+    # Propagate the light-blue material override before reading updated bounds.
+    renderer.step_n(1)
+
+
 def read_obj_bounds(path: Path) -> tuple[tuple[float, float, float], float]:
     """Fallback: estimate (center, radius) by parsing the OBJ's `v` lines."""
     mins = [float("inf"), float("inf"), float("inf")]
@@ -231,6 +275,7 @@ def main() -> int:
             print(f"[rtxpt] Loading mesh: {obj_path}")
             if not renderer.load_mesh_file(str(obj_path)):
                 raise RuntimeError(f"Failed to load mesh file: {obj_path}")
+            customize_imported_model(renderer, obj_path)
 
             framing = scene_bounds_center_radius(renderer)
             if framing is not None:

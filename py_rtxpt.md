@@ -456,6 +456,13 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | `scene.bounds_center` | `tuple | None` | Center of `scene.bounds`. |
 | `scene.bounds_size` | `tuple | None` | Extent `(max - min)` of `scene.bounds`. |
 
+### Scene Nodes
+
+| API | Return | Notes |
+| --- | --- | --- |
+| `scene.find_node(path)` | `SceneNode | None` | Find a scene graph node by name or path. |
+| `sample.find_node(path)` | `SceneNode | None` | Compatibility alias for `scene.find_node(path)`. |
+
 ### Scene Materials
 
 | API | Return | Notes |
@@ -755,6 +762,18 @@ Methods:
 | API | Notes |
 | --- | --- |
 | `mark_dirty()` | Force material GPU buffer refresh next frame. |
+
+## `SceneNode` Class
+
+Returned by `Scene.find_node()` and `Sample.find_node()`.
+
+| Property | Type |
+| --- | --- |
+| `name` | `str` |
+| `path` | `str` |
+| `translation` | `(x, y, z)` |
+| `scaling` | `(x, y, z)` |
+| `bounds` | `((min.xyz), (max.xyz)) \| None` |
 
 ## `Light` Classes
 

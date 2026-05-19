@@ -168,6 +168,38 @@ namespace
         return nullptr;
     }
 
+    std::shared_ptr<SceneGraphNode> FindSceneNode(const std::shared_ptr<SceneGraph>& sceneGraph, const std::string& path)
+    {
+        if (!sceneGraph || path.empty())
+            return nullptr;
+
+        std::filesystem::path query(path);
+        if (query.is_absolute())
+            return sceneGraph->FindNode(query);
+
+        if (auto node = sceneGraph->FindNode(std::filesystem::path("/") / query))
+            return node;
+
+        // Simple name lookup is convenient from Python, especially when the
+        // caller doesn't know the full scene graph path ahead of time.
+        if (query.has_parent_path())
+            return nullptr;
+
+        auto root = sceneGraph->GetRootNode();
+        if (!root)
+            return nullptr;
+
+        SceneGraphWalker walker(root.get());
+        while (walker)
+        {
+            if (walker->GetName() == path)
+                return walker->shared_from_this();
+            walker.Next(true);
+        }
+
+        return nullptr;
+    }
+
     bool IsFiniteBox(const donut::math::box3& bounds)
     {
         return donut::math::all(donut::math::isfinite(bounds.m_mins))
@@ -508,6 +540,27 @@ void RegisterCoreBindings(nb::module_& m)
         .def_rw("rotation", &EnvironmentLight::rotation)
         .def_rw("path", &EnvironmentLight::path);
 
+    nb::class_<SceneGraphNode>(m, "SceneNode",
+        "Scene graph node wrapper for runtime mesh/light/camera transforms.")
+        .def_prop_ro("name", [](SceneGraphNode& self) { return self.GetName(); })
+        .def_prop_ro("path", [](SceneGraphNode& self) { return self.GetPath().generic_string(); })
+        .def_prop_rw("translation",
+            [](SceneGraphNode& self) { return Double3ToTuple(self.GetTranslation()); },
+            [](SceneGraphNode& self, nb::object v) { self.SetTranslation(ToDouble3(v)); },
+            "Local translation in scene space.")
+        .def_prop_rw("scaling",
+            [](SceneGraphNode& self) { return Double3ToTuple(self.GetScaling()); },
+            [](SceneGraphNode& self, nb::object v) { self.SetScaling(ToDouble3(v)); },
+            "Local non-uniform scaling.")
+        .def_prop_ro("bounds",
+            [](SceneGraphNode& self) -> nb::object {
+                return SceneBoundsTuple(ValidSceneBounds(self.GetGlobalBoundingBox()));
+            },
+            "World-space `((min.xyz), (max.xyz))` AABB for this node's subgraph.")
+        .def("__repr__", [](SceneGraphNode& self) {
+                return std::string("<rtxpt.SceneNode '") + self.GetName() + "'>";
+            });
+
     // --- Scene ------------------------------------------------------------
     nb::class_<Scene>(m, "Scene",
         "Loaded RTXPT scene. Material and light access lives here so Python\n"
@@ -531,6 +584,9 @@ void RegisterCoreBindings(nb::module_& m)
         .def("find_light", [](Scene& self, const std::string& name) {
                 return FindSceneLight(self.GetSceneGraph(), name);
             }, nb::arg("name"), "Look up a light by scene node name.")
+        .def("find_node", [](Scene& self, const std::string& path) {
+                return FindSceneNode(self.GetSceneGraph(), path);
+            }, nb::arg("path"), "Look up a scene graph node by name or path.")
 
         .def_prop_ro("material_count", [](Scene& self) {
                 auto sceneGraph = self.GetSceneGraph();
@@ -880,6 +936,9 @@ void RegisterCoreBindings(nb::module_& m)
         .def("find_light", [](Sample& self, const std::string& name) -> std::shared_ptr<Light> {
                 return FindSceneLight(SceneGraphFromScene(self.GetScene()), name);
             }, nb::arg("name"), "Compatibility alias for `sample.scene.find_light(name)`.")
+        .def("find_node", [](Sample& self, const std::string& path) -> std::shared_ptr<SceneGraphNode> {
+                return FindSceneNode(SceneGraphFromScene(self.GetScene()), path);
+            }, nb::arg("path"), "Compatibility alias for `sample.scene.find_node(path)`.")
 
         .def("set_environment_map", [](Sample& self, const std::string& path) {
                 self.SetEnvMapOverrideSource(path);
