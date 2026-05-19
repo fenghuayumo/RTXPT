@@ -39,16 +39,26 @@ so you reach it via `rtxpt.app()`.
 
 ## Extension mode (offline / headless rendering)
 
-After a build, `rtxpt.pyd` is produced next to `Rtxpt.exe` (e.g.
-`bin/Release/rtxpt.pyd`).  Add that folder to `PYTHONPATH` and you can
-drive a brand-new device + scene from a standalone Python interpreter:
+After building the `rtxpt_py` target, install the extension package from the
+repository root:
 
 ```
-set PYTHONPATH=<repo>\bin\Release;%PYTHONPATH%
+python -m pip install .
+python -c "import rtxpt; print(rtxpt.MODE)"
+```
+
+This creates a local binary wheel from the current `bin/` runtime payload and
+installs it into the active Python environment. Then you can drive a brand-new
+device + scene from a standalone Python interpreter:
+
+```
 python Rtxpt\Python\Examples\offline_render.py ^
        --scene bistro-programmer-art.scene.json ^
        --width 1280 --height 720 --spp 256 --out out.png
 ```
+
+For quick local development without installing, adding `bin/` to `PYTHONPATH`
+still works.
 
 Or interactively:
 

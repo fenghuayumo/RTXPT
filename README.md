@@ -105,6 +105,35 @@ Windows is the primary supported platform. Linux/WSL builds use the Vulkan backe
 
    If making a binary build, the `Assets` and `Support` folders can be placed into `bin` next to executable and packed up together (i.e. the sample app will search for both `Assets/` and `../Assets/`).
 
+## Python Extension Install
+
+RTXPT also builds a standalone Python extension module for offline rendering
+and automation. After building the `rtxpt_py` target, install it into the
+active Python environment from the repository root:
+
+```
+python -m pip install .
+python -c "import rtxpt; print(rtxpt.MODE)"
+```
+
+The pip build assembles a local binary wheel from `bin/`, including the native
+extension, runtime DLLs/so files, shaders, and a minimal asset payload. The
+payload can be adjusted with environment variables:
+
+| Variable | Default | Values |
+| --- | --- | --- |
+| `RTXPT_WHEEL_VERSION` | `0.1.0` | Any PEP 440 version |
+| `RTXPT_WHEEL_ASSETS` | `minimal` | `minimal`, `full`, `none` |
+| `RTXPT_WHEEL_DYNAMIC_SHADERS` | `bin` | `bin`, `full`, `none` |
+| `RTXPT_WHEEL_SHADER_API` | `d3d12` on Windows, `vulkan` elsewhere | `d3d12`, `vulkan`, `both` |
+
+You can also build a wheel explicitly:
+
+```
+python Support/python/build_wheel.py
+python -m pip install dist/rtxpt-*.whl
+```
+
 
 ## Building Vulkan
 

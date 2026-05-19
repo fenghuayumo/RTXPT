@@ -28,13 +28,37 @@ print(rtxpt.MODE)  # "extension" or "embed"
 
 ## Import Setup
 
-构建后，Python extension 输出在 `bin/`：
+构建 `rtxpt_py` target 后，Python extension 输出在 `bin/`：
 
 ```text
 bin/rtxpt.cp311-win_amd64.pyd
 ```
 
-独立 Python 脚本需要把 `bin/` 放进 `sys.path` 或 `PYTHONPATH`：
+推荐安装方式是直接在仓库根目录运行：
+
+```powershell
+python -m pip install .
+python -c "import rtxpt; print(rtxpt.MODE)"
+```
+
+这会从当前 `bin/` 里的 native extension、运行时 DLL/so、shader 和必要 Assets
+组装本地 binary wheel，并安装到当前 Python 环境。也可以先显式构建 wheel，再安装：
+
+```powershell
+python Support/python/build_wheel.py
+python -m pip install dist/rtxpt-*.whl
+```
+
+打包参数可以用环境变量控制：
+
+| Variable | Default | Values |
+| --- | --- | --- |
+| `RTXPT_WHEEL_VERSION` | `0.1.0` | 任意 PEP 440 version |
+| `RTXPT_WHEEL_ASSETS` | `minimal` | `minimal`, `full`, `none` |
+| `RTXPT_WHEEL_DYNAMIC_SHADERS` | `bin` | `bin`, `full`, `none` |
+| `RTXPT_WHEEL_SHADER_API` | Windows 为 `d3d12`，其他平台为 `vulkan` | `d3d12`, `vulkan`, `both` |
+
+开发时如果不想安装，也仍然可以把 `bin/` 放进 `sys.path` 或 `PYTHONPATH`：
 
 ```python
 import sys
