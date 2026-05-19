@@ -184,7 +184,7 @@ NB_MODULE(rtxpt, m)
         "Example:\n"
         "    import rtxpt\n"
         "    r = rtxpt.Renderer(width=1280, height=720, headless=True,\n"
-        "                       scene='bistro-programmer-art.scene.json')\n"
+        "                       scene='builtin:plane_cube')\n"
         "    r.settings.accumulation_target = 256\n"
         "    r.step_until_accumulated()\n"
         "    r.save_screenshot('frame.png')\n"
@@ -220,7 +220,7 @@ NB_MODULE(rtxpt, m)
         .def("load_scene",
              [](PyRenderer& self, const std::string& name, bool wait) { return self.LoadScene(name, wait); },
              nb::arg("scene_name"), nb::arg("wait_until_ready") = true,
-             "Load a scene by name (relative to the Assets folder).")
+             "Load a scene by name, builtin primitive reference, or inline scene JSON string.")
 
         .def("load_gaussian_splats",
              [](PyRenderer& self, const std::string& fileName, bool convertRdfToDonut) {
@@ -283,6 +283,11 @@ NB_MODULE(rtxpt, m)
     m.def("settings", []() -> SampleUIData* { return &g_sampleUIData; },
           nb::rv_policy::reference,
           "Shortcut for the global Settings (same as Renderer.settings).");
+
+    m.def("builtin_scene_json", &rtxpt_py::BuiltinSceneJson,
+          nb::arg("builtin_model") = std::string("plane_cube"),
+          "Return a minimal inline scene JSON string for builtin primitive models\n"
+          "('plane', 'cube', 'sphere', or 'plane_cube').");
 
     m.attr("MODE") = "extension";
 }

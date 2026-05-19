@@ -27,11 +27,13 @@
 #include <donut/core/json.h>
 #include <json/json.h>
 
+#include <algorithm>
 #include <fstream>
 
 #include <unordered_set>
 
 #include <cctype>      // std::tolower
+#include <cstring>
 
 #include "../SampleUI.h"
 
@@ -651,10 +653,31 @@ MaterialsBaker::~MaterialsBaker()
 
 static std::string ModelNameFromModelFileName(const std::string& modelFileName)
 {
+    constexpr const char* builtinPrefix = "builtin:";
+    std::string normalized = modelFileName;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch) {
+        return char(std::tolower(ch));
+    });
+    if (normalized.rfind(builtinPrefix, 0) == 0)
+    {
+        normalized.erase(0, std::strlen(builtinPrefix));
+        return std::string("builtin_") + normalized;
+    }
+
     std::filesystem::path modelFileNamePath = modelFileName;
     std::filesystem::path modelName = modelFileNamePath.filename();
     modelName.replace_extension();
     return modelName.string();
+}
+
+static bool IsBuiltinModelFileName(const std::string& modelFileName)
+{
+    constexpr const char* builtinPrefix = "builtin:";
+    std::string normalized = modelFileName;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch) {
+        return char(std::tolower(ch));
+    });
+    return normalized.rfind(builtinPrefix, 0) == 0;
 }
 
 std::shared_ptr<PTMaterial> MaterialsBaker::ImportFromDonut(donut::engine::Material& material)
@@ -879,16 +902,23 @@ void MaterialsBaker::CreateRenderPassesAndLoadMaterials(nvrhi::IBindingLayout* b
             }
             else
             {
-                std::shared_ptr<PTMaterial> loaded = Load(material->modelFileName, material->name);
-                if (loaded != nullptr)
+                if (IsBuiltinModelFileName(material->modelFileName))
                 {
-                    materialEx->PTMaterial = loaded;
+                    materialEx->PTMaterial = ImportFromDonut(*material);
                 }
-                else // ...and if we didn't find it in our .scene.materials.json, then import from Donut!
+                else
                 {
-                    std::shared_ptr<PTMaterial> materialPT = ImportFromDonut(*material);
-                    materialEx->PTMaterial = materialPT;
-                    initializedFromDonutCount++;
+                    std::shared_ptr<PTMaterial> loaded = Load(material->modelFileName, material->name);
+                    if (loaded != nullptr)
+                    {
+                        materialEx->PTMaterial = loaded;
+                    }
+                    else // ...and if we didn't find it in our .scene.materials.json, then import from Donut!
+                    {
+                        std::shared_ptr<PTMaterial> materialPT = ImportFromDonut(*material);
+                        materialEx->PTMaterial = materialPT;
+                        initializedFromDonutCount++;
+                    }
                 }
                 materialEx->PTMaterial->DonutCounterpart = materialEx.get(); // keep the link - only needed if using material animation from Donut
 

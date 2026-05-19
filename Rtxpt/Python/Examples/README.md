@@ -55,7 +55,7 @@ Or interactively:
 ```python
 import rtxpt
 r = rtxpt.Renderer(width=1280, height=720, headless=True,
-                   scene="bistro-programmer-art.scene.json")
+                   scene="builtin:plane_cube")
 r.settings.accumulation_target = 64
 r.step_until_accumulated()
 r.save_screenshot("frame.png")
@@ -65,12 +65,18 @@ r.close()
 `headless=True` creates a DX12/Vulkan device with offscreen back buffers,
 without creating an OS window or swap chain.
 
+For package smoke tests, `scene="builtin:plane_cube"` does not require any
+mesh file from `Assets`. You can also pass inline scene JSON directly; model
+entries may use `builtin:plane`, `builtin:cube`, `builtin:sphere`, or
+`builtin:plane_cube`.
+
 ## Bindings overview
 
 | Object                          | Purpose                                       |
 |---------------------------------|-----------------------------------------------|
 | `rtxpt.MODE`                    | `"embed"` or `"extension"`                    |
 | `rtxpt.Renderer(...)`           | (extension only) creates a new headless device|
+| `rtxpt.builtin_scene_json(...)` | Inline JSON for a builtin primitive scene     |
 | `rtxpt.app()`                   | Returns the current `Sample` renderer         |
 | `rtxpt.settings()`              | Shortcut for `rtxpt.app().settings`           |
 | `Sample.set_realtime_mode(...)` | Switch to realtime mode + AA + denoiser       |

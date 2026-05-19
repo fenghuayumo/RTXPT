@@ -327,7 +327,7 @@ rtxpt.Renderer(
 | `vulkan` | `False` uses DX12. `True` requests Vulkan when available. |
 | `adapter_index` | GPU index, `-1` means default adapter. |
 | `debug` | Enable graphics debug settings. |
-| `scene` | Scene file path/name. Relative paths are resolved from `Assets/`. |
+| `scene` | Scene file path/name, `builtin:*` primitive reference, or inline scene JSON string. Relative file paths are resolved from `Assets/`. |
 | `realtime` | Start in realtime mode if `True`, reference mode if `False`. |
 | `accumulation_target` | Reference SPP target. |
 | `gaussian_splat_*` | Optional 3DGS PLY overlay and rasterization settings. |
@@ -354,6 +354,25 @@ rtxpt.Renderer(
 ```python
 with rtxpt.Renderer(headless=True) as r:
     r.step_n(8)
+```
+
+### Inline / Builtin Scenes
+
+For package smoke tests that should not depend on external mesh assets, the extension accepts builtin primitive scenes:
+
+```python
+with rtxpt.Renderer(headless=True, scene="builtin:plane_cube", accumulation_target=4) as r:
+    r.step_until_accumulated()
+    r.save_screenshot("smoke.png")
+```
+
+Supported builtin models are `builtin:plane`, `builtin:cube`, `builtin:sphere`, and `builtin:plane_cube`.
+
+You can also pass an inline scene JSON string. Model entries may reference builtin primitives:
+
+```python
+scene = rtxpt.builtin_scene_json("plane_cube")
+r = rtxpt.Renderer(headless=True, scene=scene)
 ```
 
 ## `Sample` Class

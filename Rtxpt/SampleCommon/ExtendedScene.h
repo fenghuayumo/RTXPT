@@ -148,6 +148,7 @@ public:
     using Scene::Scene;
 
     bool LoadWithThreadPool(const std::filesystem::path& jsonFileName, donut::engine::ThreadPool* threadPool) override;
+    bool LoadFromJsonString(const std::string& sceneJson, const std::filesystem::path& scenePath = {}) override;
     std::shared_ptr<SampleSettings> GetSampleSettingsNode() const   { return m_loadedSettings; }
     std::shared_ptr<GameSettings>   GetGameSettingsNode() const     { return m_loadedGameSettings; }
 

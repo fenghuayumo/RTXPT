@@ -1,10 +1,9 @@
 #!/usr/bin/env python
-"""Launch RTXPT with a generated default scene.
+"""Launch RTXPT with a native builtin default scene.
 
-The rtxpt.Renderer(scene=...) binding currently expects a scene file path or
-asset-relative scene name. This example keeps the scene authored in Python as a
-plain JSON string, writes it to a temporary .scene.json file, and passes that
-path to the renderer.
+The rtxpt.Renderer(scene=...) binding accepts file names, builtin primitive
+references, and inline scene JSON strings. This example uses inline JSON plus a
+builtin primitive model, so it does not depend on any mesh file in Assets.
 
 Usage:
     cd <repo>/bin
@@ -21,12 +20,10 @@ import glob
 import json
 import os
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_MODEL_PATH = REPO_ROOT / "Assets" / "Generated" / "PlaneCubeTest" / "plane_cube.gltf"
 
 
 def configure_import_path() -> None:
@@ -46,16 +43,14 @@ def configure_import_path() -> None:
     raise RuntimeError(f"Could not find rtxpt Python module. Searched:\n{searched}")
 
 
-def build_default_scene_description() -> str:
-    """Return a self-contained scene description string for a plane + cube."""
-    if not DEFAULT_MODEL_PATH.exists():
-        raise FileNotFoundError(
-            f"Default plane/cube model not found: {DEFAULT_MODEL_PATH}\n"
-            "Run the asset generation step or restore Assets/Generated/PlaneCubeTest."
-        )
+def build_default_scene_description(rtxpt) -> str:
+    """Return an inline scene description string for a plane + cube."""
+    if hasattr(rtxpt, "builtin_scene_json"):
+        return rtxpt.builtin_scene_json("plane_cube")
 
+    # Fallback for source readability; current C++ builds provide the helper.
     scene = {
-        "models": [str(DEFAULT_MODEL_PATH).replace("\\", "/")],
+        "models": ["builtin:plane_cube"],
         "graph": [
             {
                 "name": "DefaultPlaneCube",
@@ -78,13 +73,14 @@ def build_default_scene_description() -> str:
                         "irradiance": 3.0,
                     },
                     {
-                        "name": "Sky",
-                        "type": "EnvironmentLight",
-                        "radianceScale": [1.0, 1.0, 1.0],
-                        "textureIndex": [0],
-                        "rotation": [0],
-                        "path": "EnvironmentMaps/simplebluesky.exr",
-                    },
+                        "name": "Fill",
+                        "type": "PointLight",
+                        "translation": [0.0, 2.5, 3.0],
+                        "color": [1.0, 0.95, 0.85],
+                        "intensity": 30.0,
+                        "radius": 0.05,
+                        "range": 10.0,
+                    }
                 ],
             },
             {
@@ -113,18 +109,8 @@ def build_default_scene_description() -> str:
     return json.dumps(scene, indent=2)
 
 
-def materialize_scene_description(scene_description: str) -> Path:
-    """Write a scene description string to the temporary file RTXPT loads."""
-    # Parse before writing so failures point at the Python-authored scene string.
-    scene = json.loads(scene_description)
-    scene_path = Path(tempfile.gettempdir()) / "rtxpt_default_plane_cube.scene.json"
-    scene_path.write_text(json.dumps(scene, indent=2), encoding="utf-8")
-    print(f"[rtxpt] Generated default scene: {scene_path}")
-    return scene_path
-
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Launch a generated plane + cube scene.")
+    parser = argparse.ArgumentParser(description="Launch a native builtin plane + cube scene.")
     parser.add_argument("--headless", action="store_true", help="Render offscreen and exit.")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
@@ -139,8 +125,7 @@ def main() -> int:
     configure_import_path()
     import rtxpt
 
-    scene_description = build_default_scene_description()
-    scene = str(materialize_scene_description(scene_description))
+    scene = build_default_scene_description(rtxpt)
 
     mode = "headless" if args.headless else "windowed"
     print(f"[rtxpt] Launching default plane + cube scene ({mode}) ...")

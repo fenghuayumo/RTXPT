@@ -78,6 +78,19 @@ using namespace donut::render;
 
 #include <thread>
 
+namespace
+{
+    constexpr const char* c_InlineSceneSentinel = "__RTXPT_INLINE_SCENE_JSON__";
+
+    bool LooksLikeInlineSceneJson(const std::string& scene)
+    {
+        auto it = std::find_if_not(scene.begin(), scene.end(), [](unsigned char ch) {
+            return std::isspace(ch);
+        });
+        return it != scene.end() && *it == '{';
+    }
+}
+
 #ifdef _WIN32
 // Use discrete GPU by default on laptops.
 extern "C"
@@ -505,10 +518,18 @@ void Sample::Init(const std::string& preferredScene,
             m_sceneFilesAvailable.push_back( file.path().filename().string() );
     }
 
-    std::filesystem::path preferredScenePath(preferredScene);
-    std::string scene = (!preferredScene.empty() && (preferredScenePath.is_absolute() || std::filesystem::exists(preferredScenePath)))
-        ? preferredScene
-        : FindPreferredScene(m_sceneFilesAvailable, preferredScene);
+    std::string scene;
+    if (LooksLikeInlineSceneJson(preferredScene))
+    {
+        scene = preferredScene;
+    }
+    else
+    {
+        std::filesystem::path preferredScenePath(preferredScene);
+        scene = (!preferredScene.empty() && (preferredScenePath.is_absolute() || std::filesystem::exists(preferredScenePath)))
+            ? preferredScene
+            : FindPreferredScene(m_sceneFilesAvailable, preferredScene);
+    }
 
     // Select initial scene
     SetCurrentScene(scene);
@@ -521,8 +542,17 @@ void Sample::SetCurrentScene( const std::string & sceneName, bool forceReload )
     m_currentSceneName = sceneName;
     m_ui.ResetAccumulation = true;
     SetAsynchronousLoadingEnabled( false );
-    std::filesystem::path scenePath(sceneName);
-    if (!scenePath.is_absolute() && !std::filesystem::exists(scenePath))
+
+    const bool inlineScene = LooksLikeInlineSceneJson(sceneName);
+    if (inlineScene)
+        m_inlineSceneJson = sceneName;
+    else
+        m_inlineSceneJson.clear();
+
+    std::filesystem::path scenePath = inlineScene
+        ? std::filesystem::path(c_InlineSceneSentinel)
+        : std::filesystem::path(sceneName);
+    if (!inlineScene && !scenePath.is_absolute() && !std::filesystem::exists(scenePath))
         scenePath = GetLocalPath(c_AssetsFolder) / scenePath;
     m_currentScenePath = scenePath;
     m_progressLoading.Stop();
@@ -620,6 +650,13 @@ bool Sample::LoadScene(std::shared_ptr<vfs::IFileSystem> fs, const std::filesyst
 {
     m_scene = std::shared_ptr<ExtendedScene>( new ExtendedScene(GetDevice(), *m_shaderFactory, fs, m_TextureCache, m_DescriptorTable, std::make_shared<ExtendedSceneTypeFactory>() ) );
     m_progressLoading.Set(10);
+    if (sceneFileName == std::filesystem::path(c_InlineSceneSentinel))
+    {
+        if (m_scene->LoadFromJsonString(m_inlineSceneJson))
+            return true;
+        m_scene = nullptr;
+        return false;
+    }
     if (m_scene->Load(sceneFileName))
         return true;
     m_scene = nullptr;

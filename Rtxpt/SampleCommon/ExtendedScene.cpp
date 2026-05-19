@@ -293,6 +293,23 @@ bool ExtendedScene::LoadWithThreadPool(const std::filesystem::path& jsonFileName
     return true;
 }
 
+bool ExtendedScene::LoadFromJsonString(const std::string& sceneJson, const std::filesystem::path& scenePath)
+{
+    if (!Scene::LoadFromJsonString(sceneJson, scenePath))
+        return false;
+
+    ProcessNodesRecursive(GetSceneGraph()->GetRootNode());
+
+    auto& materials = m_SceneGraph->GetMaterials();
+    for (auto it : materials)
+    {
+        Material& mat = *it;
+        LocalConfig::PostMaterialLoad(mat);
+    }
+
+    return true;
+}
+
 std::shared_ptr<EnvironmentLight> FindEnvironmentLight(std::vector <std::shared_ptr<donut::engine::Light>> lights)
 {
     for (auto light : lights)

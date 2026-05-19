@@ -46,6 +46,13 @@ class Sample;
 class AdvancedPathTracer;
 namespace donut::engine { class ShaderFactory; }
 
+namespace rtxpt_py
+{
+    // Returns a minimal scene JSON string that references an RTXPT builtin
+    // primitive model ("plane", "cube", "sphere", or "plane_cube").
+    std::string BuiltinSceneJson(const std::string& builtinModel = "plane_cube");
+}
+
 class RenderSession
 {
 public:

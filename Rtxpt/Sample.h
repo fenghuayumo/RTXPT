@@ -258,6 +258,7 @@ private:
     std::vector<std::string>                    m_sceneFilesAvailable;
     std::string                                 m_currentSceneName;
     std::filesystem::path                       m_currentScenePath;
+    std::string                                 m_inlineSceneJson;
     std::shared_ptr<ExtendedScene>              m_scene;
     double                                      m_sceneTime = 0.;           // if m_ui.LoopLongestAnimation then it loops with longest animation
     float                                       m_lastDeltaTime = 0.0f;

@@ -26,10 +26,14 @@
 #include <donut/app/UserInterfaceUtils.h>
 
 #include <GLFW/glfw3.h>
+#include <json/json.h>
+#include <algorithm>
 #include <array>
 #include <chrono>
-#include <thread>
+#include <cctype>
+#include <cstring>
 #include <filesystem>
+#include <thread>
 
 #if DONUT_WITH_DX12
 #include <d3d12.h>
@@ -95,6 +99,126 @@ namespace
             return parentDirectory;
 
         return donut::app::GetDirectoryWithExecutable();
+    }
+
+    std::string TrimCopy(const std::string& value)
+    {
+        const auto begin = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) {
+            return std::isspace(ch);
+        });
+        const auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char ch) {
+            return std::isspace(ch);
+        }).base();
+        if (begin >= end)
+            return {};
+        return std::string(begin, end);
+    }
+
+    std::string ToLowerCopy(std::string value)
+    {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+            return char(std::tolower(ch));
+        });
+        return value;
+    }
+
+    bool IsBuiltinModelReference(const std::string& modelName)
+    {
+        return ToLowerCopy(modelName).rfind("builtin:", 0) == 0;
+    }
+
+    std::string NormalizeBuiltinModelName(std::string modelName)
+    {
+        modelName = ToLowerCopy(TrimCopy(modelName));
+        constexpr const char* prefix = "builtin:";
+        if (modelName.rfind(prefix, 0) == 0)
+            modelName.erase(0, std::strlen(prefix));
+
+        for (char& ch : modelName)
+        {
+            if (ch == '-' || ch == ' ')
+                ch = '_';
+        }
+
+        return modelName;
+    }
+
+    Json::Value MakeFloatArray(std::initializer_list<float> values)
+    {
+        Json::Value array(Json::arrayValue);
+        for (float value : values)
+            array.append(value);
+        return array;
+    }
+
+    std::string BuildBuiltinDefaultSceneJson(const std::string& builtinModel)
+    {
+        Json::Value root(Json::objectValue);
+        root["models"].append(std::string("builtin:") + NormalizeBuiltinModelName(builtinModel));
+
+        Json::Value modelNode(Json::objectValue);
+        modelNode["name"] = "DefaultBuiltinModel";
+        modelNode["model"] = 0;
+        root["graph"].append(modelNode);
+
+        Json::Value sun(Json::objectValue);
+        sun["name"] = "Sun";
+        sun["type"] = "DirectionalLight";
+        sun["rotation"] = MakeFloatArray({ -0.23053891f, -0.15879166f, -0.6890466f, 0.6684697f });
+        sun["angularSize"] = 1.5f;
+        sun["color"] = MakeFloatArray({ 1.0f, 0.96f, 0.9f });
+        sun["irradiance"] = 4.0f;
+
+        Json::Value fill(Json::objectValue);
+        fill["name"] = "Fill";
+        fill["type"] = "PointLight";
+        fill["translation"] = MakeFloatArray({ 0.0f, 2.5f, 3.0f });
+        fill["color"] = MakeFloatArray({ 1.0f, 0.95f, 0.85f });
+        fill["intensity"] = 30.0f;
+        fill["radius"] = 0.05f;
+        fill["range"] = 10.0f;
+
+        Json::Value lights(Json::objectValue);
+        lights["name"] = "Lights";
+        lights["children"].append(sun);
+        lights["children"].append(fill);
+        root["graph"].append(lights);
+
+        Json::Value camera(Json::objectValue);
+        camera["name"] = "Default";
+        camera["type"] = "PerspectiveCameraEx";
+        camera["translation"] = MakeFloatArray({ 0.0f, 1.15f, 5.0f });
+        camera["rotation"] = MakeFloatArray({ 0.0f, 0.0f, 0.0f, 1.0f });
+        camera["verticalFov"] = 0.7f;
+        camera["zNear"] = 0.001f;
+        camera["exposureCompensation"] = 1.0f;
+        camera["enableAutoExposure"] = false;
+
+        Json::Value cameras(Json::objectValue);
+        cameras["name"] = "Cameras";
+        cameras["children"].append(camera);
+        root["graph"].append(cameras);
+
+        Json::Value settings(Json::objectValue);
+        settings["name"] = "SampleSettings";
+        settings["type"] = "SampleSettings";
+        settings["realtimeMode"] = true;
+        settings["startingCamera"] = -1;
+        root["graph"].append(settings);
+
+        return SaveJsonToString(root);
+    }
+
+    std::string PrepareSceneArgument(const std::string& sceneArgument)
+    {
+        const std::string trimmed = TrimCopy(sceneArgument);
+        if (trimmed.empty())
+            return sceneArgument;
+
+        if (IsBuiltinModelReference(trimmed))
+            return BuildBuiltinDefaultSceneJson(trimmed);
+
+        return sceneArgument;
     }
 
 #if DONUT_WITH_DX12 && defined(RTXPT_D3D_AGILITY_SDK_VERSION)
@@ -237,9 +361,19 @@ namespace
     }
 }
 
+namespace rtxpt_py
+{
+    std::string BuiltinSceneJson(const std::string& builtinModel)
+    {
+        return BuildBuiltinDefaultSceneJson(builtinModel);
+    }
+}
+
 RenderSession::RenderSession(const Config& cfg)
     : m_config(cfg)
 {
+    m_config.scene = PrepareSceneArgument(cfg.scene);
+
     // Mirror command-line semantics: this is the configuration the rest of
     // the renderer (CaptureScriptManager, Sample::Init, ...) consumes.
     m_cmdLine.width             = uint32_t(cfg.width);
@@ -249,7 +383,7 @@ RenderSession::RenderSession(const Config& cfg)
     m_cmdLine.adapterIndex      = cfg.adapterIndex;
     m_cmdLine.debug             = cfg.debug;
     m_cmdLine.nonInteractive    = cfg.nonInteractive;
-    m_cmdLine.scene             = cfg.scene;
+    m_cmdLine.scene             = m_config.scene;
     m_cmdLine.OverrideToReferenceMode = !cfg.realtimeMode;
     m_cmdLine.OverrideToRealtimeMode  =  cfg.realtimeMode;
     m_cmdLine.ReferenceSamplesPerPixel = cfg.accumulationTarget;
@@ -288,7 +422,7 @@ RenderSession::RenderSession(const Config& cfg)
 
     // If a scene was specified up-front, InitRenderer already requested it.
     // Wait for the first rendered frame instead of reloading the same scene.
-    if (!cfg.scene.empty())
+    if (!m_config.scene.empty())
         WaitUntilReady();
 }
 
@@ -420,7 +554,7 @@ bool RenderSession::LoadScene(const std::string& sceneName, bool waitUntilReady)
     if (!m_initialized || !m_renderer)
         return false;
 
-    m_renderer->SetCurrentScene(sceneName, /*forceReload=*/true);
+    m_renderer->SetCurrentScene(PrepareSceneArgument(sceneName), /*forceReload=*/true);
 
     if (waitUntilReady)
         return WaitUntilReady();
