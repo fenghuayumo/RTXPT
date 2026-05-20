@@ -122,7 +122,7 @@ payload can be adjusted with environment variables:
 
 | Variable | Default | Values |
 | --- | --- | --- |
-| `RTXPT_WHEEL_VERSION` | `0.1.0` | Any PEP 440 version |
+| `RTXPT_WHEEL_VERSION` | `0.2.0` | Any PEP 440 version |
 | `RTXPT_WHEEL_ASSETS` | `minimal` | `minimal`, `full`, `none` |
 | `RTXPT_WHEEL_DYNAMIC_SHADERS` | `bin` | `bin`, `full`, `none` |
 | `RTXPT_WHEEL_SHADER_API` | `d3d12` on Windows, `vulkan` elsewhere | `d3d12`, `vulkan`, `both` |

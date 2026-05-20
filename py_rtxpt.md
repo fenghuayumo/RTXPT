@@ -53,7 +53,7 @@ python -m pip install dist/rtxpt-*.whl
 
 | Variable | Default | Values |
 | --- | --- | --- |
-| `RTXPT_WHEEL_VERSION` | `0.1.0` | 任意 PEP 440 version |
+| `RTXPT_WHEEL_VERSION` | `0.2.0` | 任意 PEP 440 version |
 | `RTXPT_WHEEL_ASSETS` | `minimal` | `minimal`, `full`, `none` |
 | `RTXPT_WHEEL_DYNAMIC_SHADERS` | `bin` | `bin`, `full`, `none` |
 | `RTXPT_WHEEL_SHADER_API` | Windows 为 `d3d12`，其他平台为 `vulkan` | `d3d12`, `vulkan`, `both` |
@@ -240,6 +240,47 @@ if sun:
 r.step_n(8)
 r.save_screenshot("lights.png")
 r.close()
+```
+
+### Deform Mesh Vertices
+
+Mesh deformation works on object-space vertex positions. After `set_mesh_vertices(...)`
+or `deform_mesh(...)`, RTXPT refreshes the mesh GPU buffer and can rebuild ray tracing
+acceleration structures so the edited geometry is used by subsequent frames.
+
+```python
+import math
+import rtxpt
+
+r = rtxpt.Renderer(scene="builtin:cube", headless=True, accumulation_target=8)
+app = r.app
+
+mesh = app.find_mesh("cube") or app.get_meshes()[0]
+vertices = list(app.get_mesh_vertices(mesh))
+
+# Simple soft bulge: move upper vertices upward based on x/z radius.
+deformed = []
+for x, y, z in vertices:
+    radius = math.sqrt(x * x + z * z)
+    lift = 0.15 * max(0.0, 1.0 - radius)
+    deformed.append((x, y + lift, z))
+
+app.set_mesh_vertices(mesh, deformed, recompute_normals=True)
+app.step_until_accumulated()
+r.save_screenshot("deformed_mesh.png")
+r.close()
+```
+
+For callback-style edits, return `None` to keep a vertex unchanged:
+
+```python
+def wave(index, p):
+    x, y, z = p
+    if y < 0:
+        return None
+    return (x, y + 0.05 * math.sin(index * 0.37), z)
+
+app.deform_mesh(mesh, wave, recompute_normals=True)
 ```
 
 ## Module-Level API
@@ -468,6 +509,25 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | `set_environment_map(path)` | `None` | Override scene environment map source. |
 | `get_scene()` | `Scene | None` | Return the current loaded scene. |
 | `get_scene_bounds()` | `tuple | None` | Shortcut for `scene.get_scene_bounds()`. |
+
+### Scene Meshes / Deformation
+
+| API | Return | Notes |
+| --- | --- | --- |
+| `scene.get_meshes()` | `list[Mesh]` | All meshes in the current scene. |
+| `scene.find_mesh(name)` | `Mesh | None` | Match by mesh name. |
+| `scene.mesh_count` | `int` | Number of meshes in the current scene. |
+| `sample.get_meshes()` | `list[Mesh]` | Compatibility alias for `scene.get_meshes()`. |
+| `sample.find_mesh(name)` | `Mesh | None` | Compatibility alias for `scene.find_mesh(name)`. |
+| `sample.get_mesh_vertices(mesh)` | `list[tuple]` | Returns object-space `(x, y, z)` vertex positions. |
+| `sample.set_mesh_vertices(mesh, vertices, recompute_normals=True, rebuild_acceleration_structure=True)` | `None` | Replaces all positions. `vertices` must contain exactly `mesh.vertex_count` triples. |
+| `sample.deform_mesh(mesh, callback, recompute_normals=True, rebuild_acceleration_structure=True)` | `int` | Calls `callback(index, (x, y, z))` for each vertex. Return a new triple or `None`; returns edited vertex count. |
+
+`set_mesh_vertices(...)` updates object-space mesh bounds, optionally recomputes normals,
+refreshes GPU vertex data, resets accumulation, and requests acceleration structure rebuild
+by default. Keep `rebuild_acceleration_structure=True` for ray tracing-correct geometry.
+Only set it to `False` when batching several edits and calling `request_accel_rebuild()`
+after the final update.
 
 ### Scene Bounds
 
@@ -794,9 +854,31 @@ Returned by `Scene.find_node()` and `Sample.find_node()`.
 | --- | --- |
 | `name` | `str` |
 | `path` | `str` |
+| `mesh` | `Mesh | None` |
+| `is_mesh` | `bool` |
 | `translation` | `(x, y, z)` |
 | `scaling` | `(x, y, z)` |
 | `bounds` | `((min.xyz), (max.xyz)) \| None` |
+
+## `Mesh` Class
+
+Returned by `Scene.get_meshes()`, `Scene.find_mesh()`, `Sample.get_meshes()`,
+`Sample.find_mesh()`, and `SceneNode.mesh`.
+
+Read-only properties:
+
+| Property | Type | Notes |
+| --- | --- | --- |
+| `name` | `str` | Mesh name from the source model or builtin primitive. |
+| `global_mesh_index` | `int` | Internal scene mesh index. |
+| `vertex_count` | `int` | Number of object-space positions expected by `set_mesh_vertices(...)`. |
+| `index_count` | `int` | Total index count. |
+| `geometry_count` | `int` | Number of mesh geometry groups/submeshes. |
+| `bounds` | `((min.xyz), (max.xyz)) \| None` | Object-space mesh AABB. |
+
+Vertex data is intentionally edited through `Sample`, not through writable `Mesh`
+properties, because changing vertices also needs renderer-side GPU buffer refresh and
+acceleration-structure invalidation.
 
 ## `Light` Classes
 

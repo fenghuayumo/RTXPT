@@ -91,6 +91,11 @@ public:
     bool                                    LoadObjMeshFile(const std::filesystem::path& filePath);
     void                                    FinalizeRuntimeSceneMutation(const std::shared_ptr<donut::engine::SceneGraphNode>& importedRoot);
     void                                    RequestFullRebuild();
+    std::vector<donut::math::float3>        GetMeshVertices(const std::shared_ptr<donut::engine::MeshInfo>& mesh) const;
+    void                                    SetMeshVertices(const std::shared_ptr<donut::engine::MeshInfo>& mesh,
+                                                            const std::vector<donut::math::float3>& vertices,
+                                                            bool recomputeNormals = true,
+                                                            bool rebuildAccelerationStructure = true);
     
     void                                    CollectUncompressedTextures();
     auto &                                  GetUncompressedTextures()               { return m_uncompressedTextures; }

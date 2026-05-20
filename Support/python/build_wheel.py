@@ -223,7 +223,7 @@ def build_wheel() -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a local RTXPT Python wheel from bin/.")
-    parser.add_argument("--version", default="0.1.0", help="Wheel package version.")
+    parser.add_argument("--version", default="0.2.0", help="Wheel package version.")
     parser.add_argument(
         "--assets",
         choices=["minimal", "full", "none"],

@@ -32,6 +32,7 @@
 #include <cstdlib>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -4077,6 +4078,185 @@ void Sample::RequestFullRebuild()
     m_bindingSet = nullptr;
     if (m_bindingCache)
         m_bindingCache->Clear();
+}
+
+std::vector<float3> Sample::GetMeshVertices(const std::shared_ptr<MeshInfo>& mesh) const
+{
+    if (!mesh)
+        throw std::runtime_error("GetMeshVertices: mesh is null");
+    if (!mesh->buffers)
+        throw std::runtime_error("GetMeshVertices: mesh has no buffer group");
+    if (mesh->totalVertices == 0)
+        return {};
+
+    const auto& positions = mesh->buffers->positionData;
+    const size_t begin = size_t(mesh->vertexOffset);
+    const size_t end = begin + size_t(mesh->totalVertices);
+    if (positions.size() < end)
+        throw std::runtime_error("GetMeshVertices: CPU vertex cache is unavailable; reload the scene with the Python deformation build");
+
+    return std::vector<float3>(positions.begin() + begin, positions.begin() + end);
+}
+
+static float3 NormalizeOrFallbackForDeform(const float3& v, const float3& fallback)
+{
+    const float len2 = dot(v, v);
+    if (len2 <= 1e-20f || !std::isfinite(len2))
+        return fallback;
+    return v * (1.0f / std::sqrt(len2));
+}
+
+static void RecomputeMeshNormalsFromPositions(const std::shared_ptr<MeshInfo>& mesh)
+{
+    auto& buffers = *mesh->buffers;
+    const size_t vertexBegin = size_t(mesh->vertexOffset);
+    const size_t vertexEnd = vertexBegin + size_t(mesh->totalVertices);
+
+    if (buffers.normalData.size() < vertexEnd || buffers.indexData.empty())
+        return;
+
+    std::vector<float3> accumulated(mesh->totalVertices, float3(0.0f));
+
+    for (const auto& geometry : mesh->geometries)
+    {
+        if (!geometry || geometry->type != MeshGeometryPrimitiveType::Triangles)
+            continue;
+
+        const size_t indexBegin = size_t(mesh->indexOffset) + size_t(geometry->indexOffsetInMesh);
+        const size_t indexEnd = indexBegin + size_t(geometry->numIndices);
+        if (buffers.indexData.size() < indexEnd)
+            continue;
+
+        for (size_t i = indexBegin; i + 2 < indexEnd; i += 3)
+        {
+            uint32_t local[3] = {
+                buffers.indexData[i + 0],
+                buffers.indexData[i + 1],
+                buffers.indexData[i + 2]
+            };
+
+            const uint32_t maxIndex = std::max(local[0], std::max(local[1], local[2]));
+            if (maxIndex < geometry->numVertices)
+            {
+                local[0] += geometry->vertexOffsetInMesh;
+                local[1] += geometry->vertexOffsetInMesh;
+                local[2] += geometry->vertexOffsetInMesh;
+            }
+
+            if (local[0] >= mesh->totalVertices || local[1] >= mesh->totalVertices || local[2] >= mesh->totalVertices)
+                continue;
+
+            const float3& p0 = buffers.positionData[vertexBegin + local[0]];
+            const float3& p1 = buffers.positionData[vertexBegin + local[1]];
+            const float3& p2 = buffers.positionData[vertexBegin + local[2]];
+            const float3 faceNormal = NormalizeOrFallbackForDeform(cross(p1 - p0, p2 - p0), float3(0.0f, 1.0f, 0.0f));
+
+            accumulated[local[0]] += faceNormal;
+            accumulated[local[1]] += faceNormal;
+            accumulated[local[2]] += faceNormal;
+        }
+    }
+
+    for (uint32_t i = 0; i < mesh->totalVertices; ++i)
+    {
+        const float3 normal = NormalizeOrFallbackForDeform(accumulated[i], float3(0.0f, 1.0f, 0.0f));
+        buffers.normalData[vertexBegin + i] = vectorToSnorm8(normal);
+    }
+}
+
+static void UpdateMeshBoundsFromPositions(const std::shared_ptr<MeshInfo>& mesh)
+{
+    auto& buffers = *mesh->buffers;
+    const size_t vertexBegin = size_t(mesh->vertexOffset);
+    const size_t vertexEnd = vertexBegin + size_t(mesh->totalVertices);
+    if (buffers.positionData.size() < vertexEnd)
+        return;
+
+    mesh->objectSpaceBounds = box3::empty();
+    for (const auto& geometry : mesh->geometries)
+    {
+        if (!geometry)
+            continue;
+
+        box3 bounds = box3::empty();
+        const size_t geomBegin = vertexBegin + size_t(geometry->vertexOffsetInMesh);
+        const size_t geomEnd = std::min(vertexEnd, geomBegin + size_t(geometry->numVertices));
+        for (size_t i = geomBegin; i < geomEnd; ++i)
+            bounds |= buffers.positionData[i];
+
+        geometry->objectSpaceBounds = bounds;
+        mesh->objectSpaceBounds |= bounds;
+    }
+}
+
+void Sample::SetMeshVertices(const std::shared_ptr<MeshInfo>& mesh,
+                             const std::vector<float3>& vertices,
+                             bool recomputeNormals,
+                             bool rebuildAccelerationStructure)
+{
+    if (!mesh)
+        throw std::runtime_error("SetMeshVertices: mesh is null");
+    if (!mesh->buffers)
+        throw std::runtime_error("SetMeshVertices: mesh has no buffer group");
+    if (vertices.size() != size_t(mesh->totalVertices))
+        throw std::runtime_error("SetMeshVertices: vertex count does not match mesh.total_vertices");
+
+    auto& buffers = *mesh->buffers;
+    const size_t begin = size_t(mesh->vertexOffset);
+    const size_t end = begin + vertices.size();
+    if (buffers.positionData.size() < end)
+        throw std::runtime_error("SetMeshVertices: CPU vertex cache is unavailable; reload the scene with the Python deformation build");
+
+    std::copy(vertices.begin(), vertices.end(), buffers.positionData.begin() + begin);
+    UpdateMeshBoundsFromPositions(mesh);
+
+    if (recomputeNormals)
+        RecomputeMeshNormalsFromPositions(mesh);
+
+    if (buffers.vertexBuffer)
+    {
+        GetDevice()->waitForIdle();
+        buffers.vertexBuffer = nullptr;
+        buffers.vertexBufferDescriptor.reset();
+        buffers.vertexBufferRanges.fill(nvrhi::BufferRange());
+    }
+
+    std::vector<std::shared_ptr<SceneGraphNode>> affectedNodes;
+    if (m_scene && m_scene->GetSceneGraph())
+    {
+        for (const auto& instance : m_scene->GetSceneGraph()->GetMeshInstances())
+        {
+            if (instance && instance->GetMesh() == mesh)
+            {
+                if (auto node = instance->GetNodeSharedPtr())
+                    affectedNodes.push_back(node);
+            }
+        }
+    }
+
+    for (const auto& node : affectedNodes)
+    {
+        if (node && node->GetLeaf())
+        {
+            auto leaf = node->GetLeaf();
+            node->SetLeaf(leaf);
+        }
+    }
+
+    if (m_scene)
+        m_scene->FinishedLoading(GetFrameIndex());
+
+    if (m_materialsBaker != nullptr)
+        m_materialsBaker->SceneReloaded();
+    if (m_lightsBaker != nullptr)
+        m_lightsBaker->SceneReloaded();
+    if (m_ommBaker != nullptr && m_scene)
+        m_ommBaker->SceneLoaded(*m_scene);
+
+    if (rebuildAccelerationStructure)
+        RequestFullRebuild();
+    else
+        m_ui.ResetAccumulation = true;
 }
 
 void Sample::PathTrace(nvrhi::IFramebuffer* framebuffer, const SampleConstants & constants)

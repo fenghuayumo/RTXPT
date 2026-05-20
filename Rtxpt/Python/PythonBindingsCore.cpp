@@ -200,6 +200,53 @@ namespace
         return nullptr;
     }
 
+    std::vector<std::shared_ptr<MeshInfo>> GetSceneMeshes(const std::shared_ptr<SceneGraph>& sceneGraph)
+    {
+        std::vector<std::shared_ptr<MeshInfo>> result;
+        if (!sceneGraph)
+            return result;
+
+        for (const auto& mesh : sceneGraph->GetMeshes())
+            result.push_back(mesh);
+        return result;
+    }
+
+    std::shared_ptr<MeshInfo> FindSceneMesh(const std::shared_ptr<SceneGraph>& sceneGraph, const std::string& name)
+    {
+        if (!sceneGraph)
+            return nullptr;
+
+        for (const auto& mesh : sceneGraph->GetMeshes())
+        {
+            if (mesh && mesh->name == name)
+                return mesh;
+        }
+        return nullptr;
+    }
+
+    std::shared_ptr<MeshInfo> MeshFromNode(const SceneGraphNode& node)
+    {
+        auto meshInstance = std::dynamic_pointer_cast<MeshInstance>(node.GetLeaf());
+        return meshInstance ? meshInstance->GetMesh() : nullptr;
+    }
+
+    std::vector<float3> ToFloat3Vector(const nb::object& src)
+    {
+        nb::sequence seq = nb::cast<nb::sequence>(src);
+        std::vector<float3> result;
+        for (auto h : seq)
+            result.push_back(ToFloat3(nb::borrow<nb::object>(h)));
+        return result;
+    }
+
+    nb::list Float3VectorToList(const std::vector<float3>& vertices)
+    {
+        nb::list result;
+        for (const float3& v : vertices)
+            result.append(Float3ToTuple(v));
+        return result;
+    }
+
     bool IsFiniteBox(const donut::math::box3& bounds)
     {
         return donut::math::all(donut::math::isfinite(bounds.m_mins))
@@ -540,10 +587,33 @@ void RegisterCoreBindings(nb::module_& m)
         .def_rw("rotation", &EnvironmentLight::rotation)
         .def_rw("path", &EnvironmentLight::path);
 
+    nb::class_<MeshInfo>(m, "Mesh",
+        "CPU/GPU mesh wrapper. Use Sample.get_mesh_vertices(mesh) and\n"
+        "Sample.set_mesh_vertices(mesh, vertices) for deformation.")
+        .def_ro("name", &MeshInfo::name)
+        .def_ro("global_mesh_index", &MeshInfo::globalMeshIndex)
+        .def_ro("vertex_count", &MeshInfo::totalVertices)
+        .def_ro("index_count", &MeshInfo::totalIndices)
+        .def_prop_ro("geometry_count", [](MeshInfo& self) { return self.geometries.size(); })
+        .def_prop_ro("bounds", [](MeshInfo& self) -> nb::object {
+                return SceneBoundsTuple(ValidSceneBounds(self.objectSpaceBounds));
+            },
+            "Object-space `((min.xyz), (max.xyz))` AABB for this mesh.")
+        .def("__repr__", [](MeshInfo& self) {
+                return std::string("<rtxpt.Mesh '") + self.name
+                    + "' vertices=" + std::to_string(self.totalVertices) + ">";
+            });
+
     nb::class_<SceneGraphNode>(m, "SceneNode",
         "Scene graph node wrapper for runtime mesh/light/camera transforms.")
         .def_prop_ro("name", [](SceneGraphNode& self) { return self.GetName(); })
         .def_prop_ro("path", [](SceneGraphNode& self) { return self.GetPath().generic_string(); })
+        .def_prop_ro("mesh", [](SceneGraphNode& self) {
+                return MeshFromNode(self);
+            }, "Mesh attached to this node, or None when the node is not a mesh instance.")
+        .def_prop_ro("is_mesh", [](SceneGraphNode& self) {
+                return MeshFromNode(self) != nullptr;
+            })
         .def_prop_rw("translation",
             [](SceneGraphNode& self) { return Double3ToTuple(self.GetTranslation()); },
             [](SceneGraphNode& self, nb::object v) { self.SetTranslation(ToDouble3(v)); },
@@ -587,11 +657,21 @@ void RegisterCoreBindings(nb::module_& m)
         .def("find_node", [](Scene& self, const std::string& path) {
                 return FindSceneNode(self.GetSceneGraph(), path);
             }, nb::arg("path"), "Look up a scene graph node by name or path.")
+        .def("get_meshes", [](Scene& self) {
+                return GetSceneMeshes(self.GetSceneGraph());
+            }, "Return every Mesh in this scene.")
+        .def("find_mesh", [](Scene& self, const std::string& name) {
+                return FindSceneMesh(self.GetSceneGraph(), name);
+            }, nb::arg("name"), "Look up a mesh by mesh name.")
 
         .def_prop_ro("material_count", [](Scene& self) {
                 auto sceneGraph = self.GetSceneGraph();
                 return sceneGraph ? GetSceneMaterials(sceneGraph).size() : size_t(0);
             }, "Number of PTMaterial instances in this scene.")
+        .def_prop_ro("mesh_count", [](Scene& self) {
+                auto sceneGraph = self.GetSceneGraph();
+                return sceneGraph ? sceneGraph->GetMeshes().size() : size_t(0);
+            }, "Number of meshes in this scene.")
         .def_prop_ro("light_count", [](Scene& self) {
                 auto sceneGraph = self.GetSceneGraph();
                 return sceneGraph ? sceneGraph->GetLights().size() : size_t(0);
@@ -939,6 +1019,43 @@ void RegisterCoreBindings(nb::module_& m)
         .def("find_node", [](Sample& self, const std::string& path) -> std::shared_ptr<SceneGraphNode> {
                 return FindSceneNode(SceneGraphFromScene(self.GetScene()), path);
             }, nb::arg("path"), "Compatibility alias for `sample.scene.find_node(path)`.")
+
+        .def("get_meshes", [](Sample& self) {
+                return GetSceneMeshes(SceneGraphFromScene(self.GetScene()));
+            }, "Compatibility alias for `sample.scene.get_meshes()`.")
+        .def("find_mesh", [](Sample& self, const std::string& name) -> std::shared_ptr<MeshInfo> {
+                return FindSceneMesh(SceneGraphFromScene(self.GetScene()), name);
+            }, nb::arg("name"), "Compatibility alias for `sample.scene.find_mesh(name)`.")
+        .def("get_mesh_vertices", [](Sample& self, const std::shared_ptr<MeshInfo>& mesh) {
+                return Float3VectorToList(self.GetMeshVertices(mesh));
+            }, nb::arg("mesh"),
+            "Return mesh positions as a list of (x, y, z) tuples in object space.")
+        .def("set_mesh_vertices",
+            [](Sample& self, const std::shared_ptr<MeshInfo>& mesh, nb::object vertices,
+               bool recomputeNormals, bool rebuildAccelerationStructure) {
+                self.SetMeshVertices(mesh, ToFloat3Vector(vertices), recomputeNormals, rebuildAccelerationStructure);
+            },
+            nb::arg("mesh"), nb::arg("vertices"), nb::arg("recompute_normals") = true,
+            nb::arg("rebuild_acceleration_structure") = true,
+            "Replace all object-space positions for a mesh and refresh GPU buffers.\n"
+            "`vertices` must contain exactly mesh.vertex_count triples.")
+        .def("deform_mesh",
+            [](Sample& self, const std::shared_ptr<MeshInfo>& mesh, nb::object callback,
+               bool recomputeNormals, bool rebuildAccelerationStructure) {
+                std::vector<float3> vertices = self.GetMeshVertices(mesh);
+                for (size_t i = 0; i < vertices.size(); ++i)
+                {
+                    nb::object updated = callback(i, Float3ToTuple(vertices[i]));
+                    if (!updated.is_none())
+                        vertices[i] = ToFloat3(updated);
+                }
+                self.SetMeshVertices(mesh, vertices, recomputeNormals, rebuildAccelerationStructure);
+                return vertices.size();
+            },
+            nb::arg("mesh"), nb::arg("callback"), nb::arg("recompute_normals") = true,
+            nb::arg("rebuild_acceleration_structure") = true,
+            "Apply a Python callback to each vertex. callback(index, (x,y,z))\n"
+            "may return a replacement triple, or None to keep the vertex unchanged.")
 
         .def("set_environment_map", [](Sample& self, const std::string& path) {
                 self.SetEnvMapOverrideSource(path);
