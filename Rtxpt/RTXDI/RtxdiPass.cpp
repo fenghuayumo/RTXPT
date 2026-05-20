@@ -129,7 +129,8 @@ void RtxdiPass::CreatePipelines(nvrhi::BindingLayoutHandle extraBindingLayout /*
 	
 	std::vector<donut::engine::ShaderMacro> finalShadingMacros = { { "USE_RAY_QUERY", "1" } };
 #if NVRHI_D3D12_WITH_DXR12_OPACITY_MICROMAP
-	finalShadingMacros.push_back({ "NVRHI_D3D12_WITH_DXR12_OPACITY_MICROMAP", "1" });
+	if (m_device->getGraphicsAPI() == nvrhi::GraphicsAPI::D3D12)
+		finalShadingMacros.push_back({ "NVRHI_D3D12_WITH_DXR12_OPACITY_MICROMAP", "1" });
 #endif // NVRHI_D3D12_WITH_DXR12_OPACITY_MICROMAP
 	m_FinalSamplingPass.Init(m_device, *m_shaderFactory, "app/RTXDI/DIFinalShading.hlsl", "main", finalShadingMacros, m_bindingLayout, extraBindingLayout, m_bindlessLayout);
 	

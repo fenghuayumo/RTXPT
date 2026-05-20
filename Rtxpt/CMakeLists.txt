@@ -54,7 +54,8 @@ set(rtxpt_shaders ${project}_shaders)
 if (WIN32)
 set(SHADERMAKE_OPTIONS_DXIL "-D ENABLE_DEBUG_PRINT")
 #set(SHADERMAKE_OPTIONS_SPIRV "-D ENABLE_DEBUG_PRINT") # Disable SPIRV debug printf since it causes DXC to crash as of dxc 1.8.2505
-set(SHADERMAKE_OPTIONS_SPIRV "")
+# SPIR-V cannot compile DX12 OMM ray-query variants (see shaders.cfg); match Linux.
+set(SHADERMAKE_OPTIONS_SPIRV "-D NVRHI_D3D12_WITH_DXR12_OPACITY_MICROMAP=0 -D SPIRV")
 else()
 # DXIL is irrelevant on Linux
 set(SHADERMAKE_OPTIONS_DXIL "")
@@ -76,31 +77,37 @@ if(RTXPT_D3D_AGILITY_SDK_VERSION AND (RTXPT_D3D_AGILITY_SDK_VERSION GREATER_EQUA
 endif()
 
 # SPIR-V builds cannot compile the DX12 OMM shader variants in shaders.cfg.
-set(rtxpt_shader_config "${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg")
-if (NOT WIN32)
-    file(READ "${rtxpt_shader_config}" rtxpt_shader_config_contents)
-    string(REGEX REPLACE "[^\n]*NVRHI_D3D12_WITH_DXR12_OPACITY_MICROMAP=1[^\n]*\n?" "" rtxpt_shader_config_contents "${rtxpt_shader_config_contents}")
-    set(rtxpt_shader_config "${CMAKE_CURRENT_SOURCE_DIR}/shaders_vk.cfg")
-    file(WRITE "${rtxpt_shader_config}" "${rtxpt_shader_config_contents}")
-endif()
+set(rtxpt_shader_config_dxil "${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg")
+set(rtxpt_shader_config_vk "${CMAKE_CURRENT_SOURCE_DIR}/shaders_vk.cfg")
+file(READ "${rtxpt_shader_config_dxil}" rtxpt_shader_config_vk_contents)
+string(REGEX REPLACE "[^\n]*NVRHI_D3D12_WITH_DXR12_OPACITY_MICROMAP=1[^\n]*\n?" "" rtxpt_shader_config_vk_contents "${rtxpt_shader_config_vk_contents}")
+file(WRITE "${rtxpt_shader_config_vk}" "${rtxpt_shader_config_vk_contents}")
 
-set(rtxpt_shader_compile_args
+set(rtxpt_shader_compile_common
     TARGET rtxpt_shaders
-    CONFIG ${rtxpt_shader_config}
     SOURCES ${shaders}
     FOLDER ${folder}
-    SPIRV_DXC ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/${project}/spirv
     INCLUDES ${CMAKE_SOURCE_DIR}/External/Nrd/Shaders/Include ${CMAKE_SOURCE_DIR}/External/Rtxdi/Include ${CMAKE_SOURCE_DIR}/External
     SHADERMAKE_OPTIONS ${shadermake_options}
-    SHADERMAKE_OPTIONS_DXIL ${SHADERMAKE_OPTIONS_DXIL}
-    SHADERMAKE_OPTIONS_SPIRV ${SHADERMAKE_OPTIONS_SPIRV}
 )
 if (WIN32)
-    list(APPEND rtxpt_shader_compile_args
+    donut_compile_shaders(${rtxpt_shader_compile_common}
+        CONFIG ${rtxpt_shader_config_dxil}
         DXIL ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/${project}/dxil
+        SHADERMAKE_OPTIONS_DXIL ${SHADERMAKE_OPTIONS_DXIL}
+    )
+    donut_compile_shaders(${rtxpt_shader_compile_common}
+        CONFIG ${rtxpt_shader_config_vk}
+        SPIRV_DXC ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/${project}/spirv
+        SHADERMAKE_OPTIONS_SPIRV ${SHADERMAKE_OPTIONS_SPIRV}
+    )
+else()
+    donut_compile_shaders(${rtxpt_shader_compile_common}
+        CONFIG ${rtxpt_shader_config_vk}
+        SPIRV_DXC ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ShaderPrecompiled/${project}/spirv
+        SHADERMAKE_OPTIONS_SPIRV ${SHADERMAKE_OPTIONS_SPIRV}
     )
 endif()
-donut_compile_shaders(${rtxpt_shader_compile_args})
 
 
 ##########################################################################
