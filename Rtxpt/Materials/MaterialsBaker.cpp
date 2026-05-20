@@ -812,6 +812,30 @@ static std::string MacrosToString( const std::vector<donut::engine::ShaderMacro>
     return result;
 }
 
+static void InitializeStableShaderIdentity(MaterialShaderPermutation& msp)
+{
+    if (msp.Macros.size() == 1
+        && msp.Macros[0].name == "RTXPT_MATERIAL_PERMUTATIONS_ENABLED"
+        && msp.Macros[0].definition == "0")
+    {
+        msp.StableShaderName = "Ubershader";
+        msp.StableShaderID = -1;
+        return;
+    }
+
+    const std::string stableKey = msp.ShaderFilePath + ", " + MacrosToString(msp.Macros);
+    const auto hash = HashMyString(stableKey);
+    const std::string hashHex = picosha2::bytes_to_hex_string(hash.begin(), hash.end());
+
+    msp.StableShaderName = "M" + hashHex.substr(0, 16);
+    const uint32_t stableID =
+        (uint32_t(hash[0]) << 24) |
+        (uint32_t(hash[1]) << 16) |
+        (uint32_t(hash[2]) << 8) |
+        uint32_t(hash[3]);
+    msp.StableShaderID = int(stableID & 0x7fffffff);
+}
+
 // MaterialShaderPermutation::MaterialShaderPermutation(const std::string & shaderFilePath, const std::string & closestHitName, const std::string & anyHitName, const std::vector<std::pair<std::string, std::string>> & macros )
 
 
@@ -826,7 +850,9 @@ void MaterialsBaker::BakeShaderPermutations()
     // first generate ubershader variant - that will likely go away in the future
     std::vector<donut::engine::ShaderMacro> macros;
     macros.push_back({ "RTXPT_MATERIAL_PERMUTATIONS_ENABLED", "0" });
-    m_ubershader = std::make_shared<MaterialShaderPermutation>(MaterialShaderPermutation{ .ShaderFilePath = m_relativeShaderSourcePath, .Macros = macros } );
+    MaterialShaderPermutation ubershader{ .ShaderFilePath = m_relativeShaderSourcePath, .Macros = macros };
+    InitializeStableShaderIdentity(ubershader);
+    m_ubershader = std::make_shared<MaterialShaderPermutation>(ubershader);
     m_ubershader->UniqueMaterialName = "Ubershader";
 
     // now generate per-material permutations (some materials will automatically share same permutation)
@@ -835,6 +861,7 @@ void MaterialsBaker::BakeShaderPermutations()
     for (auto& materialPT : m_materials)
     {
         MaterialShaderPermutation variant = materialPT->ComputeShaderPermutation(m_relativeShaderSourcePath);
+        InitializeStableShaderIdentity(variant);
         MaterialShaderPermutationKey key(variant);
         std::shared_ptr<MaterialShaderPermutation> ptVariant;
         auto findV = m_shaderPermutations.find(variant);

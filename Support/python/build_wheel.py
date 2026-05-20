@@ -221,6 +221,24 @@ def build_wheel() -> Path:
     raise RuntimeError("pip did not produce an rtxpt wheel")
 
 
+def run_dynamic_shader_precompile(args: argparse.Namespace) -> None:
+    shader_apis = ["d3d12", "vulkan"] if args.shader_api == "both" else [args.shader_api]
+    for shader_api in shader_apis:
+        command = [
+            sys.executable,
+            str(ROOT / "Support" / "python" / "precompile_dynamic_shaders.py"),
+            "--shader-api",
+            shader_api,
+            "--modes",
+            args.precompile_modes,
+            "--frames",
+            str(args.precompile_frames),
+        ]
+        for scene in args.precompile_scene or []:
+            command.extend(["--scene", scene])
+        subprocess.run(command, check=True, cwd=ROOT)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a local RTXPT Python wheel from bin/.")
     parser.add_argument("--version", default="0.2.0", help="Wheel package version.")
@@ -251,6 +269,33 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--precompile-dynamic-shaders",
+        action="store_true",
+        help=(
+            "Before staging the wheel, launch the local rtxpt extension headlessly "
+            "to generate ShaderDynamic/Bin entries for selected scenes."
+        ),
+    )
+    parser.add_argument(
+        "--precompile-scene",
+        action="append",
+        help=(
+            "Scene used by --precompile-dynamic-shaders. Repeat for multiple scenes. "
+            "Defaults to builtin:plane_cube."
+        ),
+    )
+    parser.add_argument(
+        "--precompile-modes",
+        default="reference,realtime",
+        help="Comma/semicolon separated modes for shader precompile: reference,realtime.",
+    )
+    parser.add_argument(
+        "--precompile-frames",
+        type=int,
+        default=1,
+        help="Frames to render per precompile scene/mode.",
+    )
     return parser.parse_args()
 
 
@@ -273,6 +318,11 @@ def main() -> int:
     shutil.copytree(PYTHON_PACKAGE_DIR, package_dir)
 
     dynamic_shaders = "none" if args.no_dynamic_shader_bin else args.dynamic_shaders
+
+    if args.precompile_dynamic_shaders:
+        if dynamic_shaders == "none":
+            print("WARNING: --precompile-dynamic-shaders used while dynamic shader bins are omitted.")
+        run_dynamic_shader_precompile(args)
 
     copy_runtime_files(
         package_dir,

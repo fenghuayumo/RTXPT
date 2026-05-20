@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 from setuptools import Distribution, setup
@@ -18,6 +19,7 @@ from build_wheel import (  # noqa: E402
     PYTHON_PACKAGE_DIR,
     copy_runtime_files,
     directory_size,
+    run_dynamic_shader_precompile,
 )
 
 
@@ -27,6 +29,18 @@ def env_choice(name: str, default: str, choices: set[str]) -> str:
         allowed = ", ".join(sorted(choices))
         raise RuntimeError(f"{name} must be one of: {allowed}")
     return value
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_list(name: str) -> list[str]:
+    value = os.environ.get(name, "")
+    return [item.strip() for item in value.replace(";", ",").split(",") if item.strip()]
 
 
 class BinaryDistribution(Distribution):
@@ -63,6 +77,16 @@ class BuildPyWithRuntime(_build_py):
                 "RTXPT_WHEEL_SHADER_API=d3d12 is only valid on Windows. "
                 "Use RTXPT_WHEEL_SHADER_API=vulkan on Linux."
             )
+
+        if env_bool("RTXPT_WHEEL_PRECOMPILE_DYNAMIC_SHADERS"):
+            if dynamic_shaders == "none":
+                print("WARNING: RTXPT_WHEEL_PRECOMPILE_DYNAMIC_SHADERS is set while dynamic shader bins are omitted.")
+            run_dynamic_shader_precompile(SimpleNamespace(
+                shader_api=shader_api,
+                precompile_modes=os.environ.get("RTXPT_WHEEL_PRECOMPILE_MODES", "reference,realtime"),
+                precompile_frames=int(os.environ.get("RTXPT_WHEEL_PRECOMPILE_FRAMES", "1")),
+                precompile_scene=env_list("RTXPT_WHEEL_PRECOMPILE_SCENES"),
+            ))
 
         copy_runtime_files(
             package_dir,

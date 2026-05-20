@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 
@@ -53,6 +54,8 @@ struct MaterialShaderPermutation
     // runtime data
     int                 IndexInTable            = -1;
     std::string         UniqueMaterialName      = "";               // not deterministic! but useful for debugging anyway
+    std::string         StableShaderName        = "";               // deterministic entry-point suffix derived from shader codegen inputs
+    int                 StableShaderID          = -1;               // deterministic debug ID; -1 keeps ubershader color at 0
 
     //MaterialShaderPermutation(const std::string & shaderFilePath, const std::string & closestHitName, const std::string & anyHitName, const std::vector<std::pair<std::string, std::string>> & macros );
 };

@@ -53,16 +53,10 @@ void PTPipelineVariant::ShaderPermutation::FromMaterialPermutation(const std::st
     CombinedAndSpecializedMacros = macros;
     for (auto& macro : msp.Macros)
         CombinedAndSpecializedMacros.push_back(macro);
-    #if PIPELINE_BAKER_ENABLE_VERBOSE_FUNCTION_NAMING
-    std::string cleanNameSuffix = msp.UniqueMaterialName;
-    #else
-    std::string cleanNameSuffix = "unk";
-    #endif
-
-    PermutationName = shortUniqueDebugID + "_" + cleanNameSuffix;
+    PermutationName = shortUniqueDebugID + "_" + msp.StableShaderName;
     CombinedAndSpecializedMacros.push_back( {"RTXPT_MATERIAL_PERMUTATION_NAME", PermutationName } );  // used to rename ClosestHit (and, if any, AnyHit) to something readable in profilers and etc
 
-    CombinedAndSpecializedMacros.push_back( {"RTXPT_SHADER_ID", std::to_string(msp.IndexInTable) } );  // used to rename ClosestHit (and, if any, AnyHit) to something readable in profilers and etc
+    CombinedAndSpecializedMacros.push_back( {"RTXPT_SHADER_ID", std::to_string(msp.StableShaderID) } );  // used for stable shader debug coloring
 }
 
 void PTPipelineVariant::ShaderPermutation::CompileIfNeeded()
@@ -107,7 +101,7 @@ PTPipelineVariant::PTPipelineVariant(const std::string & relativeSourcePath, con
 {
     m_raygen.SetPath(relativeSourcePath);
 
-    // short unique ID is only for debugging purposes - it will be baked into the shader as a part of the RTXPT_MATERIAL_PERMUTATION_NAME and also used to name ClosestHit and AnyHit
+    // short unique ID distinguishes exports between pipeline variants and must be safe for HLSL entry point names
 #if PIPELINE_BAKER_ENABLE_VERBOSE_FUNCTION_NAMING
     m_shortUniqueDebugID = StripNonAsciiAlnum(shortUniqueDebugID);
     assert( shortUniqueDebugID == m_shortUniqueDebugID ); // short unique debug ID must not contain any of the forbidden characters or bad things will happen, very bad
@@ -469,9 +463,9 @@ std::string HitGroupInfo::GetExportName() const { return "HitGroup_" + std::to_s
 
 
 #if PIPELINE_BAKER_ENABLE_VERBOSE_FUNCTION_NAMING
-std::string HitGroupInfo::GetShaderPermutationName() const { return MaterialShaderPermutation->UniqueMaterialName; }
+std::string HitGroupInfo::GetShaderPermutationName() const { return MaterialShaderPermutation->StableShaderName; }
 #else
-std::string HitGroupInfo::GetShaderPermutationName() const { return "unk"; }
+std::string HitGroupInfo::GetShaderPermutationName() const { return MaterialShaderPermutation->StableShaderName; }
 #endif
 
 int HitGroupInfo::GetShaderPermutationIndex() const { return MaterialShaderPermutation->IndexInTable; }
