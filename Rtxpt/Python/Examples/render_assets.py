@@ -41,13 +41,9 @@ IMPORTED_MODEL_BASE_COLOR = (0.72, 0.84, 1.0)
 
 
 def configure_import_path() -> None:
-    try:
-        import rtxpt  # noqa: F401
-
-        return
-    except ImportError:
-        pass
-
+    # Prefer a local build (bin/) over an installed pip package. A bare
+    # "import rtxpt" would load site-packages first while ShaderPrecompiled
+    # and the .pyd next to the repo may be newer or the only complete copy.
     candidates = [
         REPO_ROOT / "bin",
         REPO_ROOT / "build-linux" / "bin",
@@ -56,10 +52,20 @@ def configure_import_path() -> None:
     ]
     for candidate in candidates:
         if glob.glob(str(candidate / "rtxpt*.pyd")) or glob.glob(str(candidate / "rtxpt*.so")):
+            for name in list(sys.modules):
+                if name == "rtxpt" or name.startswith("rtxpt."):
+                    del sys.modules[name]
             sys.path.insert(0, str(candidate))
             os.environ["PATH"] = str(candidate) + os.pathsep + os.environ.get("PATH", "")
             os.chdir(candidate)
             return
+
+    try:
+        import rtxpt  # noqa: F401
+
+        return
+    except ImportError:
+        pass
 
     searched = "\n".join(f"  {p}" for p in candidates)
     raise RuntimeError(f"Could not find rtxpt Python module. Searched:\n{searched}")
@@ -267,8 +273,9 @@ def run_fps_test(renderer, warmup_frames: int, test_frames: int, save_frames: bo
         print(f"[rtxpt] FPS Test: saving frames to {output_dir}")
     
     print(f"[rtxpt] FPS Test: warming up for {warmup_frames} frames...")
-    for _ in range(warmup_frames):
-        renderer.step_n(1)
+    for i in range(warmup_frames):
+        if not renderer.step_n(1):
+            raise RuntimeError(f"Renderer failed during FPS warmup frame {i}")
     
     print(f"[rtxpt] FPS Test: measuring {test_frames} frames...")
     frame_times = []
@@ -276,7 +283,8 @@ def run_fps_test(renderer, warmup_frames: int, test_frames: int, save_frames: bo
     
     for i in range(test_frames):
         frame_start = time.perf_counter()
-        renderer.step_n(1)
+        if not renderer.step_n(1):
+            raise RuntimeError(f"Renderer failed during FPS test frame {i}")
         frame_end = time.perf_counter()
         frame_time = (frame_end - frame_start) * 1000  # ms
         frame_times.append(frame_time)
@@ -284,7 +292,8 @@ def run_fps_test(renderer, warmup_frames: int, test_frames: int, save_frames: bo
         # Save frame if requested
         if save_frames and output_dir is not None:
             frame_path = output_dir / f"frame_{i:04d}.png"
-            renderer.save_screenshot(str(frame_path))
+            if not renderer.save_screenshot(str(frame_path)):
+                raise RuntimeError(f"Failed to save FPS frame {i}: {frame_path}")
     
     total_time = time.perf_counter() - start_time
     avg_fps = test_frames / total_time
@@ -325,7 +334,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--spp", type=int, default=16, help="Reference samples for --headless.")
     parser.add_argument("--out", default="default_scene.png", help="Screenshot path for --headless.")
-    parser.add_argument("--vulkan", action=argparse.BooleanOptionalAction, default=True,
+    parser.add_argument("--vulkan", action=argparse.BooleanOptionalAction, default=False,
                         help="Use Vulkan backend (recommended on Linux).")
     parser.add_argument("--oidn", action=argparse.BooleanOptionalAction, default=True,
                         help="Enable OIDN denoising after reference accumulation (--headless recommended).")
@@ -385,7 +394,8 @@ def main() -> int:
     else:
         test_name = "default plane + cube"
     print(f"[rtxpt] Launching {test_name} ({mode}) ...")
-    use_reference = args.headless or args.oidn
+    # FPS benchmark measures per-frame throughput; reference accumulation is not appropriate.
+    use_reference = (args.headless or args.oidn) and not args.fps_test
     renderer = rtxpt.Renderer(
         width=args.width,
         height=args.height,

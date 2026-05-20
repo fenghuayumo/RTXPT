@@ -202,10 +202,13 @@ Sample::Sample(donut::app::DeviceManager& deviceManager,
     m_camera.SetRotateSpeed(.003f);
 
 #if DONUT_WITH_STREAMLINE
-    m_ui.IsDLSSSuported = GetDeviceManager()->GetStreamline().IsDLSSAvailable();
-    m_ui.IsDLSSFGSupported = GetDeviceManager()->GetStreamline().IsDLSSGAvailable();
-    m_ui.IsReflexSupported = GetDeviceManager()->GetStreamline().IsReflexAvailable();
-    m_ui.IsDLSSRRSupported = GetDeviceManager()->GetStreamline().IsDLSSRRAvailable();
+    if (!GetDeviceManager()->GetDeviceParams().headlessDevice)
+    {
+        m_ui.IsDLSSSuported = GetDeviceManager()->GetStreamline().IsDLSSAvailable();
+        m_ui.IsDLSSFGSupported = GetDeviceManager()->GetStreamline().IsDLSSGAvailable();
+        m_ui.IsReflexSupported = GetDeviceManager()->GetStreamline().IsReflexAvailable();
+        m_ui.IsDLSSRRSupported = GetDeviceManager()->GetStreamline().IsDLSSRRAvailable();
+    }
 #endif
 
     // Enumerate all environment maps in the media folder
@@ -1823,7 +1826,8 @@ void Sample::BackBufferResizing()
 
 // NOTE: we're not yet sure if this is necessary to avoid crash with going in/out of fullscreen and FG
 #if DONUT_WITH_STREAMLINE
-    if (m_ui.DLSSFGOptions.mode == StreamlineInterface::DLSSGMode::eOn || m_ui.ActualDLSSFGMode() == StreamlineInterface::DLSSGMode::eOn) 
+    if (!GetDeviceManager()->GetDeviceParams().headlessDevice &&
+        (m_ui.DLSSFGOptions.mode == StreamlineInterface::DLSSGMode::eOn || m_ui.ActualDLSSFGMode() == StreamlineInterface::DLSSGMode::eOn)) 
     {
         GetDeviceManager()->GetStreamline().CleanupDLSS(false);
         GetDeviceManager()->GetStreamline().CleanupDLSSG(false);
@@ -2217,6 +2221,9 @@ bool Sample::ShouldRenderUnfocused()
 void Sample::StreamlinePreRender()
 {
 #if DONUT_WITH_STREAMLINE
+    if (GetDeviceManager()->GetDeviceParams().headlessDevice)
+        return;
+
     // Setup Reflex
     {
         auto reflexConsts = donut::app::StreamlineInterface::ReflexOptions{};
@@ -4294,6 +4301,9 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
         }
 
 #if DONUT_WITH_STREAMLINE
+        const bool useStreamlineThisFrame = !GetDeviceManager()->GetDeviceParams().headlessDevice;
+        if (useStreamlineThisFrame)
+        {
         // SET STREAMLINE CONSTANTS
         {
             // This section of code updates the streamline constants every frame. Regardless of whether we are utilising the streamline plugins, as long as streamline is in use, we must set its constants.
@@ -4361,7 +4371,8 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
             GetDeviceManager()->GetStreamline().EvaluateDLSS(m_commandList);
             m_commandList->clearState();
         }
-        if (m_ui.RealtimeAA == 3)
+        }
+        if (useStreamlineThisFrame && m_ui.RealtimeAA == 3)
         {
             RAII_SCOPE(m_commandList->beginMarker("DLSS-RR");, m_commandList->endMarker(); );
 
@@ -4446,6 +4457,17 @@ static float ReadR11G11B10FloatChannel(uint32_t packed, uint32_t channel)
 
     const float value = Float16ToFloat32(float16_t{ halfBits });
     return std::isfinite(value) ? std::max(value, 0.0f) : 0.0f;
+}
+
+static nvrhi::TextureDesc MakeReadbackTextureDesc(nvrhi::TextureDesc desc, const char* debugName)
+{
+    desc.debugName = debugName;
+    desc.isRenderTarget = false;
+    desc.isUAV = false;
+    desc.isTypeless = false;
+    desc.initialState = nvrhi::ResourceStates::CopyDest;
+    desc.keepInitialState = true;
+    return desc;
 }
 
 static void ReadR11G11B10Float3Staging(nvrhi::IDevice* device, nvrhi::IStagingTexture* stagingTexture, uint32_t width, uint32_t height, std::vector<float>& output)
@@ -4567,7 +4589,9 @@ void Sample::ApplyReferenceOIDN()
         m_commandList->endMarker();
     }
 
-    nvrhi::StagingTextureHandle stagingTexture = GetDevice()->createStagingTexture(sourceDesc, nvrhi::CpuAccessMode::Read);
+    nvrhi::StagingTextureHandle stagingTexture = GetDevice()->createStagingTexture(
+        MakeReadbackTextureDesc(sourceDesc, "ReferenceOIDN AccumulatedRadiance Readback"),
+        nvrhi::CpuAccessMode::Read);
     if (stagingTexture == nullptr)
     {
         donut::log::warning("OIDN reference denoiser failed to create a staging texture.");
@@ -4579,13 +4603,17 @@ void Sample::ApplyReferenceOIDN()
     nvrhi::StagingTextureHandle normalStagingTexture;
     if (requestAlbedoGuide && m_renderTargets->RRDiffuseAlbedo != nullptr)
     {
-        albedoStagingTexture = GetDevice()->createStagingTexture(m_renderTargets->RRDiffuseAlbedo->getDesc(), nvrhi::CpuAccessMode::Read);
+        albedoStagingTexture = GetDevice()->createStagingTexture(
+            MakeReadbackTextureDesc(m_renderTargets->RRDiffuseAlbedo->getDesc(), "ReferenceOIDN Albedo Readback"),
+            nvrhi::CpuAccessMode::Read);
         if (albedoStagingTexture != nullptr)
             m_commandList->copyTexture(albedoStagingTexture, nvrhi::TextureSlice(), m_renderTargets->RRDiffuseAlbedo, nvrhi::TextureSlice());
     }
     if (requestNormalGuide && m_renderTargets->RRNormalsAndRoughness != nullptr)
     {
-        normalStagingTexture = GetDevice()->createStagingTexture(m_renderTargets->RRNormalsAndRoughness->getDesc(), nvrhi::CpuAccessMode::Read);
+        normalStagingTexture = GetDevice()->createStagingTexture(
+            MakeReadbackTextureDesc(m_renderTargets->RRNormalsAndRoughness->getDesc(), "ReferenceOIDN Normal Readback"),
+            nvrhi::CpuAccessMode::Read);
         if (normalStagingTexture != nullptr)
             m_commandList->copyTexture(normalStagingTexture, nvrhi::TextureSlice(), m_renderTargets->RRNormalsAndRoughness, nvrhi::TextureSlice());
     }

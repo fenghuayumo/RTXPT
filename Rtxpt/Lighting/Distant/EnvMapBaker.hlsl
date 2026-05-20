@@ -52,7 +52,7 @@ RWTexture2DArray<float4>                u_EnvMapCubeFacesDst        : register(u
 RWTexture2DArray<float4>                u_EnvMapCubeFacesSrc        : register(u1);
 
 Texture2D<float4>                       t_SrcEquirectangularEnvMap  : register(t0);
-TextureCube<float4>                     t_SrcCubemapEnvMap          : register(t1);
+TextureCubeArray<float4>                t_SrcCubemapEnvMap          : register(t1);
 
 Texture2DArray<float4>                  t_EnvMapCubeFaces           : register(t0);
 
@@ -103,7 +103,7 @@ float3 SampleSource( uint2 pixel, uint face, float2 offset )
         return t_SrcEquirectangularEnvMap.SampleLevel( s_EquiRectSampler, uv, 0 ).rgb;
     }
     else if (g_Const.BackgroundSourceType == 2)
-        return t_SrcCubemapEnvMap.SampleLevel( s_Linear, direction, 0 ).rgb;
+        return t_SrcCubemapEnvMap.SampleLevel( s_Linear, float4(direction, 0), 0 ).rgb;
     else
         return float3(0,0,0);
 }

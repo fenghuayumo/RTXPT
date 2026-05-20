@@ -488,6 +488,14 @@ bool EnvMapBaker::Update(nvrhi::ICommandList* commandList, donut::engine::Bindin
     }
 
     // Bindings
+    nvrhi::BindingSetItem sourceCubemapBinding = nvrhi::BindingSetItem::Texture_SRV(
+        1,
+        (m_loadedSourceBackgroundTextureCubemap != nullptr)
+            ? m_loadedSourceBackgroundTextureCubemap->texture
+            : (nvrhi::TextureHandle)commonPasses->m_BlackCubeMapArray.Get(),
+        nvrhi::Format::UNKNOWN,
+        nvrhi::AllSubresources,
+        nvrhi::TextureDimension::TextureCubeArray);
     nvrhi::BindingSetDesc bindingSetDesc;
     bindingSetDesc.bindings = {
             nvrhi::BindingSetItem::ConstantBuffer(0, m_constantBuffer),
@@ -495,7 +503,7 @@ bool EnvMapBaker::Update(nvrhi::ICommandList* commandList, donut::engine::Bindin
             nvrhi::BindingSetItem::Texture_UAV(0, m_cubemapLowRes, nvrhi::Format::UNKNOWN, nvrhi::TextureSubresourceSet(0, 1, 0, 6)).setDimension(nvrhi::TextureDimension::Texture2DArray),
             nvrhi::BindingSetItem::Texture_UAV(1, m_cubemap, nvrhi::Format::UNKNOWN, nvrhi::TextureSubresourceSet(1, 1, 0, 6)).setDimension(nvrhi::TextureDimension::Texture2DArray),
             nvrhi::BindingSetItem::Texture_SRV(0, (m_loadedSourceBackgroundTextureEquirect != nullptr) ? (m_loadedSourceBackgroundTextureEquirect->texture) : ((nvrhi::TextureHandle)commonPasses->m_BlackTexture.Get())),
-            nvrhi::BindingSetItem::Texture_SRV(1, (m_loadedSourceBackgroundTextureCubemap != nullptr) ? (m_loadedSourceBackgroundTextureCubemap->texture) : ((nvrhi::TextureHandle)commonPasses->m_BlackCubeMapArray.Get())),
+            sourceCubemapBinding,
             nvrhi::BindingSetItem::Texture_SRV(2, (nvrhi::TextureHandle)commonPasses->m_BlackCubeMapArray.Get()),
             nvrhi::BindingSetItem::Texture_SRV(10, (m_proceduralSky != nullptr && proceduralSkyEnabled) ? (m_proceduralSky->GetTransmittanceTexture()) : ((nvrhi::TextureHandle)commonPasses->m_BlackTexture.Get())),
             nvrhi::BindingSetItem::Texture_SRV(11, (m_proceduralSky != nullptr && proceduralSkyEnabled) ? (m_proceduralSky->GetScatterringTexture()) : ((nvrhi::TextureHandle)commonPasses->m_BlackTexture3D.Get())),
@@ -510,7 +518,12 @@ bool EnvMapBaker::Update(nvrhi::ICommandList* commandList, donut::engine::Bindin
             nvrhi::BindingSetItem::Texture_UAV(SHADER_DEBUG_VIZ_TEXTURE_UAV_INDEX, m_shaderDebug->GetDebugVizTexture()),
     };
     nvrhi::BindingSetHandle bindingSetLowResPrePass = bindingCache.GetOrCreateBindingSet(bindingSetDesc, m_commonBindingLayout);
-    bindingSetDesc.bindings[5] = nvrhi::BindingSetItem::Texture_SRV(2, m_cubemapLowRes );
+    bindingSetDesc.bindings[5] = nvrhi::BindingSetItem::Texture_SRV(
+        2,
+        m_cubemapLowRes,
+        nvrhi::Format::UNKNOWN,
+        nvrhi::AllSubresources,
+        nvrhi::TextureDimension::TextureCube);
     bindingSetDesc.bindings[1] = nvrhi::BindingSetItem::Texture_UAV(0, m_cubemap, nvrhi::Format::UNKNOWN, nvrhi::TextureSubresourceSet(0, 1, 0, 6)).setDimension(nvrhi::TextureDimension::Texture2DArray);
     nvrhi::BindingSetHandle bindingSetBake = bindingCache.GetOrCreateBindingSet(bindingSetDesc, m_commonBindingLayout);
 

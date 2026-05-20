@@ -587,6 +587,17 @@ bool RenderSession::Step(float dt)
     if (!m_deviceManager->RunSingleFrame())
         return false;
 
+    // Headless Python stepping can outrun the GPU and cause resource hazards
+    // (e.g. screenshot readback or auto-exposure buffer maps). Serialize frames.
+    if (m_config.headless)
+    {
+        if (!m_deviceManager->GetDevice()->waitForIdle())
+        {
+            log::error("RenderSession: GPU device lost or removed");
+            return false;
+        }
+    }
+
     window = m_deviceManager->GetWindow();
     return !window || !glfwWindowShouldClose(window);
 }
@@ -630,8 +641,11 @@ bool RenderSession::SaveScreenshot(const std::string& outputPath)
     if (!m_initialized || !m_deviceManager || !m_renderer)
         return false;
 
+    // Prefer the renderer-owned final LDR target. It is the source of the
+    // frame blit, so it does not depend on headless backbuffer rotation.
     nvrhi::ITexture* tex = m_renderer->GetLdrColorTexture();
     nvrhi::ResourceStates state = nvrhi::ResourceStates::ShaderResource;
+
     if (!tex)
     {
         uint32_t backBufferIndex = m_lastRenderedBackBufferIndex;
@@ -657,8 +671,14 @@ bool RenderSession::SaveScreenshot(const std::string& outputPath)
         return false;
     }
 
-    // SaveTextureToFile creates and tears down its own command list internally
-    // - safe to call from the main thread between Step()s.
+    // SaveTextureToFile creates its own command list. Wait for the last rendered
+    // frame to finish so LdrColor is not still in use by an in-flight submit.
+    if (!m_deviceManager->GetDevice()->waitForIdle())
+    {
+        log::error("RenderSession: GPU device lost or removed before screenshot");
+        return false;
+    }
+
     std::filesystem::path p(outputPath);
     if (p.has_parent_path())
         EnsureDirectoryExists(p.parent_path());
