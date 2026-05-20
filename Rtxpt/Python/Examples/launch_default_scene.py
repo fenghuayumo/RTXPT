@@ -34,8 +34,16 @@ IMPORTED_MODEL_BASE_COLOR = (0.72, 0.84, 1.0)
 
 
 def configure_import_path() -> None:
+    try:
+        import rtxpt  # noqa: F401
+
+        return
+    except ImportError:
+        pass
+
     candidates = [
         REPO_ROOT / "bin",
+        REPO_ROOT / "build-linux" / "bin",
         REPO_ROOT / "build" / "Rtxpt" / "Release",
         Path(__file__).resolve().parent,
     ]
@@ -234,6 +242,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--spp", type=int, default=16, help="Reference samples for --headless.")
     parser.add_argument("--out", default="default_scene.png", help="Screenshot path for --headless.")
+    parser.add_argument("--vulkan", action="store_true", help="Use Vulkan backend (recommended on Linux).")
+    parser.add_argument("--oidn", action="store_true",
+                        help="Enable OIDN denoising after reference accumulation (--headless recommended).")
+    parser.add_argument("--oidn-gpu", dest="oidn_gpu",
+                        action=argparse.BooleanOptionalAction, default=True,
+                        help="Use OIDN GPU device when available.")
+    parser.add_argument("--oidn-quality", type=int, default=2,
+                        help="OIDN quality: 0=Fast, 1=Balanced, 2=High.")
     parser.add_argument("--obj-test", action="store_true",
                         help="Append an OBJ mesh to the default scene and frame the camera around it.")
     parser.add_argument("--obj-path", default=str(DEFAULT_OBJ_MODEL),
@@ -243,6 +259,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.oidn and not args.headless:
+        print("[rtxpt] --oidn uses reference accumulation; enabling --headless")
+        args.headless = True
     launch_cwd = Path.cwd()
     configure_import_path()
     import rtxpt
@@ -253,21 +272,30 @@ def main() -> int:
     mode = "headless" if args.headless else "windowed"
     test_name = "Antman OBJ" if args.obj_test else "default plane + cube"
     print(f"[rtxpt] Launching {test_name} scene ({mode}) ...")
+    use_reference = args.headless or args.oidn
     renderer = rtxpt.Renderer(
         width=args.width,
         height=args.height,
         headless=args.headless,
+        vulkan=args.vulkan,
         scene=scene,
-        realtime=not args.headless,
+        realtime=not use_reference,
         accumulation_target=args.spp,
     )
 
     try:
         s = renderer.settings
-        s.realtime_mode = not args.headless
+        s.realtime_mode = not use_reference
+        s.accumulation_target = args.spp
         s.bounce_count = 8
         s.enable_tone_mapping = True
         s.realtime_aa = rtxpt.RealtimeAA.Off
+        if args.oidn:
+            s.oidn_enabled = True
+            s.oidn_use_gpu = args.oidn_gpu
+            s.oidn_quality = args.oidn_quality
+            s.oidn_apply()
+            print("[rtxpt] OIDN enabled (reference mode, denoise after accumulation)")
 
         if obj_path is not None:
             if not obj_path.exists():
@@ -291,7 +319,10 @@ def main() -> int:
                 frame_bounds(renderer, center, radius)
 
         if args.headless:
-            print(f"[rtxpt] Rendering {args.spp} spp ...")
+            label = f"{args.spp} spp"
+            if args.oidn:
+                label += " + OIDN"
+            print(f"[rtxpt] Rendering {label} ...")
             frames = renderer.step_until_accumulated()
             out_path = Path(args.out)
             if not out_path.is_absolute():
