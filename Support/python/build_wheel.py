@@ -16,13 +16,24 @@ BUILD_DIR = ROOT / "build" / "python-wheel"
 STAGING_DIR = BUILD_DIR / "staging"
 DIST_DIR = ROOT / "dist"
 
-
-MINIMAL_ASSET_FILES = [
+BASE_MINIMAL_ASSET_FILES = [
     "ArtLicenses.txt",
     "README.md",
     "default.json",
     "loading_splash.png",
 ]
+
+# Required by SampleProceduralSky for ==PROCEDURAL_SKY== environment lights.
+PROC_SKY_ASSET_FILES = [
+    "StandaloneTextures/RGBANoiseMedium.png",
+    "StandaloneTextures/q2rtx_env/transmittance_earth.dds",
+    "StandaloneTextures/q2rtx_env/inscatter_earth.dds",
+    "StandaloneTextures/q2rtx_env/irradiance_earth.dds",
+    "StandaloneTextures/q2rtx_env/clouds.dds",
+]
+
+MINIMAL_ASSET_FILES = BASE_MINIMAL_ASSET_FILES + PROC_SKY_ASSET_FILES
+
 
 def copy_file(src: Path, dst: Path) -> None:
     if not src.exists():
@@ -41,7 +52,6 @@ def copy_optional_file(src: Path, dst: Path) -> None:
 def copy_tree(
     src: Path,
     dst: Path,
-    *,
     suffixes: set[str] | None = None,
     path_filter: set[str] | None = None,
 ) -> None:
@@ -53,7 +63,7 @@ def copy_tree(
             continue
         if suffixes is not None and item.suffix.lower() not in suffixes:
             continue
-        if path_filter is not None and not (set(item.relative_to(src).parts) & path_filter):
+        if path_filter is not None and not set(item.relative_to(src).parts) & path_filter:
             continue
         copy_file(item, dst / item.relative_to(src))
 
@@ -69,7 +79,9 @@ def find_native_extension() -> Path:
         if exact.exists():
             return exact
 
-    candidates = sorted(BIN_DIR.glob("rtxpt*.pyd" if os.name == "nt" else "rtxpt*.so"))
+    candidates = sorted(
+        BIN_DIR.glob("rtxpt*.pyd" if os.name == "nt" else "rtxpt*.so")
+    )
     if candidates:
         return candidates[-1]
 
@@ -78,7 +90,12 @@ def find_native_extension() -> Path:
     )
 
 
-def copy_runtime_files(package_dir: Path, *, dynamic_shaders: str, shader_api: str, assets: str) -> None:
+def copy_runtime_files(
+    package_dir: Path,
+    dynamic_shaders: str,
+    shader_api: str,
+    assets: str,
+) -> None:
     native_extension = find_native_extension()
     copy_file(native_extension, package_dir / native_extension.name)
 
@@ -120,76 +137,75 @@ def copy_runtime_files(package_dir: Path, *, dynamic_shaders: str, shader_api: s
 
     if dynamic_shaders == "full":
         if (BIN_DIR / "ShaderDynamic" / "Source").exists():
-            copy_tree(BIN_DIR / "ShaderDynamic" / "Source", package_dir / "ShaderDynamic" / "Source")
+            copy_tree(
+                BIN_DIR / "ShaderDynamic" / "Source",
+                package_dir / "ShaderDynamic" / "Source",
+            )
         if (BIN_DIR / "ShaderDynamic" / "Tools").exists():
             copy_tree(
                 BIN_DIR / "ShaderDynamic" / "Tools",
                 package_dir / "ShaderDynamic" / "Tools",
-                suffixes={".dll", ".exe", ".json", ".marker", ".so", ""},
+                suffixes={"", ".exe", ".json", ".marker", ".dll", ".so"},
                 path_filter=tool_filter,
             )
 
     if assets == "minimal":
         for relative in MINIMAL_ASSET_FILES:
-            copy_file(ROOT / "Assets" / relative, package_dir / "Assets" / relative)
+            copy_file(
+                ROOT / "Assets" / relative,
+                package_dir / "Assets" / relative,
+            )
         copy_tree(ROOT / "Assets" / "Fonts", package_dir / "Assets" / "Fonts")
-    elif assets == "full":
+        return
+
+    if assets == "full":
         copy_tree(ROOT / "Assets", package_dir / "Assets")
-    elif assets == "none":
+        return
+
+    if assets == "none":
         keep = package_dir / "Assets" / ".rtxpt-wheel-runtime"
         keep.parent.mkdir(parents=True, exist_ok=True)
         keep.write_text("Runtime asset root placeholder for RTXPT wheels.\n", encoding="utf-8")
-    else:
-        raise ValueError(f"Unknown assets mode: {assets}")
+        return
+
+    raise ValueError(f"Unknown assets mode: {assets}")
 
 
 def write_build_project(version: str) -> None:
     (STAGING_DIR / "pyproject.toml").write_text(
-        """[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
-""",
+        '[build-system]\n'
+        'requires = ["setuptools>=68", "wheel"]\n'
+        'build-backend = "setuptools.build_meta"\n',
         encoding="utf-8",
     )
-
     (STAGING_DIR / "MANIFEST.in").write_text(
         "recursive-include rtxpt *\n",
         encoding="utf-8",
     )
-
     (STAGING_DIR / "README.md").write_text(
-        """# RTXPT Python Wheel
-
-Local binary wheel assembled from the current RTXPT build output.
-""",
+        "# RTXPT Python Wheel\n\n"
+        "Local binary wheel assembled from the current RTXPT build output.\n",
         encoding="utf-8",
     )
-
     (STAGING_DIR / "setup.py").write_text(
-        f"""from setuptools import Distribution, setup
-
-
-class BinaryDistribution(Distribution):
-    def has_ext_modules(self):
-        return True
-
-
-setup(
-    name="rtxpt",
-    version={version!r},
-    description="Python bindings for RTXPT",
-    long_description=open("README.md", encoding="utf-8").read(),
-    long_description_content_type="text/markdown",
-    packages=["rtxpt"],
-    include_package_data=True,
-    license_files=["LICENSE.txt"],
-    distclass=BinaryDistribution,
-    python_requires=">=3.8",
-)
-""",
+        'from setuptools import Distribution, setup\n\n\n'
+        "class BinaryDistribution(Distribution):\n"
+        "    def has_ext_modules(self):\n"
+        "        return True\n\n\n"
+        "setup(\n"
+        '    name="rtxpt",\n'
+        f'    version={version!r},\n'
+        '    description="Python bindings for RTXPT",\n'
+        '    long_description=open("README.md", encoding="utf-8").read(),\n'
+        '    long_description_content_type="text/markdown",\n'
+        '    packages=["rtxpt"],\n'
+        "    include_package_data=True,\n"
+        '    license_files=["LICENSE.txt"],\n'
+        "    distclass=BinaryDistribution,\n"
+        '    python_requires=">=3.8",\n'
+        ")\n",
         encoding="utf-8",
     )
-
     copy_file(ROOT / "LICENSE.txt", STAGING_DIR / "LICENSE.txt")
 
 
@@ -233,9 +249,13 @@ def run_dynamic_shader_precompile(args: argparse.Namespace) -> None:
             args.precompile_modes,
             "--frames",
             str(args.precompile_frames),
+            "--global-variant-preset",
+            args.precompile_global_preset,
         ]
         for scene in args.precompile_scene or []:
             command.extend(["--scene", scene])
+        for variant in args.precompile_global_variant or []:
+            command.extend(["--global-variant", variant])
         subprocess.run(command, check=True, cwd=ROOT)
 
 
@@ -267,14 +287,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--no-dynamic-shader-bin",
         action="store_true",
-        help=argparse.SUPPRESS,
+        default=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--precompile-dynamic-shaders",
         action="store_true",
         help=(
-            "Before staging the wheel, launch the local rtxpt extension headlessly "
-            "to generate ShaderDynamic/Bin entries for selected scenes."
+            "Before staging the wheel, launch the local rtxpt extension headlessly to "
+            "generate ShaderDynamic/Bin entries for selected scenes."
         ),
     )
     parser.add_argument(
@@ -296,6 +316,23 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Frames to render per precompile scene/mode.",
     )
+    parser.add_argument(
+        "--precompile-global-preset",
+        choices=["default", "coverage"],
+        default="default",
+        help=(
+            "Global macro coverage preset passed to precompile_dynamic_shaders.py. "
+            "'coverage' warms common wheel compatibility and quality toggles."
+        ),
+    )
+    parser.add_argument(
+        "--precompile-global-variant",
+        action="append",
+        help=(
+            "Additional Settings overrides for one shader warmup pass, for example "
+            "'use_nee=0,nee_candidate_samples=8'. Repeat for multiple passes."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -303,7 +340,10 @@ def main() -> int:
     args = parse_args()
 
     if os.name != "nt" and args.shader_api == "d3d12":
-        raise ValueError("D3D12 shader payload is only valid for Windows wheels. Use --shader-api vulkan on Linux.")
+        raise ValueError(
+            "D3D12 shader payload is only valid for Windows wheels. "
+            "Use --shader-api vulkan on Linux."
+        )
 
     if not BIN_DIR.exists():
         raise FileNotFoundError(f"{BIN_DIR} does not exist. Build RTXPT first.")
@@ -321,14 +361,16 @@ def main() -> int:
 
     if args.precompile_dynamic_shaders:
         if dynamic_shaders == "none":
-            print("WARNING: --precompile-dynamic-shaders used while dynamic shader bins are omitted.")
+            print(
+                "WARNING: --precompile-dynamic-shaders used while dynamic shader bins are omitted."
+            )
         run_dynamic_shader_precompile(args)
 
     copy_runtime_files(
         package_dir,
-        dynamic_shaders=dynamic_shaders,
-        shader_api=args.shader_api,
-        assets=args.assets,
+        dynamic_shaders,
+        args.shader_api,
+        args.assets,
     )
     write_build_project(args.version)
 
