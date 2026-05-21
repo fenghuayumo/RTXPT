@@ -33,7 +33,7 @@ public:
     bool                    DebugGUI(float indent);
     void                    StandaloneGUI(const std::shared_ptr<donut::engine::PlanarView> & view, const float2 & displaySize);
 
-    bool                    IsInitialized() const           { return m_scene != nullptr; }
+    bool                    IsInitialized() const           { return m_scene != nullptr && !m_props.empty(); }
     bool                    CameraActive() const            { return m_gameCameraAttached.lock() != nullptr; }
     const donut::app::FirstPersonCamera &
                             GetCamera() const               { return m_gameCamera; }

@@ -38,6 +38,7 @@ namespace game
         bool                                                    IsValid() const         { return m_valid; }
         const std::shared_ptr<donut::engine::SceneGraphNode> &  GetNode() const         { return m_node; }
         const std::string &                                     GetModelName() const    { return m_name; }
+        const Pose &                                            GetModelPose() const    { return m_modelPose; }
         GameScene &                                             GetGame() const         { return m_game; }
 
         std::string                                             FindLightControllerInfo( const std::string & nodeName );

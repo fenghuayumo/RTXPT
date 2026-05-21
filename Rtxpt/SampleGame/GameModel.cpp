@@ -131,11 +131,9 @@ ModelType::ModelType(class GameScene & game, const std::string & name, const Jso
     if (!loadedModel.rootNode)
     { assert( false ); return; }
 
-    loadedModel.rootNode->SetTransform(&m_modelPose.Translation, &m_modelPose.Rotation, &m_modelPose.Scaling);
-
+    // Keep a read-only reference to the scene prototype. Never mutate or re-parent
+    // this node here; props instantiate detached copies via ModelInstance.
     m_node = loadedModel.rootNode;
-
-    SpecialFixups( m_name, loadedModel.rootNode.get() );
 
     m_valid = m_name != "" && modelIndex != -1;
 }
@@ -159,7 +157,14 @@ ModelInstance::ModelInstance( const std::string & name, const std::shared_ptr<Mo
     m_node = scene->GetSceneGraph()->Attach(parentNode, m_node);
     m_node->SetName(name);
 
-    scene->GetSceneGraph()->Attach(m_node, modelType->GetNode());   // each model type has its own root node
+    // Attach clones the scene prototype when it already belongs to the scene graph.
+    std::shared_ptr<SceneGraphNode> modelRoot = scene->GetSceneGraph()->Attach(m_node, modelType->GetNode());
+    if (modelRoot != nullptr)
+    {
+        const Pose& pose = modelType->GetModelPose();
+        modelRoot->SetTransform(&pose.Translation, &pose.Rotation, &pose.Scaling);
+        SpecialFixups(modelType->GetModelName(), modelRoot.get());
+    }
 
     MapLightControllers( m_node.get() );
 }

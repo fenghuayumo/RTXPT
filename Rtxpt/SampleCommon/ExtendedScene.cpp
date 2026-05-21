@@ -408,8 +408,8 @@ void SampleSettings::Load(const Json::Value& node)
 
 std::shared_ptr<SceneGraphLeaf> GameSettings::Clone()
 {
-    auto copy = std::make_shared<SampleSettings>();
-    assert(false); // not properly implemented
+    auto copy = std::make_shared<GameSettings>();
+    copy->jsonData = jsonData;
     return copy;
 }
 

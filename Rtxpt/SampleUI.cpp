@@ -2514,7 +2514,9 @@ void SampleUI::buildUI(void)
 
     if ( m_app.GetGame() != nullptr && m_app.GetGame()->IsInitialized() )
     {
-        m_app.GetGame()->StandaloneGUI(m_app.GetCurrentView(), float2(m_app.GetDisplaySize()));
+        const auto view = m_app.GetCurrentView();
+        if (view)
+            m_app.GetGame()->StandaloneGUI(view, float2(m_app.GetDisplaySize()));
     }
 
     // ImGui::ShowDemoWindow();

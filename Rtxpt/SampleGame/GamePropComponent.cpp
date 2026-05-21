@@ -79,6 +79,9 @@ protected:
 
     void Tick(double gameTime, float animationTime, float deltaTime) override 
     {
+        if (!m_spotLeft || !m_spotRight || !m_blobLeft || !m_blobRight)
+            return;
+
         float lightTime = animationTime - m_start;
         float blobRightI = 0.0f;
         float blobRotAngle = 0.0f;
@@ -146,6 +149,9 @@ protected:
     ScreenGUISel StandaloneGUI(const std::shared_ptr<donut::engine::PlanarView> & view, const float2 & mousePos, const float2 & displaySize) override
     {
         ScreenGUISel sel;
+
+        if (!view)
+            return sel;
 
         box3 bbox = m_prop.GetNode()->GetGlobalBoundingBox();
         float3 bcenter = bbox.center();

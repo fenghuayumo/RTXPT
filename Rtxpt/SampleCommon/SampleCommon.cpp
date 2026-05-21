@@ -97,6 +97,9 @@ std::vector<std::filesystem::path> EnumerateFilesWithWildcard( const std::filesy
     std::regex pattern(regexPattern, std::regex::icase);
 
     std::vector<std::filesystem::path> result;
+    if (!std::filesystem::exists(folder) || !std::filesystem::is_directory(folder))
+        return result;
+
     for (const auto& entry : std::filesystem::directory_iterator(folder)) 
     {
         if (entry.is_regular_file()) 

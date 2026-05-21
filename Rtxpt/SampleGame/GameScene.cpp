@@ -34,6 +34,35 @@ using namespace donut::render;
 #include <iostream>
 #include <thread>
 
+namespace
+{
+    std::filesystem::path ResolveSampleGameRoot(const std::filesystem::path& sceneFilePath, const std::filesystem::path& mediaPath)
+    {
+        const std::filesystem::path sceneDirGamePath = sceneFilePath.parent_path() / c_SampleGameSubFolder;
+        if (std::filesystem::exists(sceneDirGamePath))
+            return sceneDirGamePath;
+
+        return mediaPath / std::string(c_SampleGameSubFolder);
+    }
+
+    std::filesystem::path ResolveGameStoragePath(const std::filesystem::path& mediaGamePath, const std::filesystem::path& sceneFilePath)
+    {
+        const std::filesystem::path sceneStem = sceneFilePath.filename().stem();
+        std::vector<std::filesystem::path> candidates;
+        candidates.push_back(mediaGamePath / sceneStem);
+        if (sceneStem.extension() == ".scene")
+            candidates.push_back(mediaGamePath / sceneStem.stem());
+
+        for (const auto& candidate : candidates)
+        {
+            if (std::filesystem::exists(candidate))
+                return candidate;
+        }
+
+        return candidates.front();
+    }
+}
+
 
 GameScene::GameScene(Sample & sample, const CommandLineOptions& cmdLine)
     : m_sample(sample), m_cmdLine(cmdLine) // NOTE: at this point, Sample is being constructed - beware of accessing incompletely constructed object
@@ -117,14 +146,16 @@ void GameScene::SceneLoaded(const std::shared_ptr<ExtendedScene>& scene, const s
     if (gameSettings == nullptr)
         return;
 
-    std::filesystem::path mediaGamePath = mediaPath / std::string(c_SampleGameSubFolder);
+    const std::filesystem::path mediaGamePath = ResolveSampleGameRoot(sceneFilePath, mediaPath);
     if (!EnsureDirectoryExists(mediaGamePath))
         { assert(false); return; }
 
-    std::filesystem::path sceneName = sceneFilePath.filename().stem();
-    m_gameStoragePath = mediaGamePath / sceneName;
+    m_gameStoragePath = ResolveGameStoragePath(mediaGamePath, sceneFilePath);
     if (!EnsureDirectoryExists(m_gameStoragePath))
         { assert(false); return; }
+
+    EnsureDirectoryExists(m_gameStoragePath / "models");
+    EnsureDirectoryExists(m_gameStoragePath / "props");
 
     Json::Value node;
     bool parsingSuccessful = LoadJsonFromString(gameSettings->GetJsonData(), node);
@@ -173,6 +204,17 @@ void GameScene::SceneLoaded(const std::shared_ptr<ExtendedScene>& scene, const s
         auto it = std::find_if(m_props.begin(), m_props.end(), [this]( const std::shared_ptr<game::PropBase> & prop ) { return EqualsIgnoreCase(prop->GetName(), m_cmdLine.PropCameraAttach); } );
         if (it != m_props.end())
             AttachCamera(*it);
+    }
+
+    if (m_props.empty())
+    {
+        if (!m_modelTypes.empty())
+            log::warning("GameSettings found model definitions but no props under '%s'", m_gameStoragePath.string().c_str());
+        else
+            log::warning("GameSettings present but no SampleGame data found under '%s'", m_gameStoragePath.string().c_str());
+        m_modelTypes.clear();
+        m_gameStoragePath = std::filesystem::path();
+        return;
     }
 
 
