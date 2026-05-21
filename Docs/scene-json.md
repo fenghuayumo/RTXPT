@@ -273,7 +273,7 @@
 | `radianceScale` | `[r, g, b]` | 环境光辐射亮度倍率。 |
 | `textureIndex` | integer | 环境贴图索引，通常写 `0`。 |
 | `rotation` | number | 环境贴图旋转值。 |
-| `path` | string | 环境贴图路径，通常相对于 `Assets/`。 |
+| `path` | string | 环境贴图路径。解析顺序：绝对路径 → 运行时 `Assets/` → scene 文件所在目录。UI 环境贴图列表同样先扫 `Assets/EnvironmentMaps/`，再扫 `<scene-dir>/EnvironmentMaps/`。 |
 
 ## 相机参数
 
@@ -467,12 +467,18 @@ Keyframe 字段：
 
 scene JSON 本身不推荐直接写材质参数。当前 `MaterialPatch` 已废弃。材质覆盖文件放在 `Assets/Materials`，由 `MaterialsBaker` 按模型名和材质名查找。
 
-查找顺序：
+查找顺序（先 scene 文件所在目录，再运行时 `Assets` 根）：
 
-1. `Assets/Materials/<scene-stem>/<model-name>.<material-name>.material.json`
-2. `Assets/Materials/<scene-stem>/<material-name>.material.json`
-3. `Assets/Materials/<model-name>.<material-name>.material.json`
-4. `Assets/Materials/<material-name>.material.json`
+1. `<scene-dir>/Materials/<scene-stem>/<model-name>.<material-name>.material.json`
+2. `<scene-dir>/Materials/<scene-stem>/<material-name>.material.json`
+3. `<scene-dir>/Materials/<model-name>.<material-name>.material.json`
+4. `<scene-dir>/Materials/<material-name>.material.json`
+5. `<Assets>/Materials/<scene-stem>/<model-name>.<material-name>.material.json`
+6. `<Assets>/Materials/<scene-stem>/<material-name>.material.json`
+7. `<Assets>/Materials/<model-name>.<material-name>.material.json`
+8. `<Assets>/Materials/<material-name>.material.json`
+
+其中 `<scene-dir>` 是 scene JSON 的父目录；`<Assets>` 是运行时资源根（`bin` 旁或 pip 包内）。
 
 `scene-stem` 是 scene 文件名去掉最后一层扩展名：
 
@@ -593,7 +599,7 @@ Assets/Materials/default/antman_merged.antman_merged_0.material.json
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `path` | string | 贴图路径；可以是相对于 `Assets/` 的路径，也可以是绝对路径。 |
+| `path` | string | 贴图路径。解析顺序：绝对路径 → 运行时 `Assets/` → scene 文件所在目录。glTF 内贴图 URI 另会先相对 glTF 文件目录，再回退到 scene 目录。 |
 | `sRGB` | bool | 是否按 sRGB 读取。 |
 | `NormalMap` | bool | 是否是法线贴图。 |
 

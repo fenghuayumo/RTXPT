@@ -149,7 +149,11 @@ void PTMaterial::Write(Json::Value& output)
     STORE_FIELD(SkipRender);
 }
 
-bool PTMaterial::Read(Json::Value& input, const std::filesystem::path& mediaPath, const std::shared_ptr<donut::engine::TextureCache>& textureCache)
+bool PTMaterial::Read(
+    Json::Value& input,
+    const std::filesystem::path& mediaPath,
+    const std::shared_ptr<donut::engine::TextureCache>& textureCache,
+    const std::filesystem::path& sceneDirectory)
 {
     // int version = -1;
     // input["version"] >> version;
@@ -175,16 +179,20 @@ bool PTMaterial::Read(Json::Value& input, const std::filesystem::path& mediaPath
         texJ["sRGB"] >> output.sRGB;
         texJ["NormalMap"] >> output.NormalMap;
 
-        std::filesystem::path fullPath = mediaPath;
-        fullPath /= output.LocalPath;
+        std::filesystem::path fullPath = ResolveSceneMediaPath(
+            output.LocalPath,
+            sceneDirectory,
+            mediaPath);
 
         bool cSearchForDDS = true;
         std::string extension = fullPath.extension().string();
         std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
         if (cSearchForDDS && extension == ".png")
         {
-            std::filesystem::path filePathDDS = fullPath;
-            filePathDDS.replace_extension(".dds");
+            std::filesystem::path filePathDDS = ResolveSceneMediaPath(
+                std::filesystem::path(output.LocalPath).replace_extension(".dds"),
+                sceneDirectory,
+                mediaPath);
 
             if (std::filesystem::exists(filePathDDS))
             {
@@ -251,11 +259,17 @@ bool PTMaterial::Read(Json::Value& input, const std::filesystem::path& mediaPath
     return true;
 }
 
-std::shared_ptr<PTMaterial> PTMaterial::FromJson(Json::Value& input, const std::filesystem::path& mediaPath, const std::shared_ptr<donut::engine::TextureCache>& textureCache, const std::string & modelName, const std::string & name)
+std::shared_ptr<PTMaterial> PTMaterial::FromJson(
+    Json::Value& input,
+    const std::filesystem::path& mediaPath,
+    const std::shared_ptr<donut::engine::TextureCache>& textureCache,
+    const std::string& modelName,
+    const std::string& name,
+    const std::filesystem::path& sceneDirectory)
 {
     std::shared_ptr<PTMaterial> material = std::make_shared<PTMaterial>();
 
-    material->Read(input, mediaPath, textureCache);
+    material->Read(input, mediaPath, textureCache, sceneDirectory);
     material->Name = name;
     material->ModelName = modelName;
 
@@ -642,6 +656,9 @@ void MaterialsBaker::Clear()
     m_materialsGPU.clear();
     m_textures.clear();
     m_mediaPath = std::filesystem::path();
+    m_sceneDirectory = std::filesystem::path();
+    m_sceneMaterialsPath = std::filesystem::path();
+    m_sceneMaterialsSceneSpecializedPath = std::filesystem::path();
     m_materialsPath = std::filesystem::path();
     m_materialsSceneSpecializedPath = std::filesystem::path();
     m_uniqueNames.clear();
@@ -731,28 +748,52 @@ std::shared_ptr<PTMaterial> MaterialsBaker::Load(const std::string & modelFileNa
 {
     std::string modelName = ModelNameFromModelFileName(modelFileName);
 
-    std::array<std::filesystem::path, 4> candidates;
+    struct MaterialFileCandidate
+    {
+        std::filesystem::path path;
+        bool sharedWithAllScenes = true;
+        bool nameOnly = false;
+    };
 
-    candidates[0] = m_materialsSceneSpecializedPath / (modelName + "." + name + c_MaterialsExtension);
-    candidates[1] = m_materialsSceneSpecializedPath / (name + c_MaterialsExtension);
-    candidates[2] = m_materialsPath                 / (modelName + "." + name + c_MaterialsExtension);
-    candidates[3] = m_materialsPath                 / (name + c_MaterialsExtension);
+    std::vector<MaterialFileCandidate> candidates;
+    auto appendCandidates = [&](const std::filesystem::path& folder, bool sharedWithAllScenes)
+    {
+        if (folder.empty())
+            return;
+
+        MaterialFileCandidate modelAndName;
+        modelAndName.path = folder / (modelName + "." + name + c_MaterialsExtension);
+        modelAndName.sharedWithAllScenes = sharedWithAllScenes;
+        candidates.push_back(modelAndName);
+
+        MaterialFileCandidate nameOnlyCandidate;
+        nameOnlyCandidate.path = folder / (name + c_MaterialsExtension);
+        nameOnlyCandidate.sharedWithAllScenes = sharedWithAllScenes;
+        nameOnlyCandidate.nameOnly = true;
+        candidates.push_back(nameOnlyCandidate);
+    };
+
+    // Scene-local Materials/ (e.g. <scene-dir>/Materials/ when scene lives next to project assets).
+    appendCandidates(m_sceneMaterialsSceneSpecializedPath, false);
+    appendCandidates(m_sceneMaterialsPath, true);
+
+    // Runtime Assets root (e.g. pip site-packages/rtxpt/Assets or ../Assets next to bin).
+    appendCandidates(m_materialsSceneSpecializedPath, false);
+    appendCandidates(m_materialsPath, true);
 
     Json::Value rootJ;
     std::string actualLoadedFileName;
     bool shared = false;
-    for ( int i = 0; i < candidates.size(); i++ )
+    for (const MaterialFileCandidate& candidate : candidates)
     {
-        auto & candidate = candidates[i];
-        if (std::filesystem::exists(candidate))
-            if (LoadJsonFromFile(candidate, rootJ))
-            {
-                actualLoadedFileName = candidate.string(); 
-                shared = i >= 2;
-                if (i%2==1)
-                    modelName = kNoModel;
-                break;
-            }
+        if (std::filesystem::exists(candidate.path) && LoadJsonFromFile(candidate.path, rootJ))
+        {
+            actualLoadedFileName = candidate.path.string();
+            shared = candidate.sharedWithAllScenes;
+            if (candidate.nameOnly)
+                modelName = kNoModel;
+            break;
+        }
     }
     if (actualLoadedFileName=="")
     {
@@ -760,7 +801,7 @@ std::shared_ptr<PTMaterial> MaterialsBaker::Load(const std::string & modelFileNa
         return nullptr;
     }
 
-    std::shared_ptr<PTMaterial> materialPT = materialPT->FromJson(rootJ, m_mediaPath, m_textureCache, modelName, name);
+    std::shared_ptr<PTMaterial> materialPT = materialPT->FromJson(rootJ, m_mediaPath, m_textureCache, modelName, name, m_sceneDirectory);
     if (materialPT == nullptr)
     {
         donut::log::warning("Error while parsing material file '%s'", actualLoadedFileName.c_str()); 
@@ -907,6 +948,16 @@ void MaterialsBaker::CreateRenderPassesAndLoadMaterials(nvrhi::IBindingLayout* b
     if (m_mediaPath == "") // first time load all
     {
         m_mediaPath = mediaPath;
+        m_sceneDirectory = sceneFilePath.parent_path();
+        if (!sceneFilePath.empty() && sceneFilePath.filename() == "__RTXPT_INLINE_SCENE_JSON__")
+            m_sceneDirectory = std::filesystem::path();
+        if (!m_sceneDirectory.empty())
+        {
+            m_sceneMaterialsPath = m_sceneDirectory / std::string(c_MaterialsSubFolder);
+            std::filesystem::path justName = sceneFilePath.filename().stem();
+            if (!justName.empty())
+                m_sceneMaterialsSceneSpecializedPath = m_sceneMaterialsPath / justName;
+        }
         m_materialsPath = mediaPath / std::string(c_MaterialsSubFolder);
 
         std::filesystem::path justName = sceneFilePath.filename().stem();
@@ -1169,7 +1220,7 @@ bool MaterialsBaker::LoadSingle(PTMaterialBase & material)
     }
     assert( material.Name != "" );
     m_deferredTextureLoadInProgress = true;
-    return material.Read(rootJ, m_mediaPath, m_textureCache);
+    return material.Read(rootJ, m_mediaPath, m_textureCache, m_sceneDirectory);
 }
 
 bool MaterialsBaker::SaveSingle(PTMaterialBase & material)

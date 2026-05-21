@@ -114,6 +114,15 @@ size_t FindSubStringIgnoreCase(const std::string & text, const std::string & sub
 bool EqualsIgnoreCase(const std::string & a, const std::string & b);
 
 std::filesystem::path GetLocalPath(std::string subfolder);
+// Resolves a relative media path against the first existing root in searchRoots.
+std::filesystem::path ResolveMediaRelativePath(
+    const std::filesystem::path& localPath,
+    std::initializer_list<std::filesystem::path> searchRoots);
+// Standard RTXPT media lookup: runtime Assets/ first, then the scene JSON parent directory.
+std::filesystem::path ResolveSceneMediaPath(
+    const std::filesystem::path& localPath,
+    const std::filesystem::path& sceneDirectory,
+    const std::filesystem::path& mediaPath = std::filesystem::path());
 void SetLocalPathBaseOverride(const std::filesystem::path& basePath);
 std::filesystem::path GetRuntimeDirectory();
 void SetRuntimeDirectoryOverride(const std::filesystem::path& runtimeDirectory);

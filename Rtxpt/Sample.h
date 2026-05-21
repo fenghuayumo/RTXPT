@@ -265,6 +265,7 @@ private:
     void                                    RenderGaussianSplats(bool renderToOutputColor);
     void                                    AccumulateGaussianSplats(const donut::engine::IView& splatView);
     void                                    BuildGaussianSplatEmissionProxyList();
+    void                                    RefreshEnvironmentMapMediaList();
 
 private:
     struct GaussianSplatSceneObject

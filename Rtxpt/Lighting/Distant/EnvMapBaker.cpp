@@ -13,6 +13,7 @@
 
 #include "EnvMapImportanceSamplingBaker.h"
 #include "../../SampleCommon/ComputePipelineBaker.h"
+#include "../../SampleCommon/SampleCommon.h"
 
 #include <donut/engine/BindingCache.h>
 #include <donut/engine/ShaderFactory.h>
@@ -361,7 +362,7 @@ int EnvMapBaker::GetTargetCubeResolution() const
     return m_targetResolution; 
 }
 
-void EnvMapBaker::PreUpdate(nvrhi::ICommandList* commandList, std::shared_ptr<donut::engine::CommonRenderPasses> commonPasses, std::string envMapBackgroundPath)
+void EnvMapBaker::PreUpdate(nvrhi::ICommandList* commandList, std::shared_ptr<donut::engine::CommonRenderPasses> commonPasses, std::string envMapBackgroundPath, const std::filesystem::path& sceneDirectory)
 {
     if( m_device->getGraphicsAPI() == nvrhi::GraphicsAPI::VULKAN && m_BC6UCompressionEnabled )
     {
@@ -396,7 +397,9 @@ void EnvMapBaker::PreUpdate(nvrhi::ICommandList* commandList, std::shared_ptr<do
 
         if (!proceduralSkyEnabled)
         {
-            std::filesystem::path fullPath = GetLocalPath(c_AssetsFolder) / m_loadedSourceBackgroundPath;
+            const std::filesystem::path fullPath = ResolveSceneMediaPath(
+                m_loadedSourceBackgroundPath,
+                sceneDirectory);
             m_textureCache->LoadTextureFromFile(fullPath, false, commonPasses.get(), commandList);
             commandList->close();
             m_device->executeCommandList(commandList);

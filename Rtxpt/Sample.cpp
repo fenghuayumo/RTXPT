@@ -212,22 +212,7 @@ Sample::Sample(donut::app::DeviceManager& deviceManager,
     }
 #endif
 
-    // Enumerate all environment maps in the media folder
-    m_envMapMediaList.clear();
-    m_envMapMediaFolder = GetLocalPath(c_AssetsFolder) / c_EnvMapSubFolder;
-    if (std::filesystem::exists(m_envMapMediaFolder))
-    {
-        for (const auto& file : std::filesystem::directory_iterator(m_envMapMediaFolder))
-        {
-            if (!file.is_regular_file()) continue;
-            if (file.path().extension() == ".exr" || file.path().extension() == ".hdr" || file.path().extension() == ".dds")
-                m_envMapMediaList.push_back(file.path());
-        }
-    }
-    else
-    {
-        log::warning("Environment map folder '%s' does not exist.", m_envMapMediaFolder.string().c_str());
-    }
+    RefreshEnvironmentMapMediaList();
 
     m_captureScriptManager = std::make_unique<CaptureScriptManager>(*this, m_ui, m_cmdLine);
 
@@ -1001,9 +986,59 @@ void Sample::CollectUncompressedTextures()
         listUncompressedTextureIfNeeded(textureIT.second.Loaded, textureIT.second.NormalMap);
 }
 
+static bool IsEnvironmentMapMediaFile(const std::filesystem::path& path)
+{
+    if (!path.has_filename())
+        return false;
+    const std::string ext = path.extension().string();
+    return ext == ".exr" || ext == ".hdr" || ext == ".dds";
+}
+
+static void AppendEnvironmentMapsFromFolder(
+    const std::filesystem::path& folder,
+    std::vector<std::filesystem::path>& outList)
+{
+    if (folder.empty() || !std::filesystem::exists(folder))
+        return;
+
+    for (const auto& file : std::filesystem::directory_iterator(folder))
+    {
+        if (!file.is_regular_file() || !IsEnvironmentMapMediaFile(file.path()))
+            continue;
+
+        const std::filesystem::path absolutePath = std::filesystem::absolute(file.path());
+        if (std::find(outList.begin(), outList.end(), absolutePath) == outList.end())
+            outList.push_back(absolutePath);
+    }
+}
+
+void Sample::RefreshEnvironmentMapMediaList()
+{
+    m_envMapMediaList.clear();
+
+    std::filesystem::path sceneDirectory;
+    if (!m_currentScenePath.empty() && m_currentScenePath != std::filesystem::path(c_InlineSceneSentinel))
+        sceneDirectory = m_currentScenePath.parent_path();
+
+    const std::filesystem::path assetsRoot = GetLocalPath(c_AssetsFolder);
+    const std::filesystem::path sceneEnvFolder = sceneDirectory / c_EnvMapSubFolder;
+    const std::filesystem::path assetsEnvFolder = assetsRoot / c_EnvMapSubFolder;
+
+    // Runtime Assets/ first, then scene JSON directory (same as texture / EnvironmentLight.path).
+    AppendEnvironmentMapsFromFolder(assetsEnvFolder, m_envMapMediaList);
+    AppendEnvironmentMapsFromFolder(sceneEnvFolder, m_envMapMediaList);
+
+    if (std::filesystem::exists(assetsEnvFolder))
+        m_envMapMediaFolder = assetsEnvFolder;
+    else
+        m_envMapMediaFolder = sceneEnvFolder;
+}
+
 void Sample::SceneLoaded( )
 {
     m_frameIndex = 0;
+
+    RefreshEnvironmentMapMediaList();
 
     m_progressLoading.Set(50);
 
@@ -1948,11 +1983,18 @@ void Sample::PreUpdateLighting(nvrhi::CommandListHandle commandList, bool& needN
 
     auto preUpdateCube = m_envMapBaker->GetEnvMapCube();
 
+    std::filesystem::path sceneDirectory;
+    if (m_currentScenePath != std::filesystem::path(c_InlineSceneSentinel))
+        sceneDirectory = m_currentScenePath.parent_path();
+
     std::string envMapActualPath = m_envMapLocalPath; 
     if (m_envMapOverride != "" && m_envMapOverride != c_EnvMapSceneDefault)
         envMapActualPath = (IsProceduralSky(m_envMapOverride.c_str()))?(m_envMapOverride):(std::string(c_EnvMapSubFolder) + "/" + m_envMapOverride);
-    
-    m_envMapBaker->PreUpdate(commandList, m_CommonPasses, envMapActualPath);
+
+    if (!envMapActualPath.empty() && !IsProceduralSky(envMapActualPath.c_str()))
+        envMapActualPath = ResolveSceneMediaPath(envMapActualPath, sceneDirectory).generic_string();
+
+    m_envMapBaker->PreUpdate(commandList, m_CommonPasses, envMapActualPath, sceneDirectory);
 
     if (preUpdateCube != m_envMapBaker->GetEnvMapCube())
         needNewBindings = true;
@@ -3710,7 +3752,11 @@ bool Sample::LoadGltfMeshFile(const std::filesystem::path& filePath)
     engine::SceneLoadingStats stats;
     engine::SceneImportResult importResult;
 
-    if (!importer->Load(filePath, *m_TextureCache, stats, nullptr, importResult))
+    std::filesystem::path sceneDirectory;
+    if (m_currentScenePath != std::filesystem::path(c_InlineSceneSentinel))
+        sceneDirectory = m_currentScenePath.parent_path();
+
+    if (!importer->Load(filePath, *m_TextureCache, stats, nullptr, importResult, sceneDirectory))
     {
         log::error("GltfImporter failed to load '%s'", filePath.string().c_str());
         return false;

@@ -117,7 +117,11 @@ struct PTMaterialBase
                             BakedShaderPermutation;
 
     virtual void            Write(Json::Value & output) = 0;
-    virtual bool            Read(Json::Value & output, const std::filesystem::path& mediaPath, const std::shared_ptr<donut::engine::TextureCache>& textureCache) = 0;
+    virtual bool            Read(
+                                Json::Value& output,
+                                const std::filesystem::path& mediaPath,
+                                const std::shared_ptr<donut::engine::TextureCache>& textureCache,
+                                const std::filesystem::path& sceneDirectory = std::filesystem::path()) = 0;
 
     virtual bool            HasAlphaTest() const = 0;
 
@@ -209,10 +213,20 @@ struct PTMaterial : public PTMaterialBase
 
     static std::shared_ptr<PTMaterial> SafeCast(const std::shared_ptr<donut::engine::Material>& donutMaterial);
 
-    static std::shared_ptr<PTMaterial> FromJson(Json::Value& input, const std::filesystem::path& mediaPath, const std::shared_ptr<donut::engine::TextureCache>& textureCache, const std::string & modelName, const std::string & name);
+    static std::shared_ptr<PTMaterial> FromJson(
+        Json::Value& input,
+        const std::filesystem::path& mediaPath,
+        const std::shared_ptr<donut::engine::TextureCache>& textureCache,
+        const std::string& modelName,
+        const std::string& name,
+        const std::filesystem::path& sceneDirectory = std::filesystem::path());
 
     virtual void            Write(Json::Value & output) override;
-    virtual bool            Read(Json::Value & output, const std::filesystem::path& mediaPath, const std::shared_ptr<donut::engine::TextureCache>& textureCache) override;
+    virtual bool            Read(
+                                Json::Value& output,
+                                const std::filesystem::path& mediaPath,
+                                const std::shared_ptr<donut::engine::TextureCache>& textureCache,
+                                const std::filesystem::path& sceneDirectory = std::filesystem::path()) override;
 
     virtual MaterialShaderPermutation 
                             ComputeShaderPermutation(const std::string & defaultShaderPath) override;
@@ -292,6 +306,9 @@ private:
     std::unordered_map<std::string, PTTexture> m_textures;
 
     std::filesystem::path           m_mediaPath;
+    std::filesystem::path           m_sceneDirectory;                     // parent directory of the loaded scene description file
+    std::filesystem::path           m_sceneMaterialsPath;                 // <scene-dir>/Materials/
+    std::filesystem::path           m_sceneMaterialsSceneSpecializedPath; // <scene-dir>/Materials/<scene-stem>/
     std::filesystem::path           m_materialsPath;                    // usually "Assets/Materials/"              <- used for materials shared between all scenes
     std::filesystem::path           m_materialsSceneSpecializedPath;    // usually "Assets/Materials/SceneName/"    <- used for materials specific to scene (not shared between scenes)
 

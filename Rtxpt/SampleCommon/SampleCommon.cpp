@@ -424,6 +424,49 @@ void ProgressBarUpdate(int slotIndex, int percentage)
     }
 }
 
+std::filesystem::path ResolveMediaRelativePath(
+    const std::filesystem::path& localPath,
+    std::initializer_list<std::filesystem::path> searchRoots)
+{
+    if (localPath.empty())
+        return {};
+
+    if (localPath.is_absolute())
+        return std::filesystem::absolute(localPath);
+
+    if (std::filesystem::exists(localPath))
+        return std::filesystem::absolute(localPath);
+
+    for (const std::filesystem::path& root : searchRoots)
+    {
+        if (root.empty())
+            continue;
+
+        const std::filesystem::path candidate = root / localPath;
+        if (std::filesystem::exists(candidate))
+            return std::filesystem::absolute(candidate);
+    }
+
+    for (const std::filesystem::path& root : searchRoots)
+    {
+        if (!root.empty())
+            return std::filesystem::absolute(root / localPath);
+    }
+
+    return std::filesystem::absolute(localPath);
+}
+
+std::filesystem::path ResolveSceneMediaPath(
+    const std::filesystem::path& localPath,
+    const std::filesystem::path& sceneDirectory,
+    const std::filesystem::path& mediaPath)
+{
+    const std::filesystem::path assetsRoot = mediaPath.empty()
+        ? GetLocalPath(c_AssetsFolder)
+        : mediaPath;
+    return ResolveMediaRelativePath(localPath, { assetsRoot, sceneDirectory });
+}
+
 std::filesystem::path GetLocalPath(std::string subfolder)
 {
     static std::filesystem::path oneChoice;
