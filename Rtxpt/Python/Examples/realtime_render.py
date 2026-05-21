@@ -86,6 +86,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--oidn-quality", type=int, default=2, help="OIDN quality: 0=Fast, 1=Balanced, 2=High.")
     parser.add_argument("--oidn-passes", type=int, default=2, help="OIDN guides: 0=ColorOnly, 1=Albedo, 2=AlbedoNormal.")
     parser.add_argument("--oidn-prefilter", type=int, default=2, help="OIDN prefilter: 0=None, 1=Fast, 2=Accurate.")
+    parser.add_argument(
+        "--restir-di",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable ReSTIR DI in realtime modes. Use --no-restir-di to disable it.",
+    )
     parser.add_argument("--camera-pos", type=float, nargs=3, metavar=("X", "Y", "Z"))
     parser.add_argument("--camera-dir", type=float, nargs=3, metavar=("X", "Y", "Z"))
     parser.add_argument(
@@ -115,7 +121,7 @@ def configure_mode(renderer, rtxpt, args: argparse.Namespace) -> tuple[str, bool
     settings.bounce_count = args.bounces
     settings.use_nee = True
     settings.enable_tone_mapping = True
-    settings.use_restir_di = True
+    settings.use_restir_di = args.restir_di
     settings.use_restir_gi = True
 
     denoiser = args.denoiser
