@@ -3802,8 +3802,6 @@ namespace
                 {
                     current->specularColor = color;
                     current->hasSpecularColor = true;
-                    if (dm::any(color > 0.0f) && current->metalness == 0.0f)
-                        current->useSpecularGlossModel = true;
                 }
                 else
                 {
@@ -3885,7 +3883,14 @@ namespace
                 else if (keyword == "map_ka" || keyword == "map_ao" || keyword == "map_occlusion")
                     current->occlusionTexture = texture;
                 else if (keyword == "map_ke" || keyword == "map_emissive")
+                {
                     current->emissiveTexture = texture;
+                    if (!current->hasEmissiveColor)
+                    {
+                        current->emissiveColor = dm::float3(1.0f);
+                        current->hasEmissiveColor = true;
+                    }
+                }
                 else if (keyword == "map_d" || keyword == "map_opacity")
                     current->opacityTexture = texture;
                 else if (keyword == "map_tf")
@@ -4446,9 +4451,7 @@ static bool LoadObjModelFile(
         material->specularColor = hasSpecGlossTexture && objMaterial.useSpecularGlossModel && !objMaterial.hasSpecularColor
             ? dm::float3(1.0f)
             : objMaterial.specularColor;
-        material->emissiveColor = !objMaterial.emissiveTexture.empty() && !objMaterial.hasEmissiveColor
-            ? dm::float3(1.0f)
-            : objMaterial.emissiveColor;
+        material->emissiveColor = objMaterial.emissiveColor;
         if (objMaterial.useSpecularGlossModel)
         {
             material->roughness = !objMaterial.glossinessTexture.empty() && !objMaterial.hasRoughness
