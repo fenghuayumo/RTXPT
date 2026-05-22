@@ -1,6 +1,6 @@
 # RTXPT Python API Reference
 
-本文档记录当前 `rtxpt` Python 绑定的使用方式。API 来源主要是：
+This document describes how to use the current `rtxpt` Python bindings. The API is primarily defined in:
 
 - `Rtxpt/Python/PythonBindingsCore.cpp`
 - `Rtxpt/Python/PythonBindings_Extension.cpp`
@@ -9,56 +9,55 @@
 
 ## Two Usage Modes
 
-`rtxpt` 模块有两种运行模式，共享大部分类型：
+The `rtxpt` module supports two runtime modes that share most types:
 
 | Mode | How to use | Typical use |
 | --- | --- | --- |
-| `extension` | 在独立 Python 进程里 `import rtxpt`，创建 `rtxpt.Renderer(...)` | 离线渲染、批处理、截图、自动化测试、3DGS 快速验证 |
-| `embed` | 从正在运行的 `Rtxpt.exe` 内部脚本系统 `import rtxpt` | 实时调参、调试、场景/材质/灯光热修改 |
+| `extension` | `import rtxpt` in a standalone Python process and create `rtxpt.Renderer(...)` | Offline rendering, batch jobs, screenshots, automated tests, quick 3DGS validation |
+| `embed` | `import rtxpt` from the in-app script system inside a running `Rtxpt.exe` | Live parameter tuning, debugging, hot edits to scenes/materials/lights |
 
-运行时可通过：
+At runtime you can check the active mode with:
 
 ```python
 import rtxpt
 print(rtxpt.MODE)  # "extension" or "embed"
 ```
 
-在 extension mode 里，`rtxpt.Renderer` 会创建自己的窗口/设备/scene。  
-在 embed mode 里，没有 `Renderer` 类；使用 `rtxpt.app()` 获取当前 `Rtxpt.exe` 内的 renderer。
+In extension mode, `rtxpt.Renderer` creates its own window, device, and scene.  
+In embed mode there is no `Renderer` class; use `rtxpt.app()` to access the renderer inside the running `Rtxpt.exe`.
 
 ## Import Setup
 
-构建 `rtxpt_py` target 后，Python extension 输出在 `bin/`：
+After building the `rtxpt_py` target, the Python extension is emitted under `bin/`:
 
 ```text
 bin/rtxpt.cp311-win_amd64.pyd
 ```
 
-推荐安装方式是直接在仓库根目录运行：
+The recommended install path is to run from the repository root:
 
 ```powershell
 python -m pip install .
 python -c "import rtxpt; print(rtxpt.MODE)"
 ```
 
-这会从当前 `bin/` 里的 native extension、运行时 DLL/so、shader 和必要 Assets
-组装本地 binary wheel，并安装到当前 Python 环境。也可以先显式构建 wheel，再安装：
+This assembles a local binary wheel from the native extension, runtime DLLs/shared libraries, shaders, and required assets in `bin/`, then installs it into the active Python environment. You can also build the wheel explicitly first:
 
 ```powershell
 python Support/python/build_wheel.py
 python -m pip install dist/rtxpt-*.whl
 ```
 
-打包参数可以用环境变量控制：
+Packaging options can be controlled with environment variables:
 
 | Variable | Default | Values |
 | --- | --- | --- |
-| `RTXPT_WHEEL_VERSION` | `0.2.0` | 任意 PEP 440 version |
+| `RTXPT_WHEEL_VERSION` | `0.2.0` | Any PEP 440 version string |
 | `RTXPT_WHEEL_ASSETS` | `minimal` | `minimal`, `full`, `none` |
 | `RTXPT_WHEEL_DYNAMIC_SHADERS` | `bin` | `bin`, `full`, `none` |
-| `RTXPT_WHEEL_SHADER_API` | Windows 为 `d3d12`，其他平台为 `vulkan` | `d3d12`, `vulkan`, `both` |
+| `RTXPT_WHEEL_SHADER_API` | `d3d12` on Windows, `vulkan` elsewhere | `d3d12`, `vulkan`, `both` |
 
-开发时如果不想安装，也仍然可以把 `bin/` 放进 `sys.path` 或 `PYTHONPATH`：
+During development, if you prefer not to install the package, you can still add `bin/` to `sys.path` or `PYTHONPATH`:
 
 ```python
 import sys
@@ -67,7 +66,7 @@ sys.path.insert(0, r"D:\ProgramCode\C++\RTXPT\bin")
 import rtxpt
 ```
 
-也可以参考 `Rtxpt/Python/Examples/test_splat_interactive.py` 中的 `configure_import_path()`。
+See `configure_import_path()` in `Rtxpt/Python/Examples/test_splat_interactive.py` for another example.
 
 ## Quick Examples
 
@@ -203,24 +202,82 @@ The script passes full COLMAP pinhole intrinsics (`fx`, `fy`, `cx`, `cy`) throug
 
 When `--convert-rdf-to-donut` is enabled, which is the default, both the PLY loader and the COLMAP camera pose are converted from RDF/COLMAP coordinates into RTXPT/Donut coordinates. `--mip-antialiasing` is enabled by default and can be disabled with `--no-mip-antialiasing`.
 
+### Load OBJ Meshes With Materials
+
+`Renderer.load_mesh_file(...)` and `Sample.load_mesh_file(...)` append OBJ models to the current scene. The loader parses `mtllib` directives in the OBJ file and resolves `.mtl` and texture paths relative to the OBJ/MTL directory by default.
+
+The current OBJ/MTL importer recognizes these common material fields:
+
+- Scalars/colors: `Kd`, `Ks`, `Ke`, `Ns`, `Pr`, `Pm`, `Ni`, `d`, `Tr`, `Tf`.
+- Base color / diffuse maps: `map_Kd`, `map_basecolor`.
+- PBR metal-roughness: `map_Pr`, `map_roughness`, `map_Pm`, `map_metallic`, `map_metalness`.
+- Packed PBR maps: `map_orm`, `map_mr`, `map_metallicroughness`, `map_occlusionroughnessmetallic`.
+- AO / occlusion: `map_Ka`, `map_ao`, `map_occlusion`.
+- Normal / bump: `map_Bump`, `bump`, `norm`, `map_normal`, including `-bm` strength.
+- Specular / glossiness: `map_Ks`, `map_Ns` for specular-gloss materials.
+- Emissive / opacity / transmission: `map_Ke`, `map_emissive`, `map_d`, `map_opacity`, `map_Tf`.
+
+When an MTL file provides separate roughness and metallic maps, the importer builds an in-memory ORM texture for RTXPT: `R=AO`, `G=roughness`, `B=metallic`, `A=1`. The `-imfchan` channel selector is honored when reading single-channel maps.
+
+```python
+import rtxpt
+
+obj_path = r"D:/assets/m-plate-pbr_final/textured.obj"
+
+with rtxpt.Renderer(scene="builtin:plane", headless=True, accumulation_target=32) as r:
+    if not r.load_mesh_file(obj_path):
+        raise RuntimeError(f"failed to load {obj_path}")
+
+    # Imported materials are available after the mesh is appended and at least
+    # one update frame has run.
+    r.step_n(1)
+
+    for mat in r.app.scene.get_materials():
+        print(mat.model_name, mat.name, mat.base_color, mat.roughness, mat.metalness)
+
+    r.step_until_accumulated()
+    r.save_screenshot("obj_materials.png")
+```
+
 ### Edit Materials
 
 ```python
 import rtxpt
 
-r = rtxpt.Renderer(scene="bistro-programmer-art.scene.json", headless=True)
-scene = r.app.scene
-mat = scene.find_material("SomeMaterialName")
-if mat:
+with rtxpt.Renderer(scene="bistro-programmer-art.scene.json", headless=True) as r:
+    scene = r.app.scene
+
+    # Names can come from scene.get_materials(), the MTL `newmtl` name, or the
+    # material unique_name printed below.
+    for mat in scene.get_materials():
+        print(mat.model_name, mat.name, mat.unique_name)
+
+    mat = scene.find_material("SomeMaterialName")
+    if mat is None:
+        raise RuntimeError("material not found")
+
+    # Scalars/colors multiply the loaded texture values when the corresponding
+    # texture remains enabled.
     mat.base_color = (1.0, 0.2, 0.1)
     mat.roughness = 0.35
     mat.metalness = 0.0
-    mat.mark_dirty()
+    mat.normal_texture_scale = 0.75
 
-r.step_n(4)
-r.save_screenshot("material_edit.png")
-r.close()
+    # Texture bindings are created by the loader. Python can enable/disable
+    # already-loaded texture slots at runtime.
+    mat.enable_base_texture = False
+    mat.enable_orm_texture = True
+    mat.enable_normal_texture = True
+
+    # In reference accumulation mode, reset after any visible edit so old
+    # accumulated samples do not remain mixed into the image.
+    r.app.reset_accumulation()
+
+    r.step_n(4)
+    r.save_screenshot("material_edit.png")
 ```
+
+All writable `Material` properties mark the material GPU data dirty automatically; calling `mark_dirty()` is only needed if native-side data was changed without going through a Python property setter. Texture replacement from Python is not exposed yet, so changing from one image file to another currently requires reloading the scene/model or editing the source material files before import.
 
 ### Edit Lights
 
@@ -296,6 +353,7 @@ These functions exist in both embed and extension mode unless noted.
 | `rtxpt.log_warning(message)` | `None` | Writes to RTXPT log at warning level. |
 | `rtxpt.log_error(message)` | `None` | Writes to RTXPT log at error level. |
 | `rtxpt.Renderer(...)` | `Renderer` | Extension mode only. Creates a standalone renderer/device/window or headless backbuffer. |
+| `rtxpt.builtin_scene_json(builtin_model="plane_cube")` | `str` | Extension mode only. Returns minimal inline scene JSON for `plane`, `cube`, `sphere`, or `plane_cube`. |
 
 ## Enums
 
@@ -368,6 +426,7 @@ All enums are arithmetic, so `int(enum_value)` works and enum values can be assi
 | `GaussianSplatStorageFormat` | `Float32=0`, `Float16=1`, `Uint8=2` |
 | `GaussianSplatFrustumCulling` | `Disabled=0`, `AtDistanceStage=1`, `AtRasterStage=2` |
 | `GaussianSplatShadowMode` | `Disabled=0`, `Hard=1`, `Soft=2` |
+| `GaussianSplatFTBSyncMode` | `Disabled=0`, `Interlock=1` |
 
 ## `Renderer` Class
 
@@ -407,7 +466,7 @@ rtxpt.Renderer(
 | `close()` | `None` | Tears down renderer/device. Also called by destructor/context manager. |
 | `load_scene(scene_name, wait_until_ready=True)` | `bool` | Switch scene. |
 | `load_gaussian_splats(file_name, convert_rdf_to_donut=True)` | `bool` | Append a `.ply` 3DGS scene object under the current scene root. |
-| `load_mesh_file(file_name)` | `bool` | Append a `.gltf`, `.glb`, or `.obj` mesh under the current scene root. |
+| `load_mesh_file(file_name)` | `bool` | Append a `.gltf`, `.glb`, or `.obj` mesh under the current scene root. OBJ imports resolve referenced `.mtl` files and common material textures relative to the OBJ/MTL path. |
 | `get_scene_bounds()` | `tuple | None` | Active scene world-space `((min.xyz), (max.xyz))` AABB from C++ `Scene::GetSceneBounds()`. |
 | `scene_bounds` | `tuple | None` | Property alias for `get_scene_bounds()`. |
 | `scene_bounds_center` | `tuple | None` | Center of `scene_bounds`. |
@@ -505,7 +564,7 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | --- | --- | --- |
 | `set_scene(scene_name, force_reload=False)` | `None` | Switch scene. |
 | `load_gaussian_splats(file_name, convert_rdf_to_donut=True)` | `bool` | Append a 3DGS `.ply` node to the current scene. |
-| `load_mesh_file(file_name)` | `bool` | Append a `.gltf`, `.glb`, or `.obj` mesh node to the current scene. |
+| `load_mesh_file(file_name)` | `bool` | Append a `.gltf`, `.glb`, or `.obj` mesh node to the current scene. OBJ imports resolve referenced `.mtl` files and common material textures relative to the OBJ/MTL path. |
 | `set_environment_map(path)` | `None` | Override scene environment map source. |
 | `get_scene()` | `Scene | None` | Return the current loaded scene. |
 | `get_scene_bounds()` | `tuple | None` | Shortcut for `scene.get_scene_bounds()`. |
@@ -521,7 +580,7 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | `sample.find_mesh(name)` | `Mesh | None` | Compatibility alias for `scene.find_mesh(name)`. |
 | `sample.get_mesh_vertices(mesh)` | `list[tuple]` | Returns object-space `(x, y, z)` vertex positions. |
 | `sample.set_mesh_vertices(mesh, vertices, recompute_normals=True, rebuild_acceleration_structure=True)` | `None` | Replaces all positions. `vertices` must contain exactly `mesh.vertex_count` triples. |
-| `sample.deform_mesh(mesh, callback, recompute_normals=True, rebuild_acceleration_structure=True)` | `int` | Calls `callback(index, (x, y, z))` for each vertex. Return a new triple or `None`; returns edited vertex count. |
+| `sample.deform_mesh(mesh, callback, recompute_normals=True, rebuild_acceleration_structure=True)` | `int` | Calls `callback(index, (x, y, z))` for each vertex. Return a new triple or `None`; returns the processed vertex count. |
 
 `set_mesh_vertices(...)` updates object-space mesh bounds, optionally recomputes normals,
 refreshes GPU vertex data, resets accumulation, and requests acceleration structure rebuild
@@ -702,10 +761,14 @@ The table below lists the Python-facing 3DGS settings that are currently wired i
 | `gaussian_splat_use_tlas_instances` | `bool` | Use TLAS instances for splat shadow acceleration. |
 | `gaussian_splat_blas_compaction` | `bool` | Enable BLAS compaction for splat shadow acceleration data. |
 | `gaussian_splat_mip_antialiasing` | `bool` | Enable splat mip antialiasing path. |
+| `gaussian_splat_quantize_normals` | `bool` | Quantize generated splat normals in the RTX path. |
+| `gaussian_splat_ftb_sync_mode` | `int/GaussianSplatFTBSyncMode` | Front-to-back synchronization mode. |
 | `gaussian_splat_frustum_culling` | `int/GaussianSplatFrustumCulling` | Frustum culling stage. |
 | `gaussian_splat_frustum_dilation` | `float` | Culling frustum dilation. |
 | `gaussian_splat_screen_size_culling` | `bool` | Enable screen-size splat culling. |
 | `gaussian_splat_min_pixel_coverage` | `float` | Minimum pixel coverage for screen-size culling. |
+| `gaussian_splat_depth_iso_threshold` | `float` | Depth/iso-surface threshold used by the splat path. |
+| `gaussian_splat_fragment_shader_barycentric` | `bool` | Use fragment-shader barycentric path when supported. |
 | `gaussian_splat_scale` | `float` | Projected footprint scale. |
 | `gaussian_splat_alpha_scale` | `float` | Opacity multiplier. |
 | `gaussian_splat_brightness` | `float` | Color multiplier. |
@@ -725,7 +788,16 @@ The table below lists the Python-facing 3DGS settings that are currently wired i
 | `gaussian_splat_shadow_soft_sample_count` | `int` | Soft shadow sample count. |
 | `gaussian_splat_rtx_kernel_degree` | `int` | RTX splat kernel degree. |
 | `gaussian_splat_rtx_adaptive_clamp` | `bool` | Enable adaptive RTX alpha clamp. |
+| `gaussian_splat_rtx_alpha_clamp` | `float` | Manual RTX alpha clamp value. |
+| `gaussian_splat_rtx_minimum_transmittance` | `float` | Minimum transmittance clamp for RTX splat tracing. |
+| `gaussian_splat_rtx_trace_strategy` | `int` | RTX splat tracing strategy selector. |
+| `gaussian_splat_rtx_particle_samples_per_pass` | `int` | RTX particle samples processed per pass. |
+| `gaussian_splat_rtx_maximum_pass_count` | `int` | Maximum RTX splat trace pass count. |
 | `gaussian_splat_rtx_particle_shadow_offset` | `float` | RTX particle shadow offset. |
+| `gaussian_splat_rtx_particle_shadow_threshold` | `float` | RTX particle shadow threshold. |
+| `gaussian_splat_rtx_colored_shadow_strength` | `float` | Strength for colored splat shadows. |
+| `gaussian_splat_rtx_mesh_composite_threshold` | `float` | Mesh/splat composite threshold. |
+| `gaussian_splat_rtx_depth_iso_threshold` | `float` | RTX depth/iso-surface threshold. |
 | `gaussian_splat_object_count` | `int` | Read-only 3DGS scene object count. |
 | `gaussian_splat_count` | `int` | Read-only total splat count across current 3DGS scene objects. |
 | `gaussian_splat_file_name` | `str` | Read-only single path or multi-object summary. |
@@ -845,6 +917,47 @@ Methods:
 | API | Notes |
 | --- | --- |
 | `mark_dirty()` | Force material GPU buffer refresh next frame. |
+
+Runtime update rules:
+
+- Property setters already mark `GPUDataDirty`; the edited material is uploaded on the next rendered frame.
+- In reference/accumulation mode, call `Sample.reset_accumulation()` or set `settings.reset_accumulation = True` after visible edits, otherwise previous samples remain blended with the old material.
+- Color values are linear RGB. The Python setter does not clamp inputs, so keep factors in the physically meaningful range unless deliberately testing extremes.
+- If a texture slot is enabled, scalar/color parameters multiply the texture sample. In metal-rough mode, effective base color is `base_color * base_texture.rgb`, roughness is `roughness * ORM.g`, and metalness is `metalness * ORM.b` unless `metalness_in_red_channel=True`.
+- `opacity` is multiplied by the base texture alpha when `enable_base_texture=True`.
+- Python currently exposes texture slot toggles, not texture file replacement. Use `enable_base_texture`, `enable_orm_texture`, `enable_normal_texture`, `enable_emissive_texture`, and `enable_transmission_texture` to turn imported textures on/off at runtime.
+- Pure parameter edits such as color, roughness, metalness, opacity, texture toggles, emissive intensity, normal scale, and IOR are next-frame updates. Bigger classification edits such as `use_specular_gloss`, `enable_alpha_testing`, `alpha_cutoff`, `enable_transmission`, `exclude_from_nee`, or `skip_render` can change shader hit groups, alpha handling, lighting participation, or acceleration-structure metadata; after those edits, request a shader/acceleration refresh.
+
+Typical runtime material override:
+
+```python
+app = rtxpt.app()              # embed mode
+# app = renderer.app           # extension mode
+scene = app.scene
+
+mat = scene.find_material("material_0")
+if mat is not None:
+    mat.base_color = (0.8, 0.9, 1.0)
+    mat.roughness = 0.18
+    mat.metalness = 0.85
+    mat.enable_base_texture = False
+    mat.enable_orm_texture = True
+    mat.normal_texture_scale = 1.0
+    app.reset_accumulation()
+```
+
+When changing material classification flags:
+
+```python
+mat.enable_alpha_testing = True
+mat.alpha_cutoff = 0.4
+mat.enable_transmission = True
+mat.transmission_factor = 0.6
+
+app.reset_accumulation()
+app.request_shader_reload()
+app.request_accel_rebuild()
+```
 
 ## `SceneNode` Class
 
