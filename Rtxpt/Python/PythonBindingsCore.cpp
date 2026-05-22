@@ -36,6 +36,7 @@
 #include <donut/core/math/math.h>
 
 #include <stdexcept>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -45,6 +46,7 @@ using donut::math::float2;
 using donut::math::float3;
 using donut::math::float4;
 using donut::math::double3;
+using donut::math::double4;
 
 // Singleton consumed by embed mode (set by PythonScripting before Py_Initialize).
 // In extension mode this stays nullptr - Renderer manages its own Sample.
@@ -96,6 +98,48 @@ namespace
         if (v.size() != 3)
             throw std::runtime_error("Expected an iterable of 3 floats");
         return double3(v[0], v[1], v[2]);
+    }
+
+    double4 ToDouble4(const nb::object& src)
+    {
+        nb::sequence seq = nb::cast<nb::sequence>(src);
+        std::vector<double> v;
+        for (auto h : seq) v.push_back(nb::cast<double>(nb::handle(h)));
+        if (v.size() != 4)
+            throw std::runtime_error("Expected an iterable of 4 floats");
+        return double4(v[0], v[1], v[2], v[3]);
+    }
+
+    nb::tuple DQuatToXYZWTuple(const donut::math::dquat& q)
+    {
+        return nb::make_tuple(q.x, q.y, q.z, q.w);
+    }
+
+    donut::math::dquat ToDQuatXYZW(const nb::object& src)
+    {
+        return donut::math::dquat::fromXYZW(ToDouble4(src));
+    }
+
+    double3 DQuatToEulerRadiansXYZ(const donut::math::dquat& rotation)
+    {
+        const donut::math::double3x3 m = rotation.toMatrix();
+
+        const double y = std::asin(donut::math::clamp(-m.m_data[2], -1.0, 1.0));
+        const double cy = std::cos(y);
+
+        double x = 0.0;
+        double z = 0.0;
+        if (std::abs(cy) > 1e-8)
+        {
+            x = std::atan2(m.m_data[5], m.m_data[8]);
+            z = std::atan2(m.m_data[1], m.m_data[0]);
+        }
+        else
+        {
+            x = std::atan2(-m.m_data[7], m.m_data[4]);
+        }
+
+        return double3(x, y, z);
     }
 
     std::shared_ptr<SceneGraph> SceneGraphFromScene(const std::shared_ptr<Scene>& scene)
@@ -618,6 +662,14 @@ void RegisterCoreBindings(nb::module_& m)
             [](SceneGraphNode& self) { return Double3ToTuple(self.GetTranslation()); },
             [](SceneGraphNode& self, nb::object v) { self.SetTranslation(ToDouble3(v)); },
             "Local translation in scene space.")
+        .def_prop_rw("rotation",
+            [](SceneGraphNode& self) { return DQuatToXYZWTuple(self.GetRotation()); },
+            [](SceneGraphNode& self, nb::object v) { self.SetRotation(ToDQuatXYZW(v)); },
+            "Local rotation quaternion as `(x, y, z, w)`.")
+        .def_prop_rw("euler",
+            [](SceneGraphNode& self) { return Double3ToTuple(DQuatToEulerRadiansXYZ(self.GetRotation())); },
+            [](SceneGraphNode& self, nb::object v) { self.SetRotation(donut::math::rotationQuat(ToDouble3(v))); },
+            "Local XYZ Euler rotation in radians. Assigning this updates the node rotation quaternion.")
         .def_prop_rw("scaling",
             [](SceneGraphNode& self) { return Double3ToTuple(self.GetScaling()); },
             [](SceneGraphNode& self, nb::object v) { self.SetScaling(ToDouble3(v)); },

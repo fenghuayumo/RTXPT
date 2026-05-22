@@ -857,8 +857,14 @@ Returned by `Scene.find_node()` and `Sample.find_node()`.
 | `mesh` | `Mesh | None` |
 | `is_mesh` | `bool` |
 | `translation` | `(x, y, z)` |
+| `rotation` | `(x, y, z, w)` quaternion |
+| `euler` | `(x, y, z)` radians |
 | `scaling` | `(x, y, z)` |
 | `bounds` | `((min.xyz), (max.xyz)) \| None` |
+
+`rotation` and `euler` both write the node's local Transform rotation. Assigning
+`euler` converts XYZ radians to the stored quaternion; assigning `rotation` expects
+an XYZW quaternion, matching scene JSON.
 
 ## `Mesh` Class
 
