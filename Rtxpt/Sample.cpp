@@ -19,6 +19,7 @@
 #include <donut/app/DeviceManager.h>
 #include <donut/core/log.h>
 #include <donut/core/json.h>
+#include <donut/core/vfs/VFS.h>
 #include <donut/core/math/float.h>
 #include <donut/core/math/math.h>
 #include <donut/shaders/light_cb.h>
@@ -29,7 +30,9 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -61,6 +64,9 @@
 
 #include <donut/engine/GltfImporter.h>
 #include <donut/engine/SceneGraph.h>
+
+#include <stb_image.h>
+#include <stb_image_write.h>
 
 #include "SampleGame/GameScene.h"
 
@@ -3345,14 +3351,51 @@ namespace
         return result;
     }
 
-    std::string ExtractObjTexturePath(const std::vector<std::string>& tokens)
+    enum class ObjTextureChannel : uint8_t
     {
+        Red,
+        Green,
+        Blue,
+        Alpha,
+        Luminance
+    };
+
+    struct ObjTextureReference
+    {
+        std::filesystem::path path;
+        ObjTextureChannel channel = ObjTextureChannel::Red;
+        float bumpMultiplier = 1.0f;
+        bool hasBumpMultiplier = false;
+
+        [[nodiscard]] bool empty() const { return path.empty(); }
+    };
+
+    ObjTextureChannel ParseObjTextureChannel(const std::string& text)
+    {
+        const std::string channel = ToLowerString(text);
+        if (channel == "g" || channel == "green")
+            return ObjTextureChannel::Green;
+        if (channel == "b" || channel == "blue")
+            return ObjTextureChannel::Blue;
+        if (channel == "a" || channel == "alpha" || channel == "m" || channel == "matte")
+            return ObjTextureChannel::Alpha;
+        if (channel == "l" || channel == "lum" || channel == "luminance" || channel == "z")
+            return ObjTextureChannel::Luminance;
+        return ObjTextureChannel::Red;
+    }
+
+    ObjTextureReference ExtractObjTextureReference(const std::vector<std::string>& tokens)
+    {
+        ObjTextureReference result;
         size_t i = 1;
         while (i < tokens.size())
         {
             const std::string option = ToLowerString(tokens[i]);
             if (option.empty() || option[0] != '-' || IsFloatToken(option))
-                return StripMatchingQuotes(JoinTokens(tokens, i));
+            {
+                result.path = StripMatchingQuotes(JoinTokens(tokens, i));
+                return result;
+            }
 
             if (option == "-o" || option == "-s" || option == "-t")
             {
@@ -3364,14 +3407,27 @@ namespace
             {
                 i += 3;
             }
+            else if (option == "-imfchan")
+            {
+                i += 2;
+                if (i <= tokens.size())
+                    result.channel = ParseObjTextureChannel(tokens[i - 1]);
+            }
+            else if (option == "-bm")
+            {
+                i += 2;
+                if (i <= tokens.size())
+                {
+                    result.bumpMultiplier = std::strtof(tokens[i - 1].c_str(), nullptr);
+                    result.hasBumpMultiplier = true;
+                }
+            }
             else if (
-                option == "-bm" ||
                 option == "-boost" ||
                 option == "-blendu" ||
                 option == "-blendv" ||
                 option == "-cc" ||
                 option == "-clamp" ||
-                option == "-imfchan" ||
                 option == "-texres" ||
                 option == "-type")
             {
@@ -3385,7 +3441,7 @@ namespace
             }
         }
 
-        return {};
+        return result;
     }
 
     std::filesystem::path ResolveObjTexturePath(const std::filesystem::path& materialFilePath, const std::string& texturePath)
@@ -3394,6 +3450,171 @@ namespace
         if (path.is_absolute())
             return path.lexically_normal();
         return (materialFilePath.parent_path() / path).lexically_normal();
+    }
+
+    struct ObjImageRgba8
+    {
+        int width = 0;
+        int height = 0;
+        std::vector<uint8_t> rgba;
+
+        [[nodiscard]] bool valid() const { return width > 0 && height > 0 && !rgba.empty(); }
+    };
+
+    bool LoadObjImageRgba8(const ObjTextureReference& texture, ObjImageRgba8& output)
+    {
+        if (texture.empty())
+            return false;
+
+        std::ifstream file(texture.path, std::ios::binary | std::ios::ate);
+        if (!file)
+        {
+            donut::log::warning("OBJ texture '%s' could not be opened for channel packing.", texture.path.string().c_str());
+            return false;
+        }
+
+        const std::streamsize fileSize = file.tellg();
+        if (fileSize <= 0 || fileSize > std::numeric_limits<int>::max())
+        {
+            donut::log::warning("OBJ texture '%s' has unsupported size for channel packing.", texture.path.string().c_str());
+            return false;
+        }
+
+        file.seekg(0, std::ios::beg);
+        std::vector<uint8_t> encoded(static_cast<size_t>(fileSize));
+        if (!file.read(reinterpret_cast<char*>(encoded.data()), fileSize))
+        {
+            donut::log::warning("OBJ texture '%s' could not be read for channel packing.", texture.path.string().c_str());
+            return false;
+        }
+
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        stbi_uc* pixels = stbi_load_from_memory(encoded.data(), static_cast<int>(encoded.size()), &width, &height, &channels, 4);
+        if (!pixels || width <= 0 || height <= 0)
+        {
+            donut::log::warning("OBJ texture '%s' could not be decoded for channel packing.", texture.path.string().c_str());
+            if (pixels)
+                stbi_image_free(pixels);
+            return false;
+        }
+
+        output.width = width;
+        output.height = height;
+        output.rgba.assign(pixels, pixels + static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+        stbi_image_free(pixels);
+        return true;
+    }
+
+    uint8_t SampleObjTextureChannel(
+        const ObjImageRgba8& image,
+        ObjTextureChannel channel,
+        uint32_t x,
+        uint32_t y,
+        uint32_t targetWidth,
+        uint32_t targetHeight)
+    {
+        if (!image.valid())
+            return 255;
+
+        const uint32_t sourceX = targetWidth > 1
+            ? x * static_cast<uint32_t>(image.width - 1) / (targetWidth - 1)
+            : 0;
+        const uint32_t sourceY = targetHeight > 1
+            ? y * static_cast<uint32_t>(image.height - 1) / (targetHeight - 1)
+            : 0;
+        const size_t offset = (static_cast<size_t>(sourceY) * static_cast<size_t>(image.width) + sourceX) * 4;
+        const uint8_t r = image.rgba[offset + 0];
+        const uint8_t g = image.rgba[offset + 1];
+        const uint8_t b = image.rgba[offset + 2];
+        const uint8_t a = image.rgba[offset + 3];
+
+        switch (channel)
+        {
+        case ObjTextureChannel::Green: return g;
+        case ObjTextureChannel::Blue: return b;
+        case ObjTextureChannel::Alpha: return a;
+        case ObjTextureChannel::Luminance:
+            return static_cast<uint8_t>(dm::clamp(0.2126f * float(r) + 0.7152f * float(g) + 0.0722f * float(b), 0.0f, 255.0f));
+        case ObjTextureChannel::Red:
+        default:
+            return r;
+        }
+    }
+
+    std::string SanitizeObjGeneratedTextureComponent(std::string text)
+    {
+        if (text.empty())
+            text = "default";
+
+        for (char& c : text)
+        {
+            const unsigned char uc = static_cast<unsigned char>(c);
+            if (!std::isalnum(uc) && c != '_' && c != '-' && c != '.')
+                c = '_';
+        }
+        return text;
+    }
+
+    std::string MakeGeneratedObjTextureName(
+        const std::filesystem::path& objFilePath,
+        const std::string& materialName,
+        const char* suffix)
+    {
+        const std::string fileName = objFilePath.stem().string()
+            + "."
+            + SanitizeObjGeneratedTextureComponent(materialName)
+            + "."
+            + suffix
+            + ".png";
+        return (objFilePath.parent_path() / fileName).generic_string();
+    }
+
+    void AppendObjPngBytes(void* context, void* data, int size)
+    {
+        if (!context || !data || size <= 0)
+            return;
+
+        auto& bytes = *static_cast<std::vector<uint8_t>*>(context);
+        const uint8_t* begin = static_cast<const uint8_t*>(data);
+        bytes.insert(bytes.end(), begin, begin + size);
+    }
+
+    std::shared_ptr<LoadedTexture> LoadGeneratedObjTexture(
+        const std::shared_ptr<TextureCache>& textureCache,
+        const std::string& generatedName,
+        const std::vector<uint8_t>& rgba,
+        uint32_t width,
+        uint32_t height,
+        bool sRGB)
+    {
+        if (!textureCache || rgba.empty() || width == 0 || height == 0)
+            return nullptr;
+
+        std::vector<uint8_t> encodedPng;
+        const int encoded = stbi_write_png_to_func(
+            AppendObjPngBytes,
+            &encodedPng,
+            static_cast<int>(width),
+            static_cast<int>(height),
+            4,
+            rgba.data(),
+            static_cast<int>(width * 4));
+
+        if (!encoded || encodedPng.empty())
+        {
+            donut::log::warning("Failed to encode generated OBJ material texture '%s'.", generatedName.c_str());
+            return nullptr;
+        }
+
+        void* pngData = malloc(encodedPng.size());
+        if (!pngData)
+            return nullptr;
+
+        std::memcpy(pngData, encodedPng.data(), encodedPng.size());
+        auto blob = std::make_shared<vfs::Blob>(pngData, encodedPng.size());
+        return textureCache->LoadTextureFromMemoryDeferred(blob, generatedName, "image/png", sRGB);
     }
 
     int ResolveObjIndex(int index, size_t count)
@@ -3495,6 +3716,14 @@ namespace
         return len > 1e-20f ? value / len : fallback;
     }
 
+    dm::float3 BuildFallbackTangent(dm::float3 normal)
+    {
+        const dm::float3 axis = std::abs(normal.z) < 0.999f
+            ? dm::float3(0.0f, 0.0f, 1.0f)
+            : dm::float3(0.0f, 1.0f, 0.0f);
+        return NormalizeOrFallback(dm::cross(axis, normal), dm::float3(1.0f, 0.0f, 0.0f));
+    }
+
     struct ObjMaterialInfo
     {
         std::string name = "default";
@@ -3514,14 +3743,17 @@ namespace
         bool hasMetalness = false;
         bool hasTransmission = false;
         bool useSpecularGlossModel = false;
-        bool metalnessInRedChannel = false;
-        std::filesystem::path baseTexturePath;
-        std::filesystem::path metalRoughTexturePath;
-        std::filesystem::path normalTexturePath;
-        std::filesystem::path emissiveTexturePath;
-        std::filesystem::path occlusionTexturePath;
-        std::filesystem::path opacityTexturePath;
-        std::filesystem::path transmissionTexturePath;
+        ObjTextureReference baseTexture;
+        ObjTextureReference packedMetalRoughTexture;
+        ObjTextureReference roughnessTexture;
+        ObjTextureReference metalnessTexture;
+        ObjTextureReference specularTexture;
+        ObjTextureReference glossinessTexture;
+        ObjTextureReference normalTexture;
+        ObjTextureReference emissiveTexture;
+        ObjTextureReference occlusionTexture;
+        ObjTextureReference opacityTexture;
+        ObjTextureReference transmissionTexture;
     };
 
     std::unordered_map<std::string, ObjMaterialInfo> LoadObjMaterialLibrary(const std::filesystem::path& filePath)
@@ -3551,7 +3783,7 @@ namespace
             if (keyword == "newmtl" && tokens.size() >= 2)
             {
                 ObjMaterialInfo material;
-                material.name = tokens[1];
+                material.name = StripMatchingQuotes(JoinTokens(tokens, 1));
                 auto [it, inserted] = materials.insert_or_assign(material.name, material);
                 current = &it->second;
             }
@@ -3617,62 +3849,218 @@ namespace
             }
             else if (current && (
                 keyword == "map_kd" ||
+                keyword == "map_basecolor" ||
                 keyword == "map_ka" ||
+                keyword == "map_ao" ||
+                keyword == "map_occlusion" ||
                 keyword == "map_ks" ||
                 keyword == "map_ns" ||
                 keyword == "map_pr" ||
+                keyword == "map_roughness" ||
                 keyword == "map_pm" ||
+                keyword == "map_metallic" ||
+                keyword == "map_metalness" ||
+                keyword == "map_orm" ||
+                keyword == "map_mr" ||
+                keyword == "map_metallicroughness" ||
+                keyword == "map_occlusionroughnessmetallic" ||
                 keyword == "map_bump" ||
                 keyword == "bump" ||
                 keyword == "norm" ||
+                keyword == "map_normal" ||
                 keyword == "map_ke" ||
+                keyword == "map_emissive" ||
                 keyword == "map_d" ||
+                keyword == "map_opacity" ||
                 keyword == "map_tf"))
             {
-                const std::string texturePath = ExtractObjTexturePath(tokens);
-                if (texturePath.empty())
+                ObjTextureReference texture = ExtractObjTextureReference(tokens);
+                if (texture.path.empty())
                     continue;
 
-                const std::filesystem::path resolvedPath = ResolveObjTexturePath(filePath, texturePath);
+                texture.path = ResolveObjTexturePath(filePath, texture.path.string());
 
-                if (keyword == "map_kd")
-                    current->baseTexturePath = resolvedPath;
-                else if (keyword == "map_ka")
-                    current->occlusionTexturePath = resolvedPath;
-                else if (keyword == "map_ke")
-                    current->emissiveTexturePath = resolvedPath;
-                else if (keyword == "map_d")
-                    current->opacityTexturePath = resolvedPath;
+                if (keyword == "map_kd" || keyword == "map_basecolor")
+                    current->baseTexture = texture;
+                else if (keyword == "map_ka" || keyword == "map_ao" || keyword == "map_occlusion")
+                    current->occlusionTexture = texture;
+                else if (keyword == "map_ke" || keyword == "map_emissive")
+                    current->emissiveTexture = texture;
+                else if (keyword == "map_d" || keyword == "map_opacity")
+                    current->opacityTexture = texture;
                 else if (keyword == "map_tf")
-                    current->transmissionTexturePath = resolvedPath;
-                else if (keyword == "map_bump" || keyword == "bump" || keyword == "norm")
-                    current->normalTexturePath = resolvedPath;
-                else if (keyword == "map_pm")
+                    current->transmissionTexture = texture;
+                else if (keyword == "map_bump" || keyword == "bump" || keyword == "norm" || keyword == "map_normal")
                 {
-                    if (current->metalRoughTexturePath.empty())
-                    {
-                        current->metalRoughTexturePath = resolvedPath;
-                        current->metalnessInRedChannel = true;
-                        current->useSpecularGlossModel = false;
-                    }
+                    current->normalTexture = texture;
+                    if (texture.hasBumpMultiplier)
+                        current->normalTextureScale = texture.bumpMultiplier;
                 }
-                else if (keyword == "map_pr" || keyword == "map_ns")
+                else if (keyword == "map_pm" || keyword == "map_metallic" || keyword == "map_metalness")
                 {
-                    current->metalRoughTexturePath = resolvedPath;
-                    current->metalnessInRedChannel = false;
-                    if (keyword == "map_pr")
-                        current->useSpecularGlossModel = false;
+                    current->metalnessTexture = texture;
+                    current->useSpecularGlossModel = false;
                 }
-                else if (keyword == "map_ks" && current->metalRoughTexturePath.empty())
+                else if (keyword == "map_pr" || keyword == "map_roughness")
                 {
-                    current->metalRoughTexturePath = resolvedPath;
-                    current->metalnessInRedChannel = false;
-                    current->useSpecularGlossModel = true;
+                    current->roughnessTexture = texture;
+                    current->useSpecularGlossModel = false;
+                }
+                else if (
+                    keyword == "map_orm" ||
+                    keyword == "map_mr" ||
+                    keyword == "map_metallicroughness" ||
+                    keyword == "map_occlusionroughnessmetallic")
+                {
+                    current->packedMetalRoughTexture = texture;
+                    current->useSpecularGlossModel = false;
+                }
+                else if (keyword == "map_ns")
+                {
+                    current->glossinessTexture = texture;
+                    if (current->roughnessTexture.empty() && current->metalnessTexture.empty() && current->packedMetalRoughTexture.empty())
+                        current->useSpecularGlossModel = true;
+                }
+                else if (keyword == "map_ks")
+                {
+                    current->specularTexture = texture;
+                    if (current->roughnessTexture.empty() && current->metalnessTexture.empty() && current->packedMetalRoughTexture.empty())
+                        current->useSpecularGlossModel = true;
                 }
             }
         }
 
         return materials;
+    }
+
+    bool SelectObjPackedTextureSize(
+        const ObjImageRgba8& a,
+        const ObjImageRgba8& b,
+        const ObjImageRgba8& c,
+        uint32_t& width,
+        uint32_t& height)
+    {
+        const ObjImageRgba8* images[] = { &a, &b, &c };
+        for (const ObjImageRgba8* image : images)
+        {
+            if (image->valid())
+            {
+                width = static_cast<uint32_t>(image->width);
+                height = static_cast<uint32_t>(image->height);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    std::shared_ptr<LoadedTexture> BuildObjMetalRoughTexture(
+        const ObjMaterialInfo& material,
+        const std::filesystem::path& objFilePath,
+        const std::shared_ptr<TextureCache>& textureCache)
+    {
+        if (material.occlusionTexture.empty() && material.roughnessTexture.empty() && material.metalnessTexture.empty())
+            return nullptr;
+
+        ObjImageRgba8 occlusionImage;
+        ObjImageRgba8 roughnessImage;
+        ObjImageRgba8 metalnessImage;
+
+        LoadObjImageRgba8(material.occlusionTexture, occlusionImage);
+        LoadObjImageRgba8(material.roughnessTexture, roughnessImage);
+        LoadObjImageRgba8(material.metalnessTexture, metalnessImage);
+
+        uint32_t width = 0;
+        uint32_t height = 0;
+        if (!SelectObjPackedTextureSize(occlusionImage, roughnessImage, metalnessImage, width, height))
+            return nullptr;
+
+        std::vector<uint8_t> rgba(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+        for (uint32_t y = 0; y < height; ++y)
+        {
+            for (uint32_t x = 0; x < width; ++x)
+            {
+                const size_t offset = (static_cast<size_t>(y) * width + x) * 4;
+                rgba[offset + 0] = occlusionImage.valid()
+                    ? SampleObjTextureChannel(occlusionImage, material.occlusionTexture.channel, x, y, width, height)
+                    : 255;
+                rgba[offset + 1] = roughnessImage.valid()
+                    ? SampleObjTextureChannel(roughnessImage, material.roughnessTexture.channel, x, y, width, height)
+                    : 255;
+                rgba[offset + 2] = metalnessImage.valid()
+                    ? SampleObjTextureChannel(metalnessImage, material.metalnessTexture.channel, x, y, width, height)
+                    : 255;
+                rgba[offset + 3] = 255;
+            }
+        }
+
+        return LoadGeneratedObjTexture(
+            textureCache,
+            MakeGeneratedObjTextureName(objFilePath, material.name, "orm"),
+            rgba,
+            width,
+            height,
+            false);
+    }
+
+    std::shared_ptr<LoadedTexture> BuildObjSpecGlossTexture(
+        const ObjMaterialInfo& material,
+        const std::filesystem::path& objFilePath,
+        const std::shared_ptr<TextureCache>& textureCache)
+    {
+        if (material.specularTexture.empty() && material.glossinessTexture.empty())
+            return nullptr;
+
+        ObjImageRgba8 specularImage;
+        ObjImageRgba8 glossinessImage;
+
+        LoadObjImageRgba8(material.specularTexture, specularImage);
+        LoadObjImageRgba8(material.glossinessTexture, glossinessImage);
+
+        uint32_t width = 0;
+        uint32_t height = 0;
+        if (!SelectObjPackedTextureSize(specularImage, glossinessImage, ObjImageRgba8{}, width, height))
+            return nullptr;
+
+        std::vector<uint8_t> rgba(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+        for (uint32_t y = 0; y < height; ++y)
+        {
+            for (uint32_t x = 0; x < width; ++x)
+            {
+                const size_t offset = (static_cast<size_t>(y) * width + x) * 4;
+                if (specularImage.valid())
+                {
+                    const uint32_t sourceX = width > 1
+                        ? x * static_cast<uint32_t>(specularImage.width - 1) / (width - 1)
+                        : 0;
+                    const uint32_t sourceY = height > 1
+                        ? y * static_cast<uint32_t>(specularImage.height - 1) / (height - 1)
+                        : 0;
+                    const size_t sourceOffset = (static_cast<size_t>(sourceY) * static_cast<size_t>(specularImage.width) + sourceX) * 4;
+                    rgba[offset + 0] = specularImage.rgba[sourceOffset + 0];
+                    rgba[offset + 1] = specularImage.rgba[sourceOffset + 1];
+                    rgba[offset + 2] = specularImage.rgba[sourceOffset + 2];
+                }
+                else
+                {
+                    rgba[offset + 0] = 255;
+                    rgba[offset + 1] = 255;
+                    rgba[offset + 2] = 255;
+                }
+
+                rgba[offset + 3] = glossinessImage.valid()
+                    ? SampleObjTextureChannel(glossinessImage, material.glossinessTexture.channel, x, y, width, height)
+                    : 255;
+            }
+        }
+
+        return LoadGeneratedObjTexture(
+            textureCache,
+            MakeGeneratedObjTextureName(objFilePath, material.name, "specgloss"),
+            rgba,
+            width,
+            height,
+            true);
     }
 }
 
@@ -3860,35 +4248,38 @@ static bool LoadObjModelFile(
         if (tokens.empty())
             continue;
 
-        if (tokens[0] == "v" && tokens.size() >= 4)
+        const std::string keyword = ToLowerString(tokens[0]);
+
+        if (keyword == "v" && tokens.size() >= 4)
         {
             positions.push_back(dm::float3(
                 std::strtof(tokens[1].c_str(), nullptr),
                 std::strtof(tokens[2].c_str(), nullptr),
                 std::strtof(tokens[3].c_str(), nullptr)));
         }
-        else if (tokens[0] == "vt" && tokens.size() >= 3)
+        else if (keyword == "vt" && tokens.size() >= 3)
         {
             texcoords.push_back(dm::float2(
                 std::strtof(tokens[1].c_str(), nullptr),
                 1.0f - std::strtof(tokens[2].c_str(), nullptr)));
         }
-        else if (tokens[0] == "vn" && tokens.size() >= 4)
+        else if (keyword == "vn" && tokens.size() >= 4)
         {
             normals.push_back(NormalizeOrFallback(dm::float3(
                 std::strtof(tokens[1].c_str(), nullptr),
                 std::strtof(tokens[2].c_str(), nullptr),
                 std::strtof(tokens[3].c_str(), nullptr)), dm::float3(0.0f, 1.0f, 0.0f)));
         }
-        else if (tokens[0] == "mtllib" && tokens.size() >= 2)
+        else if (keyword == "mtllib" && tokens.size() >= 2)
         {
-            auto loaded = LoadObjMaterialLibrary(filePath.parent_path() / tokens[1]);
+            const std::filesystem::path materialLibrary = StripMatchingQuotes(JoinTokens(tokens, 1));
+            auto loaded = LoadObjMaterialLibrary(filePath.parent_path() / materialLibrary);
             for (auto& [name, material] : loaded)
                 materials.insert_or_assign(name, material);
         }
-        else if (tokens[0] == "usemtl" && tokens.size() >= 2)
+        else if (keyword == "usemtl" && tokens.size() >= 2)
         {
-            currentMaterial = tokens[1];
+            currentMaterial = StripMatchingQuotes(JoinTokens(tokens, 1));
             if (!materials.contains(currentMaterial))
             {
                 ObjMaterialInfo material;
@@ -3897,7 +4288,7 @@ static bool LoadObjModelFile(
             }
             currentGroup = &getGroup(currentMaterial);
         }
-        else if (tokens[0] == "f" && tokens.size() >= 4)
+        else if (keyword == "f" && tokens.size() >= 4)
         {
             std::vector<uint32_t> polygon;
             polygon.reserve(tokens.size() - 1);
@@ -3953,6 +4344,8 @@ static bool LoadObjModelFile(
         }
     }
 
+    std::vector<dm::float3> resolvedNormals;
+    resolvedNormals.reserve(mesh->buffers->positionData.size());
     mesh->buffers->normalData.reserve(mesh->buffers->positionData.size());
     for (size_t i = 0; i < mesh->buffers->positionData.size(); ++i)
     {
@@ -3960,7 +4353,55 @@ static bool LoadObjModelFile(
         const dm::float3 normal = normalIndex >= 0
             ? normals[normalIndex]
             : NormalizeOrFallback(accumulatedNormals[i], dm::float3(0.0f, 1.0f, 0.0f));
+        resolvedNormals.push_back(normal);
         mesh->buffers->normalData.push_back(dm::vectorToSnorm8(normal));
+    }
+
+    std::vector<dm::float3> accumulatedTangents(mesh->buffers->positionData.size(), dm::float3(0.0f));
+    std::vector<dm::float3> accumulatedBitangents(mesh->buffers->positionData.size(), dm::float3(0.0f));
+    for (const ObjGroup& group : groups)
+    {
+        for (size_t i = 0; i + 2 < group.indices.size(); i += 3)
+        {
+            const uint32_t i0 = group.indices[i + 0];
+            const uint32_t i1 = group.indices[i + 1];
+            const uint32_t i2 = group.indices[i + 2];
+            const dm::float3& p0 = mesh->buffers->positionData[i0];
+            const dm::float3& p1 = mesh->buffers->positionData[i1];
+            const dm::float3& p2 = mesh->buffers->positionData[i2];
+            const dm::float2& uv0 = mesh->buffers->texcoord1Data[i0];
+            const dm::float2& uv1 = mesh->buffers->texcoord1Data[i1];
+            const dm::float2& uv2 = mesh->buffers->texcoord1Data[i2];
+
+            const dm::float3 edge1 = p1 - p0;
+            const dm::float3 edge2 = p2 - p0;
+            const dm::float2 deltaUv1 = uv1 - uv0;
+            const dm::float2 deltaUv2 = uv2 - uv0;
+            const float determinant = deltaUv1.x * deltaUv2.y - deltaUv2.x * deltaUv1.y;
+            if (std::abs(determinant) <= 1e-20f)
+                continue;
+
+            const float invDeterminant = 1.0f / determinant;
+            const dm::float3 tangent = (edge1 * deltaUv2.y - edge2 * deltaUv1.y) * invDeterminant;
+            const dm::float3 bitangent = (edge2 * deltaUv1.x - edge1 * deltaUv2.x) * invDeterminant;
+
+            accumulatedTangents[i0] += tangent;
+            accumulatedTangents[i1] += tangent;
+            accumulatedTangents[i2] += tangent;
+            accumulatedBitangents[i0] += bitangent;
+            accumulatedBitangents[i1] += bitangent;
+            accumulatedBitangents[i2] += bitangent;
+        }
+    }
+
+    mesh->buffers->tangentData.reserve(mesh->buffers->positionData.size());
+    for (size_t i = 0; i < mesh->buffers->positionData.size(); ++i)
+    {
+        const dm::float3 normal = resolvedNormals[i];
+        dm::float3 tangent = accumulatedTangents[i] - normal * dm::dot(normal, accumulatedTangents[i]);
+        tangent = NormalizeOrFallback(tangent, BuildFallbackTangent(normal));
+        const float handedness = dm::dot(dm::cross(normal, tangent), accumulatedBitangents[i]) < 0.0f ? -1.0f : 1.0f;
+        mesh->buffers->tangentData.push_back(dm::vectorToSnorm8(dm::float4(tangent, handedness)));
     }
 
     auto loadObjTexture = [&](const std::filesystem::path& texturePath, bool sRGB) -> std::shared_ptr<LoadedTexture>
@@ -3978,6 +4419,11 @@ static bool LoadObjModelFile(
         return textureCache->LoadTextureFromFileDeferred(texturePath, sRGB);
     };
 
+    auto loadObjTextureReference = [&](const ObjTextureReference& texture, bool sRGB) -> std::shared_ptr<LoadedTexture>
+    {
+        return loadObjTexture(texture.path, sRGB);
+    };
+
     for (const ObjGroup& group : groups)
     {
         if (group.indices.empty())
@@ -3990,35 +4436,60 @@ static bool LoadObjModelFile(
         auto material = std::dynamic_pointer_cast<MaterialEx>(sceneTypeFactory->CreateMaterial());
         material->name = objMaterial.name;
         material->modelFileName = filePath.string();
-        material->baseOrDiffuseColor = !objMaterial.baseTexturePath.empty() && !objMaterial.hasBaseColor
+        const bool hasPbrRoughnessTexture = !objMaterial.roughnessTexture.empty() || !objMaterial.packedMetalRoughTexture.empty();
+        const bool hasPbrMetalnessTexture = !objMaterial.metalnessTexture.empty() || !objMaterial.packedMetalRoughTexture.empty();
+        const bool hasSpecGlossTexture = !objMaterial.specularTexture.empty() || !objMaterial.glossinessTexture.empty();
+
+        material->baseOrDiffuseColor = !objMaterial.baseTexture.empty() && !objMaterial.hasBaseColor
             ? dm::float3(1.0f)
             : objMaterial.baseColor;
-        material->specularColor = !objMaterial.metalRoughTexturePath.empty() && objMaterial.useSpecularGlossModel && !objMaterial.hasSpecularColor
+        material->specularColor = hasSpecGlossTexture && objMaterial.useSpecularGlossModel && !objMaterial.hasSpecularColor
             ? dm::float3(1.0f)
             : objMaterial.specularColor;
-        material->emissiveColor = !objMaterial.emissiveTexturePath.empty() && !objMaterial.hasEmissiveColor
+        material->emissiveColor = !objMaterial.emissiveTexture.empty() && !objMaterial.hasEmissiveColor
             ? dm::float3(1.0f)
             : objMaterial.emissiveColor;
-        material->roughness = !objMaterial.metalRoughTexturePath.empty() && !objMaterial.hasRoughness
-            ? 1.0f
-            : objMaterial.roughness;
-        material->metalness = objMaterial.metalnessInRedChannel && !objMaterial.hasMetalness
-            ? 1.0f
-            : objMaterial.metalness;
+        if (objMaterial.useSpecularGlossModel)
+        {
+            material->roughness = !objMaterial.glossinessTexture.empty() && !objMaterial.hasRoughness
+                ? 0.0f
+                : objMaterial.roughness;
+            material->metalness = objMaterial.metalness;
+        }
+        else
+        {
+            material->roughness = hasPbrRoughnessTexture && !objMaterial.hasRoughness
+                ? 1.0f
+                : objMaterial.roughness;
+            material->metalness = hasPbrMetalnessTexture && !objMaterial.hasMetalness
+                ? 1.0f
+                : objMaterial.metalness;
+        }
         material->opacity = objMaterial.opacity;
         material->normalTextureScale = objMaterial.normalTextureScale;
         material->useSpecularGlossModel = objMaterial.useSpecularGlossModel;
-        material->metalnessInRedChannel = objMaterial.metalnessInRedChannel;
-        material->transmissionFactor = !objMaterial.transmissionTexturePath.empty() && !objMaterial.hasTransmission
+        material->metalnessInRedChannel = false;
+        material->transmissionFactor = !objMaterial.transmissionTexture.empty() && !objMaterial.hasTransmission
             ? 1.0f
             : objMaterial.transmissionFactor;
-        material->baseOrDiffuseTexture = loadObjTexture(objMaterial.baseTexturePath, true);
-        material->metalRoughOrSpecularTexture = loadObjTexture(objMaterial.metalRoughTexturePath, material->useSpecularGlossModel);
-        material->normalTexture = loadObjTexture(objMaterial.normalTexturePath, false);
-        material->emissiveTexture = loadObjTexture(objMaterial.emissiveTexturePath, true);
-        material->occlusionTexture = loadObjTexture(objMaterial.occlusionTexturePath, false);
-        material->opacityTexture = loadObjTexture(objMaterial.opacityTexturePath, false);
-        material->transmissionTexture = loadObjTexture(objMaterial.transmissionTexturePath, false);
+        material->baseOrDiffuseTexture = loadObjTextureReference(objMaterial.baseTexture, true);
+        if (objMaterial.useSpecularGlossModel)
+        {
+            material->metalRoughOrSpecularTexture = BuildObjSpecGlossTexture(objMaterial, filePath, textureCache);
+            if (!material->metalRoughOrSpecularTexture)
+                material->metalRoughOrSpecularTexture = loadObjTextureReference(objMaterial.specularTexture, true);
+        }
+        else
+        {
+            material->metalRoughOrSpecularTexture = BuildObjMetalRoughTexture(objMaterial, filePath, textureCache);
+            if (!material->metalRoughOrSpecularTexture)
+                material->metalRoughOrSpecularTexture = loadObjTextureReference(objMaterial.packedMetalRoughTexture, false);
+        }
+        material->normalTexture = loadObjTextureReference(objMaterial.normalTexture, false);
+        material->emissiveTexture = loadObjTextureReference(objMaterial.emissiveTexture, true);
+        material->occlusionTexture = loadObjTextureReference(objMaterial.occlusionTexture, false);
+        material->opacityTexture = loadObjTextureReference(objMaterial.opacityTexture, false);
+        material->transmissionTexture = loadObjTextureReference(objMaterial.transmissionTexture, false);
         if (material->transmissionFactor > 0.0f || material->transmissionTexture)
             material->domain = objMaterial.opacity < 0.999f ? MaterialDomain::TransmissiveAlphaBlended : MaterialDomain::Transmissive;
         else

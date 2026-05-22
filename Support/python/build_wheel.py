@@ -357,7 +357,7 @@ def main() -> int:
     package_dir = STAGING_DIR / "rtxpt"
     shutil.copytree(PYTHON_PACKAGE_DIR, package_dir)
 
-    dynamic_shaders = "none" if args.no_dynamic_shader_bin else args.dynamic_shaders
+    dynamic_shaders = "none" if getattr(args, "no_dynamic_shader_bin", False) else args.dynamic_shaders
 
     if args.precompile_dynamic_shaders:
         if dynamic_shaders == "none":
