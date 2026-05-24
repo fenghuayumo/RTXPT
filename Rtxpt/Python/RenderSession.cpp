@@ -24,6 +24,9 @@
 #include <donut/engine/TextureCache.h>
 #include <donut/engine/CommonRenderPasses.h>
 #include <donut/app/UserInterfaceUtils.h>
+#if RTXPT_WITH_NATIVE_DLSS
+#include <donut/render/DLSS.h>
+#endif
 
 #include <GLFW/glfw3.h>
 #include <json/json.h>
@@ -34,6 +37,7 @@
 #include <cstring>
 #include <filesystem>
 #include <thread>
+#include <vector>
 
 #if DONUT_WITH_DX12
 #include <d3d12.h>
@@ -53,6 +57,12 @@ using namespace donut;
 
 namespace
 {
+    void AppendUnique(std::vector<std::string>& values, const std::string& value)
+    {
+        if (std::find(values.begin(), values.end(), value) == values.end())
+            values.push_back(value);
+    }
+
     std::filesystem::path GetCurrentModuleDirectory()
     {
 #ifdef _WIN32
@@ -326,8 +336,13 @@ namespace
 #endif
 
 #if DONUT_WITH_VULKAN
-        p.requiredVulkanDeviceExtensions.push_back("VK_KHR_buffer_device_address");
-        p.requiredVulkanDeviceExtensions.push_back("VK_KHR_format_feature_flags2");
+#if RTXPT_WITH_NATIVE_DLSS
+        donut::render::DLSS::GetRequiredVulkanExtensions(
+            p.requiredVulkanInstanceExtensions,
+            p.requiredVulkanDeviceExtensions);
+#endif
+        AppendUnique(p.requiredVulkanDeviceExtensions, "VK_KHR_buffer_device_address");
+        AppendUnique(p.requiredVulkanDeviceExtensions, "VK_KHR_format_feature_flags2");
         p.ignoredVulkanValidationMessageLocations.push_back(0x0000000023e43bb7);
         p.ignoredVulkanValidationMessageLocations.push_back(0x000000000609a13b);
         p.ignoredVulkanValidationMessageLocations.push_back(0x00000000c5a3822a);

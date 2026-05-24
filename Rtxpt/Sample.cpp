@@ -163,6 +163,30 @@ namespace
             && ui.GaussianSplatEmissionMaxProxyCount > 0;
     }
 
+#if RTXPT_WITH_NATIVE_DLSS
+    float GetNativeDLSSResolutionScale(SI::DLSSMode mode)
+    {
+        switch (mode)
+        {
+        case SI::DLSSMode::eUltraPerformance: return 1.0f / 3.0f;
+        case SI::DLSSMode::eMaxPerformance:   return 0.5f;
+        case SI::DLSSMode::eBalanced:         return 0.58f;
+        case SI::DLSSMode::eMaxQuality:       return 2.0f / 3.0f;
+        case SI::DLSSMode::eUltraQuality:     return 0.77f;
+        case SI::DLSSMode::eDLAA:             return 1.0f;
+        default:                              return 0.58f;
+        }
+    }
+
+    uint2 GetNativeDLSSRenderSize(uint2 displaySize, SI::DLSSMode mode)
+    {
+        const float scale = GetNativeDLSSResolutionScale(mode);
+        return uint2(
+            std::max(1u, uint32_t(std::round(float(displaySize.x) * scale))),
+            std::max(1u, uint32_t(std::round(float(displaySize.y) * scale))));
+    }
+#endif
+
     float4x4 MakePinholeIntrinsicsProjection(float fx, float fy, float cx, float cy, float width, float height, float zNear)
     {
         width = std::max(width, 1.0f);
@@ -257,6 +281,22 @@ void Sample::Init(const std::string& preferredScene,
 
     m_CommonPasses = std::make_shared<engine::CommonRenderPasses>(GetDevice(), m_shaderFactory);
     m_bindingCache = std::make_unique<engine::BindingCache>(GetDevice());
+
+#if RTXPT_WITH_NATIVE_DLSS
+    m_nativeDLSS = donut::render::DLSS::Create(GetDevice(), *m_shaderFactory, donut::app::GetDirectoryWithExecutable().string());
+    if (m_nativeDLSS)
+    {
+        m_ui.IsDLSSSuported = m_nativeDLSS->IsDlssSupported();
+        m_ui.IsDLSSRRSupported = m_nativeDLSS->IsRayReconstructionSupported();
+        log::info("Native NGX DLSS support: DLSS=%s, DLSS-RR=%s.",
+            m_ui.IsDLSSSuported ? "yes" : "no",
+            m_ui.IsDLSSRRSupported ? "yes" : "no");
+    }
+    else
+    {
+        log::warning("Native NGX DLSS object was not created.");
+    }
+#endif
 
     m_ui.EnableGaussianSplats = true;
     m_ui.GaussianSplatDepthTest = m_cmdLine.GaussianSplatDepthTest;
@@ -2457,6 +2497,67 @@ void Sample::StreamlinePreRender()
 #endif // #if DONUT_WITH_STREAMLINE
 }
 
+#if RTXPT_WITH_NATIVE_DLSS
+void Sample::NativeDLSSPreRender()
+{
+    if (!m_ui.RealtimeMode)
+    {
+        m_renderSize = m_displaySize;
+        return;
+    }
+
+    if (m_nativeDLSS)
+    {
+        m_ui.IsDLSSSuported = m_nativeDLSS->IsDlssSupported();
+        m_ui.IsDLSSRRSupported = m_nativeDLSS->IsRayReconstructionSupported();
+    }
+
+    if (m_ui.RealtimeAA == 3 && !m_ui.IsDLSSRRSupported)
+    {
+        log::warning("Requested DLSS-RR mode not available. Switching to DLSS.");
+        m_ui.RealtimeAA = 2;
+    }
+
+    if (m_ui.RealtimeAA == 2 && !m_ui.IsDLSSSuported)
+    {
+        log::warning("Requested DLSS mode not available. Switching to TAA.");
+        m_ui.RealtimeAA = 1;
+    }
+
+    const bool usingDLSS = (m_ui.RealtimeAA == 2 || m_ui.RealtimeAA == 3);
+    const bool changeToDLSSMode = usingDLSS && m_ui.DLSSLastRealtimeAA != m_ui.RealtimeAA;
+
+    if (changeToDLSSMode || m_ui.DLSSMode == SI::DLSSMode::eOff)
+    {
+        m_ui.DLSSLastMode = SampleUIData::DLSSModeDefault;
+        m_ui.DLSSMode = SampleUIData::DLSSModeDefault;
+        m_ui.DLSSLastDisplaySize = { 0, 0 };
+    }
+
+    m_ui.DLSSLastRealtimeAA = m_ui.RealtimeAA;
+
+    if (usingDLSS)
+    {
+        const bool dlssResizeRequired =
+            (m_ui.DLSSMode != m_ui.DLSSLastMode) ||
+            (m_displaySize.x != m_ui.DLSSLastDisplaySize.x) ||
+            (m_displaySize.y != m_ui.DLSSLastDisplaySize.y);
+
+        if (dlssResizeRequired)
+        {
+            m_ui.DLSSLastMode = m_ui.DLSSMode;
+            m_ui.DLSSLastDisplaySize = m_displaySize;
+        }
+
+        m_renderSize = GetNativeDLSSRenderSize(m_displaySize, m_ui.DLSSMode);
+    }
+    else
+    {
+        m_renderSize = m_displaySize;
+    }
+}
+#endif
+
 void Sample::SetSceneTime( double sceneTime ) 
 { 
     if (m_sampleGame->IsInitialized())
@@ -2690,6 +2791,9 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
     PreRender();
 
     StreamlinePreRender();
+#if RTXPT_WITH_NATIVE_DLSS
+    NativeDLSSPreRender();
+#endif
 
  
     m_displayAspectRatio = m_displaySize.x/(float)m_displaySize.y;
@@ -4962,6 +5066,78 @@ void Sample::Denoise(nvrhi::IFramebuffer* framebuffer)
     }
 }
 
+#if RTXPT_WITH_NATIVE_DLSS
+bool Sample::EvaluateNativeDLSS(bool reset)
+{
+    if (!m_nativeDLSS || !(m_ui.RealtimeAA == 2 || m_ui.RealtimeAA == 3))
+        return false;
+
+    const bool useRayReconstruction = m_ui.RealtimeAA == 3;
+    if (useRayReconstruction && !m_nativeDLSS->IsRayReconstructionSupported())
+        return false;
+    if (!useRayReconstruction && !m_nativeDLSS->IsDlssSupported())
+        return false;
+
+    if (useRayReconstruction)
+    {
+        RAII_SCOPE(m_commandList->beginMarker("DLSSRR_PrepareInputs");, m_commandList->endMarker(););
+
+        SampleMiniConstants miniConstants = { uint4(0, 0, 0, 0) };
+        nvrhi::TextureDesc tdesc = m_renderTargets->OutputColor->getDesc();
+        m_postProcess->Apply(m_commandList, PostProcess::ComputePassType::DLSSRRDenoiserPrepareInputs,
+            m_constantBuffer, miniConstants, m_bindingSet, m_bindingLayout, tdesc.width, tdesc.height);
+    }
+
+    donut::render::DLSS::InitParameters initParams;
+    initParams.inputWidth = m_renderSize.x;
+    initParams.inputHeight = m_renderSize.y;
+    initParams.outputWidth = m_displaySize.x;
+    initParams.outputHeight = m_displaySize.y;
+    initParams.useLinearDepth = false;
+    initParams.useAutoExposure = true;
+    initParams.useRayReconstruction = useRayReconstruction;
+
+    m_nativeDLSS->Init(initParams);
+
+    const bool initialized = useRayReconstruction
+        ? m_nativeDLSS->IsRayReconstructionInitialized()
+        : m_nativeDLSS->IsDlssInitialized();
+    if (!initialized)
+        return false;
+
+    donut::render::DLSS::EvaluateParameters evaluateParams;
+    evaluateParams.inputColorTexture = m_renderTargets->OutputColor;
+    evaluateParams.outputColorTexture = m_renderTargets->ProcessedOutputColor;
+    evaluateParams.depthTexture = m_renderTargets->Depth;
+    evaluateParams.motionVectorsTexture = m_renderTargets->ScreenMotionVectors;
+    evaluateParams.motionVectorScaleX = 1.0f / float(m_renderSize.x);
+    evaluateParams.motionVectorScaleY = 1.0f / float(m_renderSize.y);
+    evaluateParams.resetHistory = reset || m_ui.ResetRealtimeCaches;
+
+    if (useRayReconstruction)
+    {
+        evaluateParams.diffuseAlbedo = m_renderTargets->RRDiffuseAlbedo;
+        evaluateParams.specularAlbedo = m_renderTargets->RRSpecAlbedo;
+        evaluateParams.normalRoughness = m_renderTargets->RRNormalsAndRoughness;
+    }
+
+    const bool evaluated = m_nativeDLSS->Evaluate(m_commandList, evaluateParams, *m_view);
+    if (evaluated)
+    {
+        static bool loggedNativeDLSSEvaluation = false;
+        if (!loggedNativeDLSSEvaluation)
+        {
+            log::info("Native NGX %s evaluated successfully at %ux%u -> %ux%u.",
+                useRayReconstruction ? "DLSS-RR" : "DLSS",
+                m_renderSize.x, m_renderSize.y, m_displaySize.x, m_displaySize.y);
+            loggedNativeDLSSEvaluation = true;
+        }
+    }
+
+    return evaluated;
+}
+#endif
+
 void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
 {
     if (m_ui.RealtimeMode)
@@ -5130,6 +5306,28 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
             m_commandList->beginMarker("NoDenoiserFinalMerge");
             m_postProcess->Apply(m_commandList, PostProcess::ComputePassType::NoDenoiserFinalMerge, m_constantBuffer, miniConstants, m_bindingSet, m_bindingLayout, tdesc.width, tdesc.height);
             m_commandList->endMarker();
+        }
+#endif
+
+#if RTXPT_WITH_NATIVE_DLSS
+        bool nativeDLSSEvaluated = false;
+        if (m_ui.RealtimeAA == 2 || m_ui.RealtimeAA == 3)
+            nativeDLSSEvaluated = EvaluateNativeDLSS(reset);
+
+        if (!nativeDLSSEvaluated && (m_ui.RealtimeAA == 2 || m_ui.RealtimeAA == 3))
+        {
+            if (m_ui.ActualUseStandaloneDenoiser())
+            {
+                m_commandList->copyTexture(m_renderTargets->ProcessedOutputColor, nvrhi::TextureSlice(), m_renderTargets->OutputColor, nvrhi::TextureSlice());
+            }
+            else
+            {
+                SampleMiniConstants miniConstants = { uint4(0, 0, 0, 0) };
+                nvrhi::TextureDesc tdesc = m_renderTargets->OutputColor->getDesc();
+                m_commandList->beginMarker("NoDenoiserFinalMerge");
+                m_postProcess->Apply(m_commandList, PostProcess::ComputePassType::NoDenoiserFinalMerge, m_constantBuffer, miniConstants, m_bindingSet, m_bindingLayout, tdesc.width, tdesc.height);
+                m_commandList->endMarker();
+            }
         }
 #endif
     }

@@ -308,27 +308,27 @@ namespace
 static const PerformancePreset s_performancePresets[] = {
     //                                    NEECand  NEEFull  NEEMIS  SPP  Bounce  DiffBnc   TexLOD  NestDiel  EnvMIP  SPActive  PrimRepl  Bloom    LDSampl    FflyTrhld    DLSS (on separate line due to macros)
     { "Ultra Performance",                3,       1,       1,      1,   10,     1,        0.0f,   1,        3,      2,        false,    false,   false,     0.01,
-#if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
         SI::DLSSMode::eUltraPerformance,
 #endif
     },
     { "Performance",                      3,       1,       1,      1,   12,     1,       -0.5f,   1,        2,      3,        true,     true,    false,     0.05,
-#if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
         SI::DLSSMode::eMaxPerformance,
 #endif
     },
     { "Balanced",                         5,       1,       1,      1,   18,     2,       -1.0f,   1,        2,      3,        true,     true,    true,      0.1,
-#if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
         SI::DLSSMode::eBalanced,
 #endif
     },
     { "Quality",                          3,       2,       1,      1,   24,     3,       -1.5f,   1,        2,      3,        true,     true,    true,      0.2,
-#if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
         SI::DLSSMode::eMaxQuality,
 #endif
     },
     { "Ultra Quality",                    3,       2,       0,      1,   48,     3,       -1.5f,   2,        1,      3,        true,     true,    true,      1.0,
-#if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
         SI::DLSSMode::eDLAA,
 #endif
     },
@@ -344,7 +344,7 @@ static bool MatchesPreset(const SampleUIData& ui, const PerformancePreset& p)
     if (ui.TexLODBias != p.TexLODBias)                                          return false;
     if (ui.NestedDielectricsQuality != p.NestedDielectricsQuality)              return false;
     if (ui.EnvironmentMapDiffuseSampleMIPLevel != p.EnvironmentMapDiffuseSampleMIPLevel) return false;
-#if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
     if (ui.DLSSMode != p.DLSSMode)                                              return false;
 #endif
     if (ui.StablePlanesActiveCount != p.StablePlanesActiveCount)                return false;
@@ -366,7 +366,7 @@ static void ApplyPreset(SampleUIData& ui, const PerformancePreset& p)
     ui.TexLODBias = p.TexLODBias;
     ui.NestedDielectricsQuality = p.NestedDielectricsQuality;
     ui.EnvironmentMapDiffuseSampleMIPLevel = p.EnvironmentMapDiffuseSampleMIPLevel;
-#if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
     ui.DLSSMode = p.DLSSMode;
 #endif
     ui.StablePlanesActiveCount = p.StablePlanesActiveCount;
@@ -485,30 +485,30 @@ void SampleUI::Animate(float elapsedTimeSeconds)
     m_showSceneWidgets = dm::clamp(m_showSceneWidgets + elapsedTimeSeconds * 8.0f * ((io.MousePos.y >= 0 && io.MousePos.y < h * 0.1f) ? (1) : (-1)), 0.0f, 1.0f);
 }
 
-#if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
 SI::DLSSMode DLSSModeUI(SI::DLSSMode dlssModeCurrent)
 {
     int current = -1;
     switch (dlssModeCurrent)
     {
-    case donut::app::StreamlineInterface::DLSSMode::eMaxPerformance:    current = 1; break;
-    case donut::app::StreamlineInterface::DLSSMode::eBalanced:          current = 2; break;
-    case donut::app::StreamlineInterface::DLSSMode::eMaxQuality:        current = 3; break;
-    case donut::app::StreamlineInterface::DLSSMode::eUltraPerformance:  current = 0; break;
-    case donut::app::StreamlineInterface::DLSSMode::eDLAA:              current = 4; break;
-    default: assert(false); return donut::app::StreamlineInterface::DLSSMode::eBalanced;
+    case SI::DLSSMode::eMaxPerformance:    current = 1; break;
+    case SI::DLSSMode::eBalanced:          current = 2; break;
+    case SI::DLSSMode::eMaxQuality:        current = 3; break;
+    case SI::DLSSMode::eUltraPerformance:  current = 0; break;
+    case SI::DLSSMode::eDLAA:              current = 4; break;
+    default: assert(false); return SI::DLSSMode::eBalanced;
     }
 
     ImGui::Combo("DLSS Resolution Scale", (int*)&current, "UltraPerformance\0Performance\0Balanced\0Quality\0DLAA\0");
 
     switch (current)
     {
-    case 0 : return donut::app::StreamlineInterface::DLSSMode::eUltraPerformance;
-    case 1 : return donut::app::StreamlineInterface::DLSSMode::eMaxPerformance;
-    case 2 : return donut::app::StreamlineInterface::DLSSMode::eBalanced;
-    case 3 : return donut::app::StreamlineInterface::DLSSMode::eMaxQuality;
-    case 4 : return donut::app::StreamlineInterface::DLSSMode::eDLAA;
-    default: assert(false); return donut::app::StreamlineInterface::DLSSMode::eBalanced;
+    case 0 : return SI::DLSSMode::eUltraPerformance;
+    case 1 : return SI::DLSSMode::eMaxPerformance;
+    case 2 : return SI::DLSSMode::eBalanced;
+    case 3 : return SI::DLSSMode::eMaxQuality;
+    case 4 : return SI::DLSSMode::eDLAA;
+    default: assert(false); return SI::DLSSMode::eBalanced;
 
     }
     ImGui::Text("(DLSS setting also apply to Ray Reconstruction)");
@@ -1216,13 +1216,13 @@ void SampleUI::buildUI(void)
 
                 if (m_ui.RealtimeMode)
                 {
-    #if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
                     const bool dlssAvailable = m_ui.IsDLSSSuported;
                     const bool dlssRRAvailable = m_ui.IsDLSSRRSupported; 
-    #else
+#else
                     const bool dlssAvailable = false;
                     const bool dlssRRAvailable = false;
-    #endif
+#endif
                     const char* items[] = { "Disabled", "TAA", "DLSS", "DLSS-RR" };
 
                     const int itemCount = IM_ARRAYSIZE(items);
@@ -1255,7 +1255,7 @@ void SampleUI::buildUI(void)
                         "\nIndividual DLSS options available under global `DLSS` options"
                     );
 
-#if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
                     if (m_ui.RealtimeAA == 2 || m_ui.RealtimeAA == 3)
                     {
                         RAII_SCOPE(ImGui::Indent(indent); ImGui::PushID("PPDLSSQual");,  ImGui::Unindent(indent); ImGui::PopID(););
@@ -1490,7 +1490,7 @@ void SampleUI::buildUI(void)
             {
                 RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
 
-    #if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
                 if (m_ui.RealtimeAA == 2 || m_ui.RealtimeAA == 3)
                     m_ui.DLSSMode = DLSSModeUI(m_ui.DLSSMode);
     
@@ -1508,7 +1508,7 @@ void SampleUI::buildUI(void)
 					m_ui.DLSRRPreset = DLSSRR_PRESETS[presetIndex];
 					m_ui.DLSRRPreset = clamp(m_ui.DLSRRPreset, SI::DLSSRRPreset::eDefault, SI::DLSSRRPreset::ePresetE);
                 }
-    #endif    
+#endif
                 ImGui::Combo("AA Camera Jitter", (int*)&m_ui.TemporalAntiAliasingJitter, "MSAA\0Halton\0R2\0White Noise\0");
 
             }

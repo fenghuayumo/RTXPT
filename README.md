@@ -144,7 +144,7 @@ Due to interaction with various included libraries, Vulkan support is not enable
 
 ## Building Linux / WSL
 
-Linux and WSL builds default to Vulkan and disable Windows-only integrations such as DirectX 12 Agility SDK, NVAPI, and Streamline. OIDN is downloaded from the official x86_64 Linux package when `RTXPT_WITH_OIDN=ON`.
+Linux and WSL builds default to Vulkan and disable Windows-only integrations such as DirectX 12 Agility SDK, NVAPI, and Streamline. DLSS/DLSS-RR uses the native NVIDIA NGX Vulkan path when `RTXPT_WITH_NATIVE_DLSS=ON` (default for Linux Vulkan builds), and OIDN is downloaded from the official x86_64 Linux package when `RTXPT_WITH_OIDN=ON`.
 
 Recommended WSL setup:
 
@@ -159,13 +159,14 @@ Install the Linux Vulkan SDK and make sure `dxc` is on `PATH` or set `DXC_SPIRV_
 cmake -S . -B build-linux -G Ninja \
   -DDONUT_WITH_VULKAN=ON \
   -DNVRHI_WITH_VULKAN=ON \
+  -DRTXPT_WITH_NATIVE_DLSS=ON \
   -DRTXPT_WITH_OIDN=ON \
   -DDXC_SPIRV_PATH="$VULKAN_SDK/bin/dxc"
 
 cmake --build build-linux --config Release
 ```
 
-DLSS/DLSS-RR in this sample currently goes through Streamline, whose integration in this codebase is Windows-only. Linux builds therefore compile without Streamline/DLSS for now; realtime denoising still uses NRD and reference-mode denoising can use OIDN.
+On Linux, CMake fetches NVIDIA's DLSS SDK through Donut and copies the DLSS/DLSS-RR runtime `.so` files next to the executable. Use `-DRTXPT_WITH_NATIVE_DLSS=OFF` if you need a build without NGX/DLSS. Streamline features that are not part of native NGX DLSS, such as Reflex and DLSS Frame Generation, remain Windows/Streamline-only in this codebase.
  
 
  ## DirectX 12 Agility SDK

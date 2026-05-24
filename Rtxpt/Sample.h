@@ -21,6 +21,9 @@
 #include <donut/render/BloomPass.h>
 #include <donut/app/Camera.h>
 #include <donut/engine/CommonRenderPasses.h>
+#if RTXPT_WITH_NATIVE_DLSS
+#include <donut/render/DLSS.h>
+#endif
 
 #include "RTXDI/RtxdiPass.h"
 #include "NRD/NrdIntegration.h"
@@ -158,6 +161,9 @@ public:
     void                                    PathTrace(nvrhi::IFramebuffer* framebuffer, const SampleConstants & constants);
     void                                    PreRender();
     void                                    StreamlinePreRender();
+#if RTXPT_WITH_NATIVE_DLSS
+    void                                    NativeDLSSPreRender();
+#endif
     void                                    Render(nvrhi::IFramebuffer* framebuffer) override;
     void                                    PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset);
 
@@ -266,6 +272,9 @@ private:
     void                                    AccumulateGaussianSplats(const donut::engine::IView& splatView);
     void                                    BuildGaussianSplatEmissionProxyList();
     void                                    RefreshEnvironmentMapMediaList();
+#if RTXPT_WITH_NATIVE_DLSS
+    bool                                    EvaluateNativeDLSS(bool reset);
+#endif
 
 private:
     struct GaussianSplatSceneObject
@@ -415,6 +424,9 @@ private:
 #if DONUT_WITH_STREAMLINE
     donut::app::StreamlineInterface::DLSSSettings   m_recommendedDLSSSettings = {};
     donut::app::StreamlineInterface::DLSSRROptions  m_lastDLSSRROptions;
+#endif
+#if RTXPT_WITH_NATIVE_DLSS
+    std::unique_ptr<donut::render::DLSS>     m_nativeDLSS;
 #endif
     uint2                                       m_renderSize;   // native render resolution
     uint2                                       m_displaySize;  // final output resolution

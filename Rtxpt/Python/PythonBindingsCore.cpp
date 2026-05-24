@@ -25,10 +25,6 @@
 #include "../Materials/MaterialsBaker.h"
 #include "../Lighting/LightsBaker.h"
 
-#if DONUT_WITH_STREAMLINE
-#include <donut/app/StreamlineInterface.h>
-#endif
-
 #include <donut/engine/Scene.h>
 #include <donut/engine/SceneTypes.h>
 #include <donut/engine/SceneGraph.h>
@@ -917,11 +913,10 @@ void RegisterCoreBindings(nb::module_& m)
                 "Realtime AA mode (rtxpt.RealtimeAA enum):\n"
                 "  0 = Off, 1 = TAA, 2 = DLSS, 3 = DLSS-RR")
 
-#if DONUT_WITH_STREAMLINE
         // DLSS quality (rtxpt.DLSSMode enum -> SI::DLSSMode underlying uint32)
         .def_prop_rw("dlss_mode",
             [](SampleUIData& s) { return int(s.DLSSMode); },
-            [](SampleUIData& s, int v) { s.DLSSMode = donut::app::StreamlineInterface::DLSSMode(v); },
+            [](SampleUIData& s, int v) { s.DLSSMode = SI::DLSSMode(v); },
             "DLSS quality preset (rtxpt.DLSSMode).\n"
             "Off, MaxPerformance, Balanced, MaxQuality, UltraPerformance, UltraQuality, DLAA.")
         .def_rw("dlss_lod_bias_use_override", &SampleUIData::DLSSLodBiasUseOverride)
@@ -931,7 +926,7 @@ void RegisterCoreBindings(nb::module_& m)
         // DLSS-G (frame generation)
         .def_prop_rw("dlss_fg_mode",
             [](SampleUIData& s) { return int(s.DLSSFGMode); },
-            [](SampleUIData& s, int v) { s.DLSSFGMode = donut::app::StreamlineInterface::DLSSGMode(v); },
+            [](SampleUIData& s, int v) { s.DLSSFGMode = SI::DLSSGMode(v); },
             "DLSS frame generation mode (rtxpt.DLSSFGMode).")
         .def_rw("dlss_fg_multiplier",            &SampleUIData::DLSSFGMultiplier)
         .def_rw("dlss_fg_num_frames_to_generate",&SampleUIData::DLSSFGNumFramesToGenerate)
@@ -940,7 +935,7 @@ void RegisterCoreBindings(nb::module_& m)
         // DLSS-RR (ray reconstruction)
         .def_prop_rw("dlss_rr_preset",
             [](SampleUIData& s) { return int(s.DLSRRPreset); },
-            [](SampleUIData& s, int v) { s.DLSRRPreset = donut::app::StreamlineInterface::DLSSRRPreset(v); },
+            [](SampleUIData& s, int v) { s.DLSRRPreset = SI::DLSSRRPreset(v); },
             "DLSS-RR preset (rtxpt.DLSSRRPreset).")
         .def_rw("dlss_rr_micro_jitter",          &SampleUIData::DLSSRRMicroJitter)
         .def_rw("dlss_rr_brightness_clamp_k",    &SampleUIData::DLSSRRBrightnessClampK)
@@ -956,7 +951,6 @@ void RegisterCoreBindings(nb::module_& m)
         .def_ro("is_dlss_fg_supported",  &SampleUIData::IsDLSSFGSupported)
         .def_ro("is_dlss_rr_supported",  &SampleUIData::IsDLSSRRSupported)
         .def_ro("is_reflex_supported",   &SampleUIData::IsReflexSupported)
-#endif // DONUT_WITH_STREAMLINE
 
         // --- Standalone NRD denoiser (realtime, RealtimeAA != DLSS-RR) ---
         .def_rw("standalone_denoiser",           &SampleUIData::StandaloneDenoiser,

@@ -45,7 +45,89 @@ namespace donut::engine
 }
 
 #if DONUT_WITH_STREAMLINE
-typedef donut::app::StreamlineInterface SI;
+using SI = donut::app::StreamlineInterface;
+#else
+struct StreamlineCompatibilityTypes
+{
+    enum class DLSSMode : uint32_t
+    {
+        eOff,
+        eMaxPerformance,
+        eBalanced,
+        eMaxQuality,
+        eUltraPerformance,
+        eUltraQuality,
+        eDLAA,
+        eCount,
+    };
+
+    enum ReflexMode
+    {
+        eOff,
+        eLowLatency,
+        eLowLatencyWithBoost,
+        ReflexMode_eCount
+    };
+
+    enum class DLSSGMode : uint32_t
+    {
+        eOff,
+        eOn,
+        eAuto,
+        eCount
+    };
+
+    enum class DLSSGFlags : uint32_t
+    {
+        eShowOnlyInterpolatedFrame = 1 << 0,
+        eDynamicResolutionEnabled = 1 << 1,
+        eRequestVRAMEstimate = 1 << 2,
+        eRetainResourcesWhenOff = 1 << 3,
+        eEnableFullscreenMenuDetection = 1 << 4,
+    };
+
+    enum class DLSSGQueueParallelismMode : uint32_t
+    {
+        eBlockPresentingClientQueue,
+        eBlockNoClientQueues,
+        eCount
+    };
+
+    struct DLSSGOptions
+    {
+        DLSSGMode mode = DLSSGMode::eOff;
+        uint32_t numFramesToGenerate = 1;
+        DLSSGFlags flags{};
+        uint32_t dynamicResWidth{};
+        uint32_t dynamicResHeight{};
+        uint32_t numBackBuffers{};
+        uint32_t mvecDepthWidth{};
+        uint32_t mvecDepthHeight{};
+        uint32_t colorWidth{};
+        uint32_t colorHeight{};
+        uint32_t colorBufferFormat{};
+        uint32_t mvecBufferFormat{};
+        uint32_t depthBufferFormat{};
+        uint32_t hudLessBufferFormat{};
+        uint32_t uiBufferFormat{};
+        bool useReflexMatrices = false;
+        DLSSGQueueParallelismMode queueParallelismMode{};
+    };
+
+    enum class DLSSRRPreset : uint32_t
+    {
+        eDefault,
+        ePresetA,
+        ePresetB,
+        ePresetC,
+        ePresetD,
+        ePresetE,
+        ePresetF,
+        ePresetG,
+        ePresetH,
+    };
+};
+using SI = StreamlineCompatibilityTypes;
 #endif
 
 struct TogglableNode
@@ -113,7 +195,7 @@ struct PerformancePreset
     bool        EnableBloom;
     bool        EnableLDSamplerForBSDF;
     float       FireflyThreshold;
-#if DONUT_WITH_STREAMLINE
+#if RTXPT_WITH_ANY_DLSS
     SI::DLSSMode DLSSMode;
 #endif
 };
@@ -253,7 +335,6 @@ struct SampleUIData
     bool                                ShowMaterialEditor = true;  // this makes material editor default right click option
     bool                                ShowInspector = true;       // combined Material + Transform inspector panel
 
-#if DONUT_WITH_STREAMLINE
     // DLSS specific parameters
     //float                               DLSSSharpness = 0.f;
     //bool                                DLSSDynamicResChange = true;
@@ -268,6 +349,7 @@ struct SampleUIData
     float                               DLSSLodBiasOverride = 0.f;
     bool                                DLSSAlwaysUseExtents = false;
 
+#if DONUT_WITH_STREAMLINE
     // DLSSFG specific parameters
     bool                                IsDLSSFGSupported = false;
     SI::DLSSGMode                       DLSSFGMode = SI::DLSSGMode::eOff;
@@ -287,6 +369,25 @@ struct SampleUIData
     int                                 FpsCap = 60;
 
     // DLSS-RR specific parameters
+    bool                                IsDLSSRRSupported = false;
+    SI::DLSSRRPreset                    DLSRRPreset = SI::DLSSRRPreset::ePresetE;
+#else
+    bool                                IsDLSSFGSupported = false;
+    SI::DLSSGMode                       DLSSFGMode = SI::DLSSGMode::eOff;
+    SI::DLSSGOptions                    DLSSFGOptions = {};
+    uint32_t                            DLSSFGMultiplier = 1;
+    uint32_t                            DLSSFGNumFramesToGenerate = 1;
+    uint32_t                            DLSSFGMaxNumFramesToGenerate = 1;
+
+    bool                                IsReflexSupported = false;
+    bool                                IsReflexLowLatencyAvailable = false;
+    bool                                IsReflexFlashIndicatorDriverControlled = false;
+    int                                 ReflexMode = SI::ReflexMode::eOff;
+    int                                 ReflexCappedFps = 0;
+    bool                                ReflexShowStats = false;
+    std::string                         ReflexStats = "";
+    int                                 FpsCap = 60;
+
     bool                                IsDLSSRRSupported = false;
     SI::DLSSRRPreset                    DLSRRPreset = SI::DLSSRRPreset::ePresetE;
 #endif // DONUT_WITH_STREAMLINE

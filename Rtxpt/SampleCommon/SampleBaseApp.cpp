@@ -18,6 +18,10 @@
 #include "LocalConfig.h"
 
 #include <donut/app/ApplicationBase.h>
+#include <donut/core/log.h>
+#if RTXPT_WITH_NATIVE_DLSS
+#include <donut/render/DLSS.h>
+#endif
 #include "../Sample.h"
 
 #include <GLFW/glfw3.h>
@@ -62,6 +66,26 @@ namespace
             || value == "on";
     }
 
+    bool CommandLineWantsConsoleLogging(int argc, char const* const* argv)
+    {
+        for (int n = 1; n < argc; ++n)
+        {
+            std::string arg = LowerAscii(argv[n] ? argv[n] : "");
+            if (arg.rfind("--", 0) == 0)
+                arg.erase(0, 2);
+            else if (!arg.empty() && (arg[0] == '-' || arg[0] == '/'))
+                arg.erase(0, 1);
+
+            const size_t equals = arg.find('=');
+            const std::string key = arg.substr(0, equals);
+            const std::string value = (equals == std::string::npos) ? "" : arg.substr(equals + 1);
+            if ((key == "nowindow" || key == "noninteractive") && IsTrueOptionValue(value))
+                return true;
+        }
+
+        return false;
+    }
+
     bool TryParseBackendName(const std::string& value, nvrhi::GraphicsAPI& api)
     {
         const std::string backend = LowerAscii(value);
@@ -76,6 +100,12 @@ namespace
             return true;
         }
         return false;
+    }
+
+    void AppendUnique(std::vector<std::string>& values, const std::string& value)
+    {
+        if (std::find(values.begin(), values.end(), value) == values.end())
+            values.push_back(value);
     }
 
     nvrhi::GraphicsAPI GetRtxptGraphicsAPIFromCommandLine(int argc, const char* const* argv)
@@ -367,8 +397,13 @@ donut::app::DeviceCreationParameters SampleBaseApp::GetDefaultDeviceParams() con
 #endif
 
 #if DONUT_WITH_VULKAN
-    deviceParams.requiredVulkanDeviceExtensions.push_back("VK_KHR_buffer_device_address");
-    deviceParams.requiredVulkanDeviceExtensions.push_back("VK_KHR_format_feature_flags2");
+#if RTXPT_WITH_NATIVE_DLSS
+    donut::render::DLSS::GetRequiredVulkanExtensions(
+        deviceParams.requiredVulkanInstanceExtensions,
+        deviceParams.requiredVulkanDeviceExtensions);
+#endif
+    AppendUnique(deviceParams.requiredVulkanDeviceExtensions, "VK_KHR_buffer_device_address");
+    AppendUnique(deviceParams.requiredVulkanDeviceExtensions, "VK_KHR_format_feature_flags2");
 
     // Attachment 0 not written by fragment shader; undefined values will be written to attachment (OMM baker)
     deviceParams.ignoredVulkanValidationMessageLocations.push_back(0x0000000023e43bb7);
@@ -408,6 +443,9 @@ bool SampleBaseApp::ProcessCommandLine(int argc, char const* const* argv,
         m_CmdLine.height = 1440;
     }
 #endif
+    if (CommandLineWantsConsoleLogging(argc, argv))
+        donut::log::ConsoleApplicationMode();
+
     if (!m_CmdLine.InitFromCommandLine(argc, argv))
     {
         return false;
@@ -422,6 +460,10 @@ bool SampleBaseApp::ProcessCommandLine(int argc, char const* const* argv,
     {   
         donut::log::EnableOutputToMessageBox(false);
         HelpersSetNonInteractive();
+    }
+    if (m_CmdLine.noWindow || m_CmdLine.nonInteractive)
+    {
+        donut::log::ConsoleApplicationMode();
     }
 
     if (m_CmdLine.debug)

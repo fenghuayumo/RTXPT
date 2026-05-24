@@ -116,6 +116,28 @@ option(STREAMLINE_FEATURE_DIRECTSR  "Include DirectSR dll"          OFF )
 #----------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------
+# Native NGX DLSS config
+#
+# Streamline remains the preferred/default integration on Windows.  Linux uses the Vulkan backend and cannot use this
+# codebase's Streamline path, so enable Donut's native NGX DLSS integration there.
+if (WIN32)
+    set(RTXPT_DEFAULT_WITH_NATIVE_DLSS OFF)
+else()
+    set(RTXPT_DEFAULT_WITH_NATIVE_DLSS ${DONUT_WITH_VULKAN})
+endif()
+option(RTXPT_WITH_NATIVE_DLSS "Enable native NVIDIA NGX DLSS integration for Vulkan builds without Streamline" ${RTXPT_DEFAULT_WITH_NATIVE_DLSS})
+if (RTXPT_WITH_NATIVE_DLSS AND DONUT_WITH_STREAMLINE)
+    message(WARNING "RTXPT_WITH_NATIVE_DLSS is intended for non-Streamline builds; disabling it because DONUT_WITH_STREAMLINE is enabled.")
+    set(RTXPT_WITH_NATIVE_DLSS OFF CACHE BOOL "Enable native NVIDIA NGX DLSS integration for Vulkan builds without Streamline" FORCE)
+endif()
+if (RTXPT_WITH_NATIVE_DLSS AND NOT DONUT_WITH_VULKAN)
+    message(WARNING "RTXPT_WITH_NATIVE_DLSS requires DONUT_WITH_VULKAN; disabling native DLSS.")
+    set(RTXPT_WITH_NATIVE_DLSS OFF CACHE BOOL "Enable native NVIDIA NGX DLSS integration for Vulkan builds without Streamline" FORCE)
+endif()
+set(DONUT_WITH_DLSS ${RTXPT_WITH_NATIVE_DLSS} CACHE BOOL "Enable the NGX DLSS integration used by RTXPT native DLSS" FORCE)
+#----------------------------------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------------------------------------------------
 # Get and unpack DXC for DirectX shader compilation. Linux/WSL uses the Vulkan SDK DXC.
 if (WIN32)
     CheckAndDownloadPackage("DXC" "v1.9.2602.17" ${CMAKE_CURRENT_SOURCE_DIR}/external/dxc https://www.nuget.org/api/v2/package/Microsoft.Direct3D.DXC/1.9.2602.17 "zip")

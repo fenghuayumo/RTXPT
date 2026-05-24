@@ -14,6 +14,25 @@
 include(Donut/compileshaders.cmake)
 add_subdirectory(Donut)
 
+if (RTXPT_WITH_NATIVE_DLSS)
+    set(rtxpt_native_dlss_runtime_libraries "")
+    if (DLSS_SHARED_LIBRARY_PATH)
+        list(APPEND rtxpt_native_dlss_runtime_libraries "${DLSS_SHARED_LIBRARY_PATH}")
+    endif()
+    if (DLSS_RR_SHARED_LIBRARY_PATH)
+        list(APPEND rtxpt_native_dlss_runtime_libraries "${DLSS_RR_SHARED_LIBRARY_PATH}")
+    endif()
+
+    if (rtxpt_native_dlss_runtime_libraries)
+        add_custom_target(RtxptNativeDLSSRuntime ALL
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${rtxpt_native_dlss_runtime_libraries} "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+            COMMENT "Copying native DLSS runtime libraries"
+        )
+        set_target_properties(RtxptNativeDLSSRuntime PROPERTIES FOLDER "External/Donut")
+    endif()
+endif()
+
 ##########################################################################
 ################################ UTIL ####################################
 ##########################################################################
