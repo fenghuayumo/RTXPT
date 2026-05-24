@@ -545,22 +545,33 @@ Ray Bridge::computeCameraRay(const uint2 pixelPos)
 {
     SampleGenerator sampleGenerator = SampleGenerator::make( SampleGeneratorVertexBase::make( pixelPos, 0, Bridge::getSampleIndex() ) );
 
-    // compute camera ray! would make sense to compile out if unused
-    float2 subPixelOffset = g_Const.ptConsts.camera.Jitter + (sampleNext2D(sampleGenerator) - 0.5.xx) * g_Const.ptConsts.perPixelJitterAAScale;
+    float2 cameraJitter = g_Const.ptConsts.camera.Jitter;
+    float2 aaJitter = (sampleNext2D(sampleGenerator) - 0.5.xx) * g_Const.ptConsts.perPixelJitterAAScale;
     const float2 cameraDoFSample = sampleNext2D(sampleGenerator);
-    //return ComputeRayPinhole( g_Const.ptConsts.camera, pixelPos, subPixelOffset );
-    Ray ray = ComputeRayThinlens( g_Const.ptConsts.camera, pixelPos, subPixelOffset, cameraDoFSample ); 
 
-#if 0  // fallback: use inverted matrix) useful for correctness validation; with DoF disabled (apertureRadius/focalDistance == near zero), should provide same rays as above code - otherwise something's really broken
-    PlanarViewConstants view = g_Const.view;
-    float2 uv = (float2(pixelPos) + 0.5) * view.viewportSizeInv;
-    float4 clipPos = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 1e-7, 1);
-    float4 worldPos = mul(clipPos, view.matClipToWorld);
+    SimpleViewConstants view = g_Const.view;
+    float2 viewJitter = float2(cameraJitter.x, -cameraJitter.y);
+    float2 pixelCenter = float2(pixelPos) + 0.5.xx - viewJitter + aaJitter;
+    float4 clipPos = float4(pixelCenter / view.clipToWindowScale + float2(-1, 1), 1e-7, 1.0);
+    float4 worldPos = mul(clipPos, view.matClipToWorldNoOffset);
     worldPos.xyz /= worldPos.w;
-        
-    ray.origin  = view.cameraDirectionOrPosition.xyz;
-    ray.dir     = normalize(worldPos.xyz - ray.origin);
-#endif
+
+    Ray ray = Ray::make(g_Const.ptConsts.camera.PosW, normalize(worldPos.xyz - g_Const.ptConsts.camera.PosW), 0.0f, g_Const.ptConsts.camera.FarZ);
+
+    if (g_Const.ptConsts.camera.ApertureRadius > 0.0f && g_Const.ptConsts.camera.FocalDistance > 0.0f)
+    {
+        float diskAngle = 2.0f * K_PI * cameraDoFSample.x;
+        float2 diskSample = float2(cos(diskAngle), sin(diskAngle)) * sqrt(cameraDoFSample.y) * g_Const.ptConsts.camera.ApertureRadius;
+        float3 cameraRight = normalize(g_Const.ptConsts.camera.CameraU);
+        float3 cameraUp = normalize(g_Const.ptConsts.camera.CameraV);
+        float3 cameraForward = normalize(g_Const.ptConsts.camera.DirectionW);
+
+        float focalT = g_Const.ptConsts.camera.FocalDistance / max(dot(ray.dir, cameraForward), 1e-6f);
+        float3 focalPoint = ray.origin + ray.dir * focalT;
+        ray.origin += cameraRight * diskSample.x + cameraUp * diskSample.y;
+        ray.dir = normalize(focalPoint - ray.origin);
+    }
+
     return ray;
 }
 
