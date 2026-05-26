@@ -28,7 +28,8 @@ import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_GS_DIR = Path(r"D:/ProgramCode/Python/demo_gsplat&blender/GS")
+DEFAULT_GS_DIR = Path(r"D:/ScanVideo/models/example/GS")
+LEGACY_GS_DIR = Path(r"D:/ProgramCode/Python/demo_gsplat&blender/GS")
 
 
 CAMERA_MODELS: dict[int, tuple[str, int]] = {
@@ -239,10 +240,7 @@ def load_colmap_views(colmap_dir: Path, name_prefix: str | None, name_contains: 
 
         camera = cameras[image.camera_id]
         fx, fy, cx, cy = camera_params(camera)
-        w2c = np.eye(4, dtype=np.float64)
-        w2c[:3, :3] = qvec2rotmat(image.qvec)
-        w2c[:3, 3] = image.tvec
-        c2w = np.linalg.inv(w2c)
+        c2w = colmap_c2w_from_image(image)
         views.append(RenderView(image.id, image.name, camera.width, camera.height, fx, fy, cx, cy, c2w))
 
     if not views:
@@ -258,11 +256,24 @@ def normalize(v: np.ndarray) -> tuple[float, float, float]:
     return (float(v[0]), float(v[1]), float(v[2]))
 
 
+def colmap_w2c_from_image(image: ColmapImage) -> np.ndarray:
+    """COLMAP world-to-camera: p_cam = R @ p_world + t."""
+    w2c = np.eye(4, dtype=np.float64)
+    w2c[:3, :3] = qvec2rotmat(image.qvec)
+    w2c[:3, 3] = image.tvec
+    return w2c
+
+
+def colmap_c2w_from_image(image: ColmapImage) -> np.ndarray:
+    return np.linalg.inv(colmap_w2c_from_image(image))
+
+
 def rtxpt_camera_from_colmap(view: RenderView, convert_rdf_to_donut: bool):
+    """Pose from COLMAP c2w: camera +Z forward, +Y down in OpenCV convention."""
     c2w = view.c2w
-    pos = c2w[:3, 3]
-    direction = c2w[:3, 2]
-    up = -c2w[:3, 1]
+    pos = c2w[:3, 3].copy()
+    direction = c2w[:3, 2].copy()
+    up = -c2w[:3, 1].copy()
 
     if convert_rdf_to_donut:
         rdf_to_donut = np.array([1.0, -1.0, -1.0], dtype=np.float64)
@@ -275,6 +286,65 @@ def rtxpt_camera_from_colmap(view: RenderView, convert_rdf_to_donut: bool):
         normalize(direction),
         normalize(up),
     )
+
+
+def scaled_colmap_intrinsics(view: RenderView, width: int, height: int) -> tuple[float, float, float, float]:
+    sx = width / view.width
+    sy = height / view.height
+    return (
+        float(view.fx * sx),
+        float(view.fy * sy),
+        float(view.cx * sx),
+        float(view.cy * sy),
+    )
+
+
+def set_camera_intrinsics(renderer, fx: float, fy: float, cx: float, cy: float, width: float, height: float) -> None:
+    if hasattr(renderer, "set_camera_intrinsics"):
+        renderer.set_camera_intrinsics(fx, fy, cx, cy, width, height)
+        return
+    if hasattr(renderer, "app") and hasattr(renderer.app, "set_camera_intrinsics"):
+        renderer.app.set_camera_intrinsics(fx, fy, cx, cy, width, height)
+        return
+    raise RuntimeError("This rtxpt build has no set_camera_intrinsics; rebuild RTXPT Python bindings.")
+
+
+def apply_colmap_view_to_renderer(
+    renderer,
+    view: RenderView,
+    width: int,
+    height: int,
+    convert_rdf_to_donut: bool,
+    symmetric_fov: bool,
+) -> dict:
+    """Apply COLMAP extrinsics (c2w) + intrinsics (K) to RTXPT camera."""
+    cam_pos, cam_dir, cam_up = rtxpt_camera_from_colmap(view, convert_rdf_to_donut)
+    renderer.set_camera(cam_pos, cam_dir, cam_up)
+
+    record: dict = {
+        "rtxpt_position": cam_pos,
+        "rtxpt_direction": cam_dir,
+        "rtxpt_up": cam_up,
+        "c2w": view.c2w.tolist(),
+    }
+
+    if symmetric_fov:
+        fov_y = vertical_fov_degrees(view)
+        renderer.set_camera_fov(fov_y)
+        record["projection"] = "symmetric_vertical_fov"
+        record["vertical_fov_degrees"] = fov_y
+    else:
+        fx, fy, cx, cy = scaled_colmap_intrinsics(view, width, height)
+        set_camera_intrinsics(renderer, fx, fy, cx, cy, float(width), float(height))
+        record["projection"] = "pinhole_intrinsics"
+        record["fx"] = fx
+        record["fy"] = fy
+        record["cx"] = cx
+        record["cy"] = cy
+        record["width"] = width
+        record["height"] = height
+
+    return record
 
 
 def vertical_fov_degrees(view: RenderView) -> float:
@@ -367,10 +437,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def resolve_gs_dir(gs_dir: Path) -> Path:
+    gs_dir = gs_dir.resolve()
+    if (gs_dir / "gaussians.ply").exists() or (gs_dir / "sparse").exists():
+        return gs_dir
+    if LEGACY_GS_DIR.exists():
+        print(f"[rtxpt] GS dir fallback: {LEGACY_GS_DIR}")
+        return LEGACY_GS_DIR.resolve()
+    return gs_dir
+
+
 def main() -> int:
     args = parse_args()
 
-    gs_dir = args.gs_dir.resolve()
+    gs_dir = resolve_gs_dir(args.gs_dir)
     ply_path = (args.ply or (gs_dir / "gaussians.ply")).resolve()
     colmap_dir = (args.colmap_dir or (gs_dir / "sparse")).resolve()
     out_dir = (args.out_dir or (gs_dir / "rtxpt_rendered")).resolve()
@@ -399,8 +479,13 @@ def main() -> int:
     print(f"[rtxpt] mip AA     : {args.mip_antialiasing}")
     if args.symmetric_fov:
         warn_projection_limits(first)
+        print("[rtxpt] projection : symmetric vertical FOV only (--symmetric-fov)")
     else:
-        print("[rtxpt] projection : full COLMAP intrinsics (fx, fy, cx, cy)")
+        fx0, fy0, cx0, cy0 = scaled_colmap_intrinsics(first, width, height)
+        print(
+            f"[rtxpt] projection : COLMAP K scaled to output "
+            f"(fx={fx0:.3f}, fy={fy0:.3f}, cx={cx0:.3f}, cy={cy0:.3f})"
+        )
 
     configure_import_path()
     import rtxpt
@@ -451,22 +536,14 @@ def main() -> int:
             if view.width != first.width or view.height != first.height:
                 print(f"[warn] {view.name}: camera size {view.width}x{view.height}, rendering at {width}x{height}")
 
-            cam_pos, cam_dir, cam_up = rtxpt_camera_from_colmap(view, args.convert_rdf_to_donut)
-            fov_y = vertical_fov_degrees(view)
-            renderer.set_camera(cam_pos, cam_dir, cam_up)
-            if not args.symmetric_fov and hasattr(renderer, "set_camera_intrinsics"):
-                sx = width / view.width
-                sy = height / view.height
-                renderer.set_camera_intrinsics(
-                    view.fx * sx,
-                    view.fy * sy,
-                    view.cx * sx,
-                    view.cy * sy,
-                    float(width),
-                    float(height),
-                )
-            else:
-                renderer.set_camera_fov(fov_y)
+            cam_record = apply_colmap_view_to_renderer(
+                renderer,
+                view,
+                width,
+                height,
+                args.convert_rdf_to_donut,
+                args.symmetric_fov,
+            )
             renderer.step_n(max(1, args.frames_per_view))
 
             out_path = out_dir / f"{index:04d}_{safe_stem(view.name)}.png"
@@ -479,16 +556,13 @@ def main() -> int:
                     "output": str(out_path),
                     "image_name": view.name,
                     "image_id": view.image_id,
-                    "width": view.width,
-                    "height": view.height,
-                    "fx": view.fx,
-                    "fy": view.fy,
-                    "cx": view.cx,
-                    "cy": view.cy,
-                    "vertical_fov_degrees": fov_y,
-                    "rtxpt_position": cam_pos,
-                    "rtxpt_direction": cam_dir,
-                    "rtxpt_up": cam_up,
+                    "colmap_width": view.width,
+                    "colmap_height": view.height,
+                    "colmap_fx": view.fx,
+                    "colmap_fy": view.fy,
+                    "colmap_cx": view.cx,
+                    "colmap_cy": view.cy,
+                    **cam_record,
                 }
             )
     finally:

@@ -7,6 +7,33 @@ This document describes how to use the current `rtxpt` Python bindings. The API 
 - `Rtxpt/Python/PythonBindings_Embed.cpp`
 - `Rtxpt/Python/RenderSession.*`
 
+## Table of Contents
+
+### Getting Started
+
+- [Two Usage Modes](#two-usage-modes)
+- [Import Setup](#import-setup)
+- [Quick Examples](#quick-examples)
+
+### API Reference
+
+- [Module-Level API](#module-level-api)
+- [Renderer](#renderer) — extension-mode standalone renderer
+- [Sample & Scene](#sample--scene) — `app()`, scene, camera, accumulation
+- [Model](#model) — `Mesh`, `SceneNode`, deformation, bounds
+- [Material](#material) — `Material` class and scene lookup
+- [Light](#light) — light types and scene lookup
+- [3DGS](#3dgs) — Gaussian splat loading, settings, enums
+- [Settings](#settings) — path tracing, denoiser, tone mapping, DLSS, etc.
+- [Enums](#enums) — shared enumerations
+
+### Other
+
+- [Embedded Mode Notes](#embedded-mode-notes)
+- [Extension Mode Notes](#extension-mode-notes)
+- [Existing Examples](#existing-examples)
+- [Introspection](#introspection)
+
 ## Two Usage Modes
 
 The `rtxpt` module supports two runtime modes that share most types:
@@ -281,6 +308,72 @@ with rtxpt.Renderer(scene="bistro-programmer-art.scene.json", headless=True) as 
 
 All writable `Material` properties mark the material GPU data dirty automatically; calling `mark_dirty()` is only needed if native-side data was changed without going through a Python property setter. Texture replacement helpers load the new image through the runtime texture cache, enable the slot, and upload updated material data on the next rendered frame.
 
+### Read and Replace Material Textures
+
+Texture access is exposed as file bindings on `Material`. Python can read the current
+loaded texture path, replace a slot with another image file, enable or disable an
+existing slot, and clear a slot. It does not expose direct pixel-buffer editing.
+
+```python
+import rtxpt
+
+with rtxpt.Renderer(scene="bistro-programmer-art.scene.json", headless=True) as r:
+    mat = r.app.scene.find_material("SomeMaterialName")
+    if mat is None:
+        raise RuntimeError("material not found")
+
+    # Read current texture file bindings. Each property is str or None.
+    print("base:", mat.base_texture_path)
+    print("orm:", mat.orm_texture_path)
+    print("normal:", mat.normal_texture_path)
+    print("emissive:", mat.emissive_texture_path)
+    print("transmission:", mat.transmission_texture_path)
+
+    # Replace common slots with slot-specific helpers.
+    if not mat.set_base_texture(r"D:/assets/albedo_replacement.png"):
+        raise RuntimeError("base texture not found")
+    mat.set_normal_texture(r"D:/assets/normal_replacement.png")
+
+    # Replace any slot with the generic API and TextureSlot enum.
+    mat.set_texture(rtxpt.TextureSlot.Emissive, r"D:/assets/emissive.png")
+    mat.set_texture(rtxpt.TextureSlot.ORM, r"D:/assets/orm_linear.png", srgb=False)
+
+    # Toggle sampling without disconnecting the loaded texture.
+    mat.enable_base_texture = True
+    mat.enable_normal_texture = False
+
+    # Disconnect and disable a slot.
+    mat.clear_emissive_texture()
+    # Equivalent generic form:
+    mat.clear_texture(rtxpt.TextureSlot.Transmission)
+
+    r.app.reset_accumulation()
+    r.step_n(4)
+```
+
+`set_*_texture(...)` returns `True` when the file was resolved and loaded, `False`
+when it was not found. A successful set operation also enables that texture slot.
+`clear_*_texture(...)` removes the binding and disables the slot.
+
+Default color-space handling:
+
+| Slot | Helper | Default interpretation |
+| --- | --- | --- |
+| `TextureSlot.Base` | `set_base_texture(path, srgb=None)` | sRGB |
+| `TextureSlot.ORM` | `set_orm_texture(path, srgb=None)` | Linear in metal-rough mode, sRGB in spec-gloss mode |
+| `TextureSlot.Normal` | `set_normal_texture(path)` | Linear normal map |
+| `TextureSlot.Emissive` | `set_emissive_texture(path, srgb=None)` | sRGB |
+| `TextureSlot.Transmission` | `set_transmission_texture(path, srgb=None)` | Linear |
+
+Use the optional `srgb` argument to override the default color-space choice. The
+generic `set_texture(slot, path, srgb=None, normal_map=None)` also accepts
+`normal_map` for advanced cases; leave it as `None` for the slot default.
+
+Relative texture paths are resolved through the same runtime texture search used by
+material JSON loading: runtime `Assets/` first, then the current scene directory.
+For `.png` inputs, an existing sibling `.dds` is preferred, matching RTXPT material
+loading behavior.
+
 ### Edit Lights
 
 ```python
@@ -342,7 +435,22 @@ def wave(index, p):
 app.deform_mesh(mesh, wave, recompute_normals=True)
 ```
 
-## Module-Level API
+## API Reference
+
+The sections below are grouped by topic so you can jump directly to the API you need:
+
+| Category | Section |
+| --- | --- |
+| Renderer | [Renderer](#renderer) |
+| Scene / app | [Sample & Scene](#sample--scene) |
+| Mesh / nodes | [Model](#model) |
+| Materials | [Material](#material) |
+| Lights | [Light](#light) |
+| Gaussian splats | [3DGS](#3dgs) |
+| Render settings | [Settings](#settings) |
+| Shared enums | [Enums](#enums) |
+
+### Module-Level API
 
 These functions exist in both embed and extension mode unless noted.
 
@@ -357,92 +465,9 @@ These functions exist in both embed and extension mode unless noted.
 | `rtxpt.Renderer(...)` | `Renderer` | Extension mode only. Creates a standalone renderer/device/window or headless backbuffer. |
 | `rtxpt.builtin_scene_json(builtin_model="plane_cube")` | `str` | Extension mode only. Returns minimal inline scene JSON for `plane`, `cube`, `sphere`, or `plane_cube`. |
 
-## Enums
+## Renderer
 
-All enums are arithmetic, so `int(enum_value)` works and enum values can be assigned to int-backed settings fields.
-
-### `PathTracerMode`
-
-| Value | Int | Meaning |
-| --- | ---: | --- |
-| `rtxpt.PathTracerMode.Realtime` | `0` | Realtime path tracing mode. |
-| `rtxpt.PathTracerMode.Reference` | `1` | Reference accumulation mode. |
-
-### `RealtimeAA`
-
-| Value | Int | Meaning |
-| --- | ---: | --- |
-| `rtxpt.RealtimeAA.Off` | `0` | No realtime AA/upscaler. |
-| `rtxpt.RealtimeAA.TAA` | `1` | Temporal AA. |
-| `rtxpt.RealtimeAA.DLSS` | `2` | DLSS Super Resolution. |
-| `rtxpt.RealtimeAA.DLSS_RR` | `3` | DLSS Ray Reconstruction. |
-
-### `DLSSMode`
-
-| Value | Int |
-| --- | ---: |
-| `Off` | `0` |
-| `MaxPerformance` | `1` |
-| `Balanced` | `2` |
-| `MaxQuality` | `3` |
-| `UltraPerformance` | `4` |
-| `UltraQuality` | `5` |
-| `DLAA` | `6` |
-
-### `DLSSFGMode`
-
-| Value | Int |
-| --- | ---: |
-| `Off` | `0` |
-| `On` | `1` |
-| `Auto` | `2` |
-
-### `DLSSRRPreset`
-
-| Value | Int |
-| --- | ---: |
-| `Default` | `0` |
-| `PresetA` ... `PresetH` | `1` ... `8` |
-
-### `ReflexMode`
-
-| Value | Int |
-| --- | ---: |
-| `Off` | `0` |
-| `LowLatency` | `1` |
-| `LowLatencyWithBoost` | `2` |
-
-### OIDN Enums
-
-| Enum | Values |
-| --- | --- |
-| `OidnPasses` | `ColorOnly=0`, `Albedo=1`, `AlbedoNormal=2` |
-| `OidnPrefilter` | `None_=0`, `Fast=1`, `Accurate=2` |
-| `OidnQuality` | `Fast=0`, `Balanced=1`, `High=2` |
-
-### 3DGS Enums
-
-| Enum | Values |
-| --- | --- |
-| `GaussianSplatSortMode` | `GpuSort=0`, `StochasticSplats=1` |
-| `GaussianSplatStorageFormat` | `Float32=0`, `Float16=1`, `Uint8=2` |
-| `GaussianSplatFrustumCulling` | `Disabled=0`, `AtDistanceStage=1`, `AtRasterStage=2` |
-| `GaussianSplatShadowMode` | `Disabled=0`, `Hard=1`, `Soft=2` |
-| `GaussianSplatFTBSyncMode` | `Disabled=0`, `Interlock=1` |
-
-### `TextureSlot`
-
-| Value | Meaning |
-| --- | --- |
-| `Base` | Base/diffuse texture. |
-| `ORM` / `OcclusionRoughnessMetallic` | ORM texture, or spec-gloss texture when `use_specular_gloss=True`. |
-| `Normal` | Normal texture. |
-| `Emissive` | Emissive texture. |
-| `Transmission` | Transmission texture. |
-
-## `Renderer` Class
-
-Extension mode only.
+Extension mode only. Create with `rtxpt.Renderer(...)`.
 
 ### Constructor
 
@@ -549,9 +574,9 @@ r = rtxpt.Renderer(headless=False, realtime=True, scene=scene)
 
 For scene files, relative 3DGS paths are resolved relative to the scene JSON file. `path`, `file`, and `fileName` are accepted aliases.
 
-## `Sample` Class
+## Sample & Scene
 
-Top-level renderer instance. In extension mode, access it through `renderer.app`; in embed mode, use `rtxpt.app()`.
+Top-level renderer instance (`Sample`). In extension mode, access it through `renderer.app`; in embed mode, use `rtxpt.app()`. Scene graph access goes through `app.scene`.
 
 ### Read-Only Properties
 
@@ -580,63 +605,6 @@ Top-level renderer instance. In extension mode, access it through `renderer.app`
 | `set_environment_map(path)` | `None` | Override scene environment map source. |
 | `get_scene()` | `Scene | None` | Return the current loaded scene. |
 | `get_scene_bounds()` | `tuple | None` | Shortcut for `scene.get_scene_bounds()`. |
-
-### Scene Meshes / Deformation
-
-| API | Return | Notes |
-| --- | --- | --- |
-| `scene.get_meshes()` | `list[Mesh]` | All meshes in the current scene. |
-| `scene.find_mesh(name)` | `Mesh | None` | Match by mesh name. |
-| `scene.mesh_count` | `int` | Number of meshes in the current scene. |
-| `sample.get_meshes()` | `list[Mesh]` | Compatibility alias for `scene.get_meshes()`. |
-| `sample.find_mesh(name)` | `Mesh | None` | Compatibility alias for `scene.find_mesh(name)`. |
-| `sample.get_mesh_vertices(mesh)` | `list[tuple]` | Returns object-space `(x, y, z)` vertex positions. |
-| `sample.set_mesh_vertices(mesh, vertices, recompute_normals=True, rebuild_acceleration_structure=True)` | `None` | Replaces all positions. `vertices` must contain exactly `mesh.vertex_count` triples. |
-| `sample.deform_mesh(mesh, callback, recompute_normals=True, rebuild_acceleration_structure=True)` | `int` | Calls `callback(index, (x, y, z))` for each vertex. Return a new triple or `None`; returns the processed vertex count. |
-
-`set_mesh_vertices(...)` updates object-space mesh bounds, optionally recomputes normals,
-refreshes GPU vertex data, resets accumulation, and requests acceleration structure rebuild
-by default. Keep `rebuild_acceleration_structure=True` for ray tracing-correct geometry.
-Only set it to `False` when batching several edits and calling `request_accel_rebuild()`
-after the final update.
-
-### Scene Bounds
-
-| API | Return | Notes |
-| --- | --- | --- |
-| `scene.get_scene_bounds()` | `tuple | None` | World-space `((min.xyz), (max.xyz))` AABB from C++ `Scene::GetSceneBounds()`. |
-| `scene.get_bounds()` | `tuple | None` | Alias for `scene.get_scene_bounds()`. |
-| `scene.bounds` | `tuple | None` | Property alias for `scene.get_scene_bounds()`. |
-| `scene.bounds_center` | `tuple | None` | Center of `scene.bounds`. |
-| `scene.bounds_size` | `tuple | None` | Extent `(max - min)` of `scene.bounds`. |
-
-### Scene Nodes
-
-| API | Return | Notes |
-| --- | --- | --- |
-| `scene.find_node(path)` | `SceneNode | None` | Find a scene graph node by name or path. |
-| `sample.find_node(path)` | `SceneNode | None` | Compatibility alias for `scene.find_node(path)`. |
-
-### Scene Materials
-
-| API | Return | Notes |
-| --- | --- | --- |
-| `scene.get_materials()` | `list[Material]` | All `PTMaterial` materials in the current scene. |
-| `scene.find_material(name)` | `Material | None` | Match by `Name` or `UniqueName`. |
-| `scene.find_material_by_id(material_id)` | `Material | None` | Lookup by material ID. |
-| `scene.material_count` | `int` | Number of PT materials in the current scene. |
-
-`Sample.get_materials()`, `Sample.find_material()`, and `Sample.find_material_by_id()` remain available as compatibility aliases.
-
-### Scene Lights
-
-| API | Return | Notes |
-| --- | --- | --- |
-| `scene.get_lights()` | `list[Light]` | All lights in current scene. |
-| `scene.find_light(name)` | `Light | None` | Match by scene node name. |
-| `scene.light_count` | `int` | Number of lights in the current scene. |
-
-`Sample.get_lights()` and `Sample.find_light()` remain available as compatibility aliases.
 
 ### Camera
 
@@ -682,9 +650,368 @@ app.set_reference_mode(
 | `set_realtime_mode(standalone_denoiser=True, realtime_aa=2)` | Sets realtime mode. `realtime_aa`: `0=Off`, `1=TAA`, `2=DLSS`, `3=DLSS_RR`. |
 | `set_reference_mode(spp=0, oidn=False, oidn_quality=1, oidn_passes=1, oidn_prefilter=1)` | Sets reference mode. `spp=0` keeps current target. |
 
-## `Settings` Class
+## Model
 
-`Settings` mirrors the live ImGui UI state. Most fields are writable and take effect on subsequent frames.
+Mesh geometry, scene graph nodes, and vertex deformation. Access meshes through `app.scene` or `Sample` compatibility aliases.
+
+### Scene Lookup
+
+| API | Return | Notes |
+| --- | --- | --- |
+| `scene.get_meshes()` | `list[Mesh]` | All meshes in the current scene. |
+| `scene.find_mesh(name)` | `Mesh | None` | Match by mesh name. |
+| `scene.mesh_count` | `int` | Number of meshes in the current scene. |
+| `scene.find_node(path)` | `SceneNode | None` | Find a scene graph node by name or path. |
+| `sample.get_meshes()` | `list[Mesh]` | Compatibility alias for `scene.get_meshes()`. |
+| `sample.find_mesh(name)` | `Mesh | None` | Compatibility alias for `scene.find_mesh(name)`. |
+| `sample.find_node(path)` | `SceneNode | None` | Compatibility alias for `scene.find_node(path)`. |
+| `Renderer.load_mesh_file(file_name)` | `bool` | Append a `.gltf`, `.glb`, or `.obj` mesh (extension mode). |
+| `Sample.load_mesh_file(file_name)` | `bool` | Append a mesh node (embed or extension). |
+
+### Vertex Deformation
+
+| API | Return | Notes |
+| --- | --- | --- |
+| `sample.get_mesh_vertices(mesh)` | `list[tuple]` | Returns object-space `(x, y, z)` vertex positions. |
+| `sample.set_mesh_vertices(mesh, vertices, recompute_normals=True, rebuild_acceleration_structure=True)` | `None` | Replaces all positions. `vertices` must contain exactly `mesh.vertex_count` triples. |
+| `sample.deform_mesh(mesh, callback, recompute_normals=True, rebuild_acceleration_structure=True)` | `int` | Calls `callback(index, (x, y, z))` for each vertex. Return a new triple or `None`; returns the processed vertex count. |
+
+`set_mesh_vertices(...)` updates object-space mesh bounds, optionally recomputes normals,
+refreshes GPU vertex data, resets accumulation, and requests acceleration structure rebuild
+by default. Keep `rebuild_acceleration_structure=True` for ray tracing-correct geometry.
+Only set it to `False` when batching several edits and calling `request_accel_rebuild()`
+after the final update.
+
+### Scene Bounds
+
+| API | Return | Notes |
+| --- | --- | --- |
+| `scene.get_scene_bounds()` | `tuple | None` | World-space `((min.xyz), (max.xyz))` AABB from C++ `Scene::GetSceneBounds()`. |
+| `scene.get_bounds()` | `tuple | None` | Alias for `scene.get_scene_bounds()`. |
+| `scene.bounds` | `tuple | None` | Property alias for `scene.get_scene_bounds()`. |
+| `scene.bounds_center` | `tuple | None` | Center of `scene.bounds`. |
+| `scene.bounds_size` | `tuple | None` | Extent `(max - min)` of `scene.bounds`. |
+| `Renderer.get_scene_bounds()` / `scene_bounds` | `tuple | None` | Extension-mode world bounds shortcut. |
+
+### `Mesh` Class
+
+Returned by `Scene.get_meshes()`, `Scene.find_mesh()`, `Sample.get_meshes()`,
+`Sample.find_mesh()`, and `SceneNode.mesh`.
+
+| Property | Type | Notes |
+| --- | --- | --- |
+| `name` | `str` | Mesh name from the source model or builtin primitive. |
+| `global_mesh_index` | `int` | Internal scene mesh index. |
+| `vertex_count` | `int` | Number of object-space positions expected by `set_mesh_vertices(...)`. |
+| `index_count` | `int` | Total index count. |
+| `geometry_count` | `int` | Number of mesh geometry groups/submeshes. |
+| `bounds` | `((min.xyz), (max.xyz)) \| None` | Object-space mesh AABB. |
+
+Vertex data is edited through `Sample.set_mesh_vertices()` / `Sample.deform_mesh()`, not through writable `Mesh` properties, because changing vertices also needs GPU buffer refresh and acceleration-structure invalidation.
+
+### `SceneNode` Class
+
+Returned by `Scene.find_node()` and `Sample.find_node()`.
+
+| Property | Type |
+| --- | --- |
+| `name` | `str` |
+| `path` | `str` |
+| `mesh` | `Mesh | None` |
+| `is_mesh` | `bool` |
+| `translation` | `(x, y, z)` |
+| `rotation` | `(x, y, z, w)` quaternion |
+| `euler` | `(x, y, z)` radians |
+| `scaling` | `(x, y, z)` |
+| `bounds` | `((min.xyz), (max.xyz)) \| None` |
+
+`rotation` and `euler` both write the node's local Transform rotation. Assigning
+`euler` converts XYZ radians to the stored quaternion; assigning `rotation` expects
+an XYZW quaternion, matching scene JSON. Python Transform edits reset accumulation
+automatically so the next rendered frame does not blend with the previous pose.
+
+## Material
+
+Scene material lookup and the `Material` class for runtime edits and texture replacement.
+
+### Scene Lookup
+
+| API | Return | Notes |
+| --- | --- | --- |
+| `scene.get_materials()` | `list[Material]` | All `PTMaterial` materials in the current scene. |
+| `scene.find_material(name)` | `Material | None` | Match by `Name` or `UniqueName`. |
+| `scene.find_material_by_id(material_id)` | `Material | None` | Lookup by material ID. |
+| `scene.material_count` | `int` | Number of PT materials in the current scene. |
+
+`Sample.get_materials()`, `Sample.find_material()`, and `Sample.find_material_by_id()` remain available as compatibility aliases.
+
+### `Material` Class
+
+Returned by `Scene.get_materials()`, `Scene.find_material()`, and `Scene.find_material_by_id()`.
+
+#### Identifiers (read-only)
+
+| Property | Type |
+| --- | --- |
+| `name` | `str` |
+| `model_name` | `str` |
+| `unique_name` | `str` |
+
+#### Properties (writable)
+
+Editable properties automatically mark GPU data dirty:
+
+| Property | Type |
+| --- | --- |
+| `base_color` | `(r, g, b)` |
+| `specular_color` | `(r, g, b)` |
+| `emissive_color` | `(r, g, b)` |
+| `emissive_intensity` | `float` |
+| `metalness` | `float` |
+| `roughness` | `float` |
+| `opacity` | `float` |
+| `transmission_factor` | `float` |
+| `diffuse_transmission_factor` | `float` |
+| `normal_texture_scale` | `float` |
+| `ior` | `float` |
+| `alpha_cutoff` | `float` |
+| `volume_attenuation_distance` | `float` |
+| `volume_attenuation_color` | `(r, g, b)` |
+| `nested_priority` | `int` |
+| `use_specular_gloss` | `bool` |
+| `enable_alpha_testing` | `bool` |
+| `enable_transmission` | `bool` |
+| `thin_surface` | `bool` |
+| `exclude_from_nee` | `bool` |
+| `enable_as_analytic_light_proxy` | `bool` |
+| `skip_render` | `bool` |
+| `metalness_in_red_channel` | `bool` |
+| `enable_base_texture` | `bool` |
+| `enable_orm_texture` | `bool` |
+| `enable_normal_texture` | `bool` |
+| `enable_emissive_texture` | `bool` |
+| `enable_transmission_texture` | `bool` |
+
+#### Texture Paths (read-only)
+
+| Property | Type |
+| --- | --- |
+| `base_texture_path` | `str | None` |
+| `orm_texture_path` | `str | None` |
+| `normal_texture_path` | `str | None` |
+| `emissive_texture_path` | `str | None` |
+| `transmission_texture_path` | `str | None` |
+
+#### Methods
+
+| API | Notes |
+| --- | --- |
+| `mark_dirty()` | Force material GPU buffer refresh next frame. |
+| `set_texture(slot, path, srgb=None, normal_map=None)` | Replace a texture slot. `slot` is a `TextureSlot` enum value. Returns `False` if the file cannot be resolved. |
+| `set_base_texture(path, srgb=None)` | Replace base/diffuse texture. Defaults to sRGB. |
+| `set_orm_texture(path, srgb=None)` | Replace ORM/spec-gloss texture. Defaults to linear for metal-rough and sRGB for spec-gloss. |
+| `set_normal_texture(path)` | Replace normal texture. |
+| `set_emissive_texture(path, srgb=None)` | Replace emissive texture. Defaults to sRGB. |
+| `set_transmission_texture(path, srgb=None)` | Replace transmission texture. Defaults to linear. |
+| `clear_texture(slot)` | Disconnect and disable a texture slot. |
+| `clear_base_texture()`, `clear_orm_texture()`, `clear_normal_texture()`, `clear_emissive_texture()`, `clear_transmission_texture()` | Slot-specific clear helpers. |
+
+#### Runtime Update Rules
+
+- Property setters already mark `GPUDataDirty`; the edited material is uploaded on the next rendered frame.
+- In reference/accumulation mode, call `Sample.reset_accumulation()` or set `settings.reset_accumulation = True` after visible edits, otherwise previous samples remain blended with the old material.
+- Color values are linear RGB. The Python setter does not clamp inputs, so keep factors in the physically meaningful range unless deliberately testing extremes.
+- If a texture slot is enabled, scalar/color parameters multiply the texture sample. In metal-rough mode, effective base color is `base_color * base_texture.rgb`, roughness is `roughness * ORM.g`, and metalness is `metalness * ORM.b` unless `metalness_in_red_channel=True`.
+- `opacity` is multiplied by the base texture alpha when `enable_base_texture=True`.
+- Use `set_base_texture`, `set_orm_texture`, `set_normal_texture`, `set_emissive_texture`, or `set_transmission_texture` to replace an imported texture at runtime. Relative paths are resolved the same way as material JSON paths: runtime `Assets/` first, then the current scene directory. For `.png` inputs, an existing sibling `.dds` is preferred, matching material JSON loading.
+- Pure parameter edits such as color, roughness, metalness, opacity, texture toggles, emissive intensity, normal scale, and IOR are next-frame updates. Bigger classification edits such as `use_specular_gloss`, `enable_alpha_testing`, `alpha_cutoff`, `enable_transmission`, `exclude_from_nee`, or `skip_render` can change shader hit groups, alpha handling, lighting participation, or acceleration-structure metadata; after those edits, request a shader/acceleration refresh.
+
+Typical runtime material override:
+
+```python
+app = rtxpt.app()              # embed mode
+# app = renderer.app           # extension mode
+scene = app.scene
+
+mat = scene.find_material("material_0")
+if mat is not None:
+    mat.base_color = (0.8, 0.9, 1.0)
+    mat.roughness = 0.18
+    mat.metalness = 0.85
+    mat.set_base_texture(r"D:/assets/replacement_albedo.png")
+    mat.enable_orm_texture = True
+    mat.normal_texture_scale = 1.0
+    app.reset_accumulation()
+```
+
+When changing material classification flags:
+
+```python
+mat.enable_alpha_testing = True
+mat.alpha_cutoff = 0.4
+mat.enable_transmission = True
+mat.transmission_factor = 0.6
+
+app.reset_accumulation()
+app.request_shader_reload()
+app.request_accel_rebuild()
+```
+
+## Light
+
+Scene light lookup and per-type light properties.
+
+### Scene Lookup
+
+| API | Return | Notes |
+| --- | --- | --- |
+| `scene.get_lights()` | `list[Light]` | All lights in current scene. |
+| `scene.find_light(name)` | `Light | None` | Match by scene node name. |
+| `scene.light_count` | `int` | Number of lights in the current scene. |
+| `Sample.get_lights()` | `list[Light]` | Compatibility alias for `scene.get_lights()`. |
+| `Sample.find_light(name)` | `Light | None` | Compatibility alias for `scene.find_light(name)`. |
+| `Sample.set_environment_map(path)` | `None` | Override scene environment map source. |
+
+### Base Class `Light`
+
+| Property | Type | Notes |
+| --- | --- | --- |
+| `light_type` | implementation enum/int | Underlying Donut light type. |
+| `name` | `str` | Scene node name. Read-only. |
+| `color` | `(r, g, b)` | Writable. |
+| `position` | `(x, y, z)` | Writable. |
+| `direction` | `(x, y, z)` | Writable. |
+
+Derived classes expose extra properties depending on actual light type.
+
+### `DirectionalLight`
+
+| Property | Type | Notes |
+| --- | --- | --- |
+| `irradiance` | `float` | Target illuminance, multiplied by `color`. |
+| `angular_size` | `float` | Apparent angular size in degrees. |
+
+### `SpotLight`
+
+| Property | Type |
+| --- | --- |
+| `intensity` | `float` |
+| `radius` | `float` |
+| `range` | `float` |
+| `inner_angle` | `float` |
+| `outer_angle` | `float` |
+
+### `PointLight`
+
+| Property | Type |
+| --- | --- |
+| `intensity` | `float` |
+| `radius` | `float` |
+| `range` | `float` |
+
+### `EnvironmentLight`
+
+| Property | Type |
+| --- | --- |
+| `radiance_scale` | `(r, g, b)` |
+| `rotation` | float / implementation-specific value |
+| `path` | `str` |
+
+For common environment tweaks, prefer `settings.environment_map` (see [Settings](#settings)) and `Sample.set_environment_map(path)`.
+
+## 3DGS
+
+3D Gaussian splat loading, scene graph nodes, and render settings.
+
+### Loading
+
+| API | Return | Notes |
+| --- | --- | --- |
+| `Renderer.load_gaussian_splats(file_name, convert_rdf_to_donut=True)` | `bool` | Append a `.ply` 3DGS scene object (extension mode). |
+| `Sample.load_gaussian_splats(file_name, convert_rdf_to_donut=True)` | `bool` | Append a 3DGS `.ply` node to the current scene. |
+| Scene JSON `GaussianSplat` node | — | Declare splats in inline or file-based scene JSON. See [Renderer → Inline / Builtin Scenes](#inline--builtin-scenes). |
+
+Read-only status on `Sample` / `Renderer.settings`:
+
+| Property | Type | Notes |
+| --- | --- | --- |
+| `gaussian_splat_object_count` | `int` | Number of loaded 3DGS scene objects. |
+| `gaussian_splat_count` | `int` | Total splat count across current 3DGS objects. |
+| `gaussian_splat_file_name` | `str` | Single path or multi-object summary. |
+
+### 3DGS Enums
+
+| Enum | Values |
+| --- | --- |
+| `GaussianSplatSortMode` | `GpuSort=0`, `StochasticSplats=1` |
+| `GaussianSplatStorageFormat` | `Float32=0`, `Float16=1`, `Uint8=2` |
+| `GaussianSplatFrustumCulling` | `Disabled=0`, `AtDistanceStage=1`, `AtRasterStage=2` |
+| `GaussianSplatShadowMode` | `Disabled=0`, `Hard=1`, `Soft=2` |
+| `GaussianSplatFTBSyncMode` | `Disabled=0`, `Interlock=1` |
+
+### Settings (`settings.*`)
+
+3DGS data is scene-owned. Scene JSON can contain any number of `GaussianSplat`, `GaussianSplats`, or `3DGaussianSplat` nodes. `load_gaussian_splats(...)` appends another `GaussianSplat` node to the current scene root. Switching scenes clears the old scene graph, including its 3DGS objects.
+
+Rasterization runs over all enabled 3DGS scene objects. Emissive proxy sampling combines all enabled 3DGS objects into one world-space proxy list. Splat shadows currently use the first enabled 3DGS object as the primary shadow source.
+
+`gaussian_splat_translation`, `gaussian_splat_rotation_euler_deg`, and `gaussian_splat_object_scale` apply only when Python appends a new 3DGS node through `load_gaussian_splats(...)`.
+
+| Property | Type | Notes |
+| --- | --- | --- |
+| `enable_gaussian_splats` | `bool` | Enables rendering for 3DGS scene objects. |
+| `gaussian_splat_depth_test` | `bool` | Test against scene depth. |
+| `gaussian_splat_sorting_mode` | `int/GaussianSplatSortMode` | `GpuSort` or `StochasticSplats`. |
+| `gaussian_splat_sh_format` | `int/GaussianSplatStorageFormat` | SH payload storage format. |
+| `gaussian_splat_rgba_format` | `int/GaussianSplatStorageFormat` | RGBA payload storage format. |
+| `gaussian_splat_use_aabbs` | `bool` | Use AABB-based splat shadow acceleration data. |
+| `gaussian_splat_use_tlas_instances` | `bool` | Use TLAS instances for splat shadow acceleration. |
+| `gaussian_splat_blas_compaction` | `bool` | Enable BLAS compaction for splat shadow acceleration data. |
+| `gaussian_splat_mip_antialiasing` | `bool` | Enable splat mip antialiasing path. |
+| `gaussian_splat_quantize_normals` | `bool` | Quantize generated splat normals in the RTX path. |
+| `gaussian_splat_ftb_sync_mode` | `int/GaussianSplatFTBSyncMode` | Front-to-back synchronization mode. |
+| `gaussian_splat_frustum_culling` | `int/GaussianSplatFrustumCulling` | Frustum culling stage. |
+| `gaussian_splat_frustum_dilation` | `float` | Culling frustum dilation. |
+| `gaussian_splat_screen_size_culling` | `bool` | Enable screen-size splat culling. |
+| `gaussian_splat_min_pixel_coverage` | `float` | Minimum pixel coverage for screen-size culling. |
+| `gaussian_splat_depth_iso_threshold` | `float` | Depth/iso-surface threshold used by the splat path. |
+| `gaussian_splat_fragment_shader_barycentric` | `bool` | Use fragment-shader barycentric path when supported. |
+| `gaussian_splat_scale` | `float` | Projected footprint scale. |
+| `gaussian_splat_alpha_scale` | `float` | Opacity multiplier. |
+| `gaussian_splat_brightness` | `float` | Color multiplier. |
+| `gaussian_splat_tint_color` | `(r, g, b)` | Multiplies the SH0/base color before brightness. |
+| `gaussian_splat_as_emitter` | `bool` | Inject 3DGS emissive proxies into light sampling. |
+| `gaussian_splat_emission_intensity` | `float` | Emissive proxy intensity multiplier. |
+| `gaussian_splat_emission_max_proxy_count` | `int` | Emissive proxy budget. |
+| `gaussian_splat_alpha_cull_threshold` | `float` | Cull low-alpha splats. |
+| `gaussian_splat_translation` | `(x, y, z)` | Initial translation for newly attached Python 3DGS nodes. |
+| `gaussian_splat_rotation_euler_deg` | `(x, y, z)` | Initial Euler rotation in degrees for newly attached Python 3DGS nodes. |
+| `gaussian_splat_object_scale` | `(x, y, z)` | Initial non-uniform scale for newly attached Python 3DGS nodes. |
+| `gaussian_splat_shadows` | `bool` | Enable splat shadow integration. |
+| `gaussian_splat_hybrid_shadows` | `bool` | Alias for `gaussian_splat_shadows`. |
+| `gaussian_splat_shadows_mode` | `int/GaussianSplatShadowMode` | Disabled, hard, or soft splat shadows. |
+| `gaussian_splat_shadow_strength` | `float` | Shadow opacity/strength. |
+| `gaussian_splat_shadow_soft_radius` | `float` | Soft shadow radius. |
+| `gaussian_splat_shadow_soft_sample_count` | `int` | Soft shadow sample count. |
+| `gaussian_splat_rtx_kernel_degree` | `int` | RTX splat kernel degree. |
+| `gaussian_splat_rtx_adaptive_clamp` | `bool` | Enable adaptive RTX alpha clamp. |
+| `gaussian_splat_rtx_alpha_clamp` | `float` | Manual RTX alpha clamp value. |
+| `gaussian_splat_rtx_minimum_transmittance` | `float` | Minimum transmittance clamp for RTX splat tracing. |
+| `gaussian_splat_rtx_trace_strategy` | `int` | RTX splat tracing strategy selector. |
+| `gaussian_splat_rtx_particle_samples_per_pass` | `int` | RTX particle samples processed per pass. |
+| `gaussian_splat_rtx_maximum_pass_count` | `int` | Maximum RTX splat trace pass count. |
+| `gaussian_splat_rtx_particle_shadow_offset` | `float` | RTX particle shadow offset. |
+| `gaussian_splat_rtx_particle_shadow_threshold` | `float` | RTX particle shadow threshold. |
+| `gaussian_splat_rtx_colored_shadow_strength` | `float` | Strength for colored splat shadows. |
+| `gaussian_splat_rtx_mesh_composite_threshold` | `float` | Mesh/splat composite threshold. |
+| `gaussian_splat_rtx_depth_iso_threshold` | `float` | RTX depth/iso-surface threshold. |
+| `gaussian_splat_object_count` | `int` | Read-only 3DGS scene object count. |
+| `gaussian_splat_count` | `int` | Read-only total splat count. |
+| `gaussian_splat_file_name` | `str` | Read-only single path or multi-object summary. |
+
+## Settings
+
+`Settings` mirrors the live ImGui UI state (`rtxpt.settings()` or `app.settings`). Most fields are writable and take effect on subsequent frames. For 3DGS-specific fields, see [3DGS](#3dgs).
 
 ### General
 
@@ -754,66 +1081,6 @@ app.set_reference_mode(
 | `bloom_intensity` | `float` |
 | `bloom_radius` | `float` |
 
-### 3D Gaussian Splats
-
-3DGS data is scene-owned. Scene JSON can contain any number of `GaussianSplat`, `GaussianSplats`, or `3DGaussianSplat` nodes. `load_gaussian_splats(...)` is a convenience method that appends another `GaussianSplat` node to the current scene root. Switching scenes clears the old scene graph, including its 3DGS objects.
-
-Rasterization runs over all enabled 3DGS scene objects. Emissive proxy sampling also combines all enabled 3DGS objects into one world-space proxy list. The current RTX/path-tracing splat shadow binding still has one global resource slot, so splat shadows use the first enabled 3DGS object as the primary shadow source.
-
-The table below lists the Python-facing 3DGS settings that are currently wired into the renderer. Rasterization, culling, emission, and shadow settings are shared render settings. Object placement belongs to the scene graph node transform. `gaussian_splat_translation`, `gaussian_splat_rotation_euler_deg`, and `gaussian_splat_object_scale` are only used as the initial transform when Python appends a new 3DGS node through `load_gaussian_splats(...)`.
-
-| Property | Type | Notes |
-| --- | --- | --- |
-| `enable_gaussian_splats` | `bool` | Enables rendering for 3DGS scene objects. |
-| `gaussian_splat_depth_test` | `bool` | Test against scene depth. |
-| `gaussian_splat_sorting_mode` | `int/GaussianSplatSortMode` | `GpuSort` or `StochasticSplats`. |
-| `gaussian_splat_sh_format` | `int/GaussianSplatStorageFormat` | SH payload storage format. |
-| `gaussian_splat_rgba_format` | `int/GaussianSplatStorageFormat` | RGBA payload storage format. |
-| `gaussian_splat_use_aabbs` | `bool` | Use AABB-based splat shadow acceleration data. |
-| `gaussian_splat_use_tlas_instances` | `bool` | Use TLAS instances for splat shadow acceleration. |
-| `gaussian_splat_blas_compaction` | `bool` | Enable BLAS compaction for splat shadow acceleration data. |
-| `gaussian_splat_mip_antialiasing` | `bool` | Enable splat mip antialiasing path. |
-| `gaussian_splat_quantize_normals` | `bool` | Quantize generated splat normals in the RTX path. |
-| `gaussian_splat_ftb_sync_mode` | `int/GaussianSplatFTBSyncMode` | Front-to-back synchronization mode. |
-| `gaussian_splat_frustum_culling` | `int/GaussianSplatFrustumCulling` | Frustum culling stage. |
-| `gaussian_splat_frustum_dilation` | `float` | Culling frustum dilation. |
-| `gaussian_splat_screen_size_culling` | `bool` | Enable screen-size splat culling. |
-| `gaussian_splat_min_pixel_coverage` | `float` | Minimum pixel coverage for screen-size culling. |
-| `gaussian_splat_depth_iso_threshold` | `float` | Depth/iso-surface threshold used by the splat path. |
-| `gaussian_splat_fragment_shader_barycentric` | `bool` | Use fragment-shader barycentric path when supported. |
-| `gaussian_splat_scale` | `float` | Projected footprint scale. |
-| `gaussian_splat_alpha_scale` | `float` | Opacity multiplier. |
-| `gaussian_splat_brightness` | `float` | Color multiplier. |
-| `gaussian_splat_tint_color` | `(r, g, b)` | Multiplies the SH0/base color before brightness. |
-| `gaussian_splat_as_emitter` | `bool` | Inject 3DGS emissive proxies into light sampling. |
-| `gaussian_splat_emission_intensity` | `float` | Emissive proxy intensity multiplier. |
-| `gaussian_splat_emission_max_proxy_count` | `int` | Emissive proxy budget. |
-| `gaussian_splat_alpha_cull_threshold` | `float` | Cull low-alpha splats. |
-| `gaussian_splat_translation` | `(x, y, z)` | Initial translation for newly attached Python 3DGS nodes. |
-| `gaussian_splat_rotation_euler_deg` | `(x, y, z)` | Initial Euler rotation in degrees for newly attached Python 3DGS nodes. |
-| `gaussian_splat_object_scale` | `(x, y, z)` | Initial non-uniform scale for newly attached Python 3DGS nodes. |
-| `gaussian_splat_shadows` | `bool` | Enable splat shadow integration. |
-| `gaussian_splat_hybrid_shadows` | `bool` | Alias for `gaussian_splat_shadows`. |
-| `gaussian_splat_shadows_mode` | `int/GaussianSplatShadowMode` | Disabled, hard, or soft splat shadows. |
-| `gaussian_splat_shadow_strength` | `float` | Shadow opacity/strength. |
-| `gaussian_splat_shadow_soft_radius` | `float` | Soft shadow radius. |
-| `gaussian_splat_shadow_soft_sample_count` | `int` | Soft shadow sample count. |
-| `gaussian_splat_rtx_kernel_degree` | `int` | RTX splat kernel degree. |
-| `gaussian_splat_rtx_adaptive_clamp` | `bool` | Enable adaptive RTX alpha clamp. |
-| `gaussian_splat_rtx_alpha_clamp` | `float` | Manual RTX alpha clamp value. |
-| `gaussian_splat_rtx_minimum_transmittance` | `float` | Minimum transmittance clamp for RTX splat tracing. |
-| `gaussian_splat_rtx_trace_strategy` | `int` | RTX splat tracing strategy selector. |
-| `gaussian_splat_rtx_particle_samples_per_pass` | `int` | RTX particle samples processed per pass. |
-| `gaussian_splat_rtx_maximum_pass_count` | `int` | Maximum RTX splat trace pass count. |
-| `gaussian_splat_rtx_particle_shadow_offset` | `float` | RTX particle shadow offset. |
-| `gaussian_splat_rtx_particle_shadow_threshold` | `float` | RTX particle shadow threshold. |
-| `gaussian_splat_rtx_colored_shadow_strength` | `float` | Strength for colored splat shadows. |
-| `gaussian_splat_rtx_mesh_composite_threshold` | `float` | Mesh/splat composite threshold. |
-| `gaussian_splat_rtx_depth_iso_threshold` | `float` | RTX depth/iso-surface threshold. |
-| `gaussian_splat_object_count` | `int` | Read-only 3DGS scene object count. |
-| `gaussian_splat_count` | `int` | Read-only total splat count across current 3DGS scene objects. |
-| `gaussian_splat_file_name` | `str` | Read-only single path or multi-object summary. |
-
 ### Realtime AA / DLSS / Reflex
 
 Availability depends on build options and hardware support.
@@ -879,205 +1146,82 @@ Reference / OIDN:
 | `visible_to_camera` | `bool` |
 | `hide_source` | `bool` inverse of `visible_to_camera` |
 
-## `Material` Class
+## Enums
 
-Returned by `Scene.get_materials()`, `Scene.find_material()`, and `Scene.find_material_by_id()`.
+All enums are arithmetic, so `int(enum_value)` works and enum values can be assigned to int-backed settings fields. 3DGS-specific enums are listed under [3DGS → 3DGS Enums](#3dgs-enums).
 
-Read-only identifiers:
+### Path Tracing & Realtime
 
-| Property | Type |
+#### `PathTracerMode`
+
+| Value | Int | Meaning |
+| --- | ---: | --- |
+| `rtxpt.PathTracerMode.Realtime` | `0` | Realtime path tracing mode. |
+| `rtxpt.PathTracerMode.Reference` | `1` | Reference accumulation mode. |
+
+#### `RealtimeAA`
+
+| Value | Int | Meaning |
+| --- | ---: | --- |
+| `rtxpt.RealtimeAA.Off` | `0` | No realtime AA/upscaler. |
+| `rtxpt.RealtimeAA.TAA` | `1` | Temporal AA. |
+| `rtxpt.RealtimeAA.DLSS` | `2` | DLSS Super Resolution. |
+| `rtxpt.RealtimeAA.DLSS_RR` | `3` | DLSS Ray Reconstruction. |
+
+#### `DLSSMode`
+
+| Value | Int |
+| --- | ---: |
+| `Off` | `0` |
+| `MaxPerformance` | `1` |
+| `Balanced` | `2` |
+| `MaxQuality` | `3` |
+| `UltraPerformance` | `4` |
+| `UltraQuality` | `5` |
+| `DLAA` | `6` |
+
+#### `DLSSFGMode`
+
+| Value | Int |
+| --- | ---: |
+| `Off` | `0` |
+| `On` | `1` |
+| `Auto` | `2` |
+
+#### `DLSSRRPreset`
+
+| Value | Int |
+| --- | ---: |
+| `Default` | `0` |
+| `PresetA` ... `PresetH` | `1` ... `8` |
+
+#### `ReflexMode`
+
+| Value | Int |
+| --- | ---: |
+| `Off` | `0` |
+| `LowLatency` | `1` |
+| `LowLatencyWithBoost` | `2` |
+
+### OIDN
+
+| Enum | Values |
 | --- | --- |
-| `name` | `str` |
-| `model_name` | `str` |
-| `unique_name` | `str` |
+| `OidnPasses` | `ColorOnly=0`, `Albedo=1`, `AlbedoNormal=2` |
+| `OidnPrefilter` | `None_=0`, `Fast=1`, `Accurate=2` |
+| `OidnQuality` | `Fast=0`, `Balanced=1`, `High=2` |
 
-Editable properties automatically mark GPU data dirty:
+### Material
 
-| Property | Type |
+#### `TextureSlot`
+
+| Value | Meaning |
 | --- | --- |
-| `base_color` | `(r, g, b)` |
-| `specular_color` | `(r, g, b)` |
-| `emissive_color` | `(r, g, b)` |
-| `emissive_intensity` | `float` |
-| `metalness` | `float` |
-| `roughness` | `float` |
-| `opacity` | `float` |
-| `transmission_factor` | `float` |
-| `diffuse_transmission_factor` | `float` |
-| `normal_texture_scale` | `float` |
-| `ior` | `float` |
-| `alpha_cutoff` | `float` |
-| `volume_attenuation_distance` | `float` |
-| `volume_attenuation_color` | `(r, g, b)` |
-| `nested_priority` | `int` |
-| `use_specular_gloss` | `bool` |
-| `enable_alpha_testing` | `bool` |
-| `enable_transmission` | `bool` |
-| `thin_surface` | `bool` |
-| `exclude_from_nee` | `bool` |
-| `enable_as_analytic_light_proxy` | `bool` |
-| `skip_render` | `bool` |
-| `metalness_in_red_channel` | `bool` |
-| `enable_base_texture` | `bool` |
-| `enable_orm_texture` | `bool` |
-| `enable_normal_texture` | `bool` |
-| `enable_emissive_texture` | `bool` |
-| `enable_transmission_texture` | `bool` |
-
-Read-only texture paths, or `None` when the slot has no texture:
-
-| Property | Type |
-| --- | --- |
-| `base_texture_path` | `str | None` |
-| `orm_texture_path` | `str | None` |
-| `normal_texture_path` | `str | None` |
-| `emissive_texture_path` | `str | None` |
-| `transmission_texture_path` | `str | None` |
-
-Methods:
-
-| API | Notes |
-| --- | --- |
-| `mark_dirty()` | Force material GPU buffer refresh next frame. |
-| `set_texture(slot, path, srgb=None, normal_map=None)` | Replace a texture slot. `slot` is a `TextureSlot` enum value. Returns `False` if the file cannot be resolved. |
-| `set_base_texture(path, srgb=None)` | Replace base/diffuse texture. Defaults to sRGB. |
-| `set_orm_texture(path, srgb=None)` | Replace ORM/spec-gloss texture. Defaults to linear for metal-rough and sRGB for spec-gloss. |
-| `set_normal_texture(path)` | Replace normal texture. |
-| `set_emissive_texture(path, srgb=None)` | Replace emissive texture. Defaults to sRGB. |
-| `set_transmission_texture(path, srgb=None)` | Replace transmission texture. Defaults to linear. |
-| `clear_texture(slot)` | Disconnect and disable a texture slot. |
-| `clear_base_texture()`, `clear_orm_texture()`, `clear_normal_texture()`, `clear_emissive_texture()`, `clear_transmission_texture()` | Slot-specific clear helpers. |
-
-Runtime update rules:
-
-- Property setters already mark `GPUDataDirty`; the edited material is uploaded on the next rendered frame.
-- In reference/accumulation mode, call `Sample.reset_accumulation()` or set `settings.reset_accumulation = True` after visible edits, otherwise previous samples remain blended with the old material.
-- Color values are linear RGB. The Python setter does not clamp inputs, so keep factors in the physically meaningful range unless deliberately testing extremes.
-- If a texture slot is enabled, scalar/color parameters multiply the texture sample. In metal-rough mode, effective base color is `base_color * base_texture.rgb`, roughness is `roughness * ORM.g`, and metalness is `metalness * ORM.b` unless `metalness_in_red_channel=True`.
-- `opacity` is multiplied by the base texture alpha when `enable_base_texture=True`.
-- Use `set_base_texture`, `set_orm_texture`, `set_normal_texture`, `set_emissive_texture`, or `set_transmission_texture` to replace an imported texture at runtime. Relative paths are resolved the same way as material JSON paths: runtime `Assets/` first, then the current scene directory. For `.png` inputs, an existing sibling `.dds` is preferred, matching material JSON loading.
-- Pure parameter edits such as color, roughness, metalness, opacity, texture toggles, emissive intensity, normal scale, and IOR are next-frame updates. Bigger classification edits such as `use_specular_gloss`, `enable_alpha_testing`, `alpha_cutoff`, `enable_transmission`, `exclude_from_nee`, or `skip_render` can change shader hit groups, alpha handling, lighting participation, or acceleration-structure metadata; after those edits, request a shader/acceleration refresh.
-
-Typical runtime material override:
-
-```python
-app = rtxpt.app()              # embed mode
-# app = renderer.app           # extension mode
-scene = app.scene
-
-mat = scene.find_material("material_0")
-if mat is not None:
-    mat.base_color = (0.8, 0.9, 1.0)
-    mat.roughness = 0.18
-    mat.metalness = 0.85
-    mat.set_base_texture(r"D:/assets/replacement_albedo.png")
-    mat.enable_orm_texture = True
-    mat.normal_texture_scale = 1.0
-    app.reset_accumulation()
-```
-
-When changing material classification flags:
-
-```python
-mat.enable_alpha_testing = True
-mat.alpha_cutoff = 0.4
-mat.enable_transmission = True
-mat.transmission_factor = 0.6
-
-app.reset_accumulation()
-app.request_shader_reload()
-app.request_accel_rebuild()
-```
-
-## `SceneNode` Class
-
-Returned by `Scene.find_node()` and `Sample.find_node()`.
-
-| Property | Type |
-| --- | --- |
-| `name` | `str` |
-| `path` | `str` |
-| `mesh` | `Mesh | None` |
-| `is_mesh` | `bool` |
-| `translation` | `(x, y, z)` |
-| `rotation` | `(x, y, z, w)` quaternion |
-| `euler` | `(x, y, z)` radians |
-| `scaling` | `(x, y, z)` |
-| `bounds` | `((min.xyz), (max.xyz)) \| None` |
-
-`rotation` and `euler` both write the node's local Transform rotation. Assigning
-`euler` converts XYZ radians to the stored quaternion; assigning `rotation` expects
-an XYZW quaternion, matching scene JSON. Python Transform edits reset accumulation
-automatically so the next rendered frame does not blend with the previous pose.
-
-## `Mesh` Class
-
-Returned by `Scene.get_meshes()`, `Scene.find_mesh()`, `Sample.get_meshes()`,
-`Sample.find_mesh()`, and `SceneNode.mesh`.
-
-Read-only properties:
-
-| Property | Type | Notes |
-| --- | --- | --- |
-| `name` | `str` | Mesh name from the source model or builtin primitive. |
-| `global_mesh_index` | `int` | Internal scene mesh index. |
-| `vertex_count` | `int` | Number of object-space positions expected by `set_mesh_vertices(...)`. |
-| `index_count` | `int` | Total index count. |
-| `geometry_count` | `int` | Number of mesh geometry groups/submeshes. |
-| `bounds` | `((min.xyz), (max.xyz)) \| None` | Object-space mesh AABB. |
-
-Vertex data is intentionally edited through `Sample`, not through writable `Mesh`
-properties, because changing vertices also needs renderer-side GPU buffer refresh and
-acceleration-structure invalidation.
-
-## `Light` Classes
-
-Base class: `Light`.
-
-| Property | Type | Notes |
-| --- | --- | --- |
-| `light_type` | implementation enum/int | Underlying Donut light type. |
-| `name` | `str` | Scene node name. Read-only. |
-| `color` | `(r, g, b)` | Writable. |
-| `position` | `(x, y, z)` | Writable. |
-| `direction` | `(x, y, z)` | Writable. |
-
-Derived classes expose extra properties depending on actual light type.
-
-### `DirectionalLight`
-
-| Property | Type | Notes |
-| --- | --- | --- |
-| `irradiance` | `float` | Target illuminance, multiplied by `color`. |
-| `angular_size` | `float` | Apparent angular size in degrees. |
-
-### `SpotLight`
-
-| Property | Type |
-| --- | --- |
-| `intensity` | `float` |
-| `radius` | `float` |
-| `range` | `float` |
-| `inner_angle` | `float` |
-| `outer_angle` | `float` |
-
-### `PointLight`
-
-| Property | Type |
-| --- | --- |
-| `intensity` | `float` |
-| `radius` | `float` |
-| `range` | `float` |
-
-### `EnvironmentLight`
-
-| Property | Type |
-| --- | --- |
-| `radiance_scale` | `(r, g, b)` |
-| `rotation` | float / implementation-specific value |
-| `path` | `str` |
-
-For common environment tweaks, prefer `settings.environment_map` and `Sample.set_environment_map(path)`.
+| `Base` | Base/diffuse texture. |
+| `ORM` / `OcclusionRoughnessMetallic` | ORM texture, or spec-gloss texture when `use_specular_gloss=True`. |
+| `Normal` | Normal texture. |
+| `Emissive` | Emissive texture. |
+| `Transmission` | Transmission texture. |
 
 ## Embedded Mode Notes
 

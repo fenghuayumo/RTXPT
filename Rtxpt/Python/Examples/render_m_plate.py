@@ -30,7 +30,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCANVIDEO_MESH_ROOT = Path(r"D:\ScanVideo\models\example_mesh")
 MODEL_PRESETS: dict[str, Path] = {
-    "plate": SCANVIDEO_MESH_ROOT / "m-plate-pbr_final" / "textured.obj",
+    "plate": SCANVIDEO_MESH_ROOT / "background" / "output.obj",
     "link": SCANVIDEO_MESH_ROOT / "link" / "link7_0.obj",
 }
 DEFAULT_MODEL = "plate"
