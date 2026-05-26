@@ -10,6 +10,9 @@ Usage:
     python Rtxpt/Python/Examples/render_m_plate.py --model plate
     python Rtxpt/Python/Examples/render_m_plate.py --model link --out link7_0.png
 
+    # Try set_base_texture() at runtime:
+    python Rtxpt/Python/Examples/render_m_plate.py --obj-path D:/ScanVideo/models/example_mesh/m-plate-pbr_final/textured.obj --albedo D:/path/to/albedo.png
+
     # Render all built-in presets:
     python Rtxpt/Python/Examples/render_m_plate.py --all
 
@@ -30,8 +33,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCANVIDEO_MESH_ROOT = Path(r"D:\ScanVideo\models\example_mesh")
 MODEL_PRESETS: dict[str, Path] = {
-    "plate": SCANVIDEO_MESH_ROOT / "background" / "output.obj",
+    "plate": SCANVIDEO_MESH_ROOT / "m-plate-pbr_final" / "textured.obj",
     "link": SCANVIDEO_MESH_ROOT / "link" / "link7_0.obj",
+    "background": SCANVIDEO_MESH_ROOT / "background" / "output.obj",
 }
 DEFAULT_MODEL = "plate"
 DEFAULT_HDR = REPO_ROOT / "Assets" / "EnvironmentMaps" / "20060807_wells6_hd.hdr"
@@ -263,19 +267,62 @@ def default_output_path(obj_path: Path) -> str:
     return f"{obj_path.stem}.png"
 
 
+def materials_for_model(scene, model_name: str) -> list:
+    return [m for m in scene.get_materials() if m.model_name == model_name]
+
+
 def print_materials(scene, model_name: str) -> None:
-    count = 0
-    for material in scene.get_materials():
-        if material.model_name != model_name:
-            continue
-        count += 1
+    materials = materials_for_model(scene, model_name)
+    if not materials:
+        print(f"[rtxpt] WARNING: no materials found for model '{model_name}'")
+        return
+    for material in materials:
+        base_path = getattr(material, "base_texture_path", None)
         print(
             f"[rtxpt]   {material.name}: base={material.base_color}, "
             f"rough={material.roughness:.2f}, metal={material.metalness:.2f}, "
-            f"base_tex={material.enable_base_texture}"
+            f"enable_base_tex={material.enable_base_texture}, "
+            f"base_tex_path={base_path}"
         )
-    if count == 0:
-        print(f"[rtxpt] WARNING: no materials found for model '{model_name}'")
+
+
+def apply_set_base_texture(
+    scene,
+    model_name: str,
+    albedo_path: Path,
+    material_slot: str | None,
+    srgb: bool,
+) -> None:
+    """Call Material.set_base_texture() on matching scene materials."""
+    albedo_path = albedo_path.resolve()
+    if not albedo_path.is_file():
+        raise FileNotFoundError(f"Albedo image not found: {albedo_path}")
+
+    targets = materials_for_model(scene, model_name)
+    if material_slot is not None:
+        targets = [m for m in targets if m.name == material_slot]
+        if not targets:
+            raise RuntimeError(
+                f"Material slot '{material_slot}' not found on model '{model_name}'. "
+                f"Available: {[m.name for m in materials_for_model(scene, model_name)]}"
+            )
+
+    if not targets:
+        raise RuntimeError(f"No materials for model '{model_name}'")
+
+    for material in targets:
+        before = material.base_texture_path
+        ok = material.set_base_texture(str(albedo_path), srgb=srgb)
+        material.enable_base_texture = True
+        after = material.base_texture_path
+        print(f"[rtxpt] set_base_texture('{material.name}')")
+        print(f"[rtxpt]   path : {albedo_path}")
+        print(f"[rtxpt]   srgb : {srgb}")
+        print(f"[rtxpt]   ok   : {ok}")
+        print(f"[rtxpt]   before: {before}")
+        print(f"[rtxpt]   after : {after}")
+        if not ok:
+            raise RuntimeError(f"set_base_texture failed for '{material.name}'")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -317,6 +364,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--oidn-quality", type=int, default=2,
                         help="OIDN quality: 0=Fast, 1=Balanced, 2=High.")
+    parser.add_argument("--albedo", default=None,
+                        help="Replace albedo via Material.set_base_texture(path).")
+    parser.add_argument("--material-slot", default="material_0",
+                        help="MTL material name for --albedo (default: material_0).")
+    parser.add_argument("--albedo-srgb", action=argparse.BooleanOptionalAction, default=True,
+                        help="sRGB flag passed to set_base_texture (default: True).")
     return parser
 
 
@@ -358,8 +411,23 @@ def render_mesh(
 
         scene_obj = renderer.app.scene
         model_name = obj_path.stem
-        print(f"[rtxpt] Materials for '{model_name}':")
+        print(f"[rtxpt] Materials for '{model_name}' (imported):")
         print_materials(scene_obj, model_name)
+
+        if args.albedo:
+            print(f"[rtxpt] Applying set_base_texture ...")
+            apply_set_base_texture(
+                scene_obj,
+                model_name,
+                resolve_path(args.albedo),
+                args.material_slot,
+                args.albedo_srgb,
+            )
+            if hasattr(renderer.app, "reset_accumulation"):
+                renderer.app.reset_accumulation()
+            renderer.step_n(1)
+            print(f"[rtxpt] Materials after set_base_texture:")
+            print_materials(scene_obj, model_name)
 
         print(
             f"[rtxpt] Mesh bounds (world): center={tuple(round(v, 4) for v in world_center)}, "

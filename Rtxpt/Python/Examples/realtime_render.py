@@ -60,11 +60,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--adapter-index", type=int, default=-1)
     parser.add_argument(
         "--denoiser",
-        choices=["off", "nrd", "dlss", "oidn"],
+        choices=["off", "taa", "nrd", "dlss", "oidn"],
         default="nrd",
         help=(
-            "Denoiser path to exercise. nrd is realtime and works headless. "
-            "dlss means DLSS Ray Reconstruction when available and requires a non-headless window. "
+            "Realtime path to exercise. taa and nrd work headless. "
+            "dlss means DLSS Ray Reconstruction when available; native NGX works headless, "
+            "while Streamline DLSS requires a non-headless window. "
             "oidn is reference-mode OIDN because current RTXPT OIDN is not a realtime denoiser."
         ),
     )
@@ -146,16 +147,21 @@ def configure_mode(renderer, rtxpt, args: argparse.Namespace) -> tuple[str, bool
     settings.accumulation_target = 1
     settings.reset_accumulation = True
 
+    if denoiser == "taa":
+        settings.realtime_aa = int(rtxpt.RealtimeAA.TAA)
+        settings.standalone_denoiser = False
+        return "TAA realtime", True
+
     if denoiser == "nrd":
         settings.realtime_aa = int(rtxpt.RealtimeAA.TAA)
         settings.standalone_denoiser = True
         return "NRD + TAA realtime", True
 
     if denoiser == "dlss":
-        if args.headless:
-            print("[rtxpt] WARNING: DLSS/DLSS-RR is skipped by the RTXPT render loop in headless mode.")
-            print("[rtxpt]          Use --no-headless to exercise the actual Streamline DLSS path.")
         aa_mode, label = select_dlss_aa(rtxpt, settings)
+        if args.headless and label in {"DLSS", "DLSS-RR"}:
+            print("[rtxpt] DLSS/DLSS-RR is available in headless mode on native NGX builds.")
+            print("[rtxpt] Streamline builds still need --no-headless for the Streamline DLSS path.")
         settings.realtime_aa = aa_mode
         settings.standalone_denoiser = False
         if hasattr(settings, "dlss_mode") and label in {"DLSS", "DLSS-RR"}:
