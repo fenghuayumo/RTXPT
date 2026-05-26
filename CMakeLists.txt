@@ -87,11 +87,7 @@ endfunction()
 #----------------------------------------------------------------------------------------------------------------------
 # Streamline config
 #set(FETCHCONTENT_QUIET OFF) <- use for a lot more detailed info from FetchContent
-if (WIN32)
-    set(RTXPT_DEFAULT_WITH_STREAMLINE ON)
-else()
-    set(RTXPT_DEFAULT_WITH_STREAMLINE OFF)
-endif()
+set(RTXPT_DEFAULT_WITH_STREAMLINE OFF)
 option(DONUT_WITH_STREAMLINE "Enable streamline, separate package required" ${RTXPT_DEFAULT_WITH_STREAMLINE})
 if (DONUT_WITH_STREAMLINE AND NOT WIN32)
     message(WARNING "Streamline integration is currently Windows-only in this codebase; disabling DONUT_WITH_STREAMLINE for this platform.")
@@ -118,13 +114,8 @@ option(STREAMLINE_FEATURE_DIRECTSR  "Include DirectSR dll"          OFF )
 #----------------------------------------------------------------------------------------------------------------------
 # Native NGX DLSS config
 #
-# Streamline remains the preferred/default integration on Windows.  Linux uses the Vulkan backend and cannot use this
-# codebase's Streamline path, so enable Donut's native NGX DLSS integration there.
-if (WIN32)
-    set(RTXPT_DEFAULT_WITH_NATIVE_DLSS OFF)
-else()
-    set(RTXPT_DEFAULT_WITH_NATIVE_DLSS ${DONUT_WITH_VULKAN})
-endif()
+# Use Donut's native NGX DLSS integration by default when Vulkan is available.
+set(RTXPT_DEFAULT_WITH_NATIVE_DLSS ${DONUT_WITH_VULKAN})
 option(RTXPT_WITH_NATIVE_DLSS "Enable native NVIDIA NGX DLSS integration for Vulkan builds without Streamline" ${RTXPT_DEFAULT_WITH_NATIVE_DLSS})
 if (RTXPT_WITH_NATIVE_DLSS AND DONUT_WITH_STREAMLINE)
     message(WARNING "RTXPT_WITH_NATIVE_DLSS is intended for non-Streamline builds; disabling it because DONUT_WITH_STREAMLINE is enabled.")

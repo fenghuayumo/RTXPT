@@ -456,6 +456,9 @@ bool SampleBaseApp::ProcessCommandLine(int argc, char const* const* argv,
         preferredScene = m_CmdLine.scene;
     }
 
+    if (m_CmdLine.noWindow)
+        m_CmdLine.nonInteractive = true;
+
     if (m_CmdLine.nonInteractive)
     {   
         donut::log::EnableOutputToMessageBox(false);
