@@ -261,7 +261,7 @@ def run_dynamic_shader_precompile(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a local RTXPT Python wheel from bin/.")
-    parser.add_argument("--version", default="0.3.0", help="Wheel package version.")
+    parser.add_argument("--version", default="0.5", help="Wheel package version.")
     parser.add_argument(
         "--assets",
         choices=["minimal", "full", "none"],
