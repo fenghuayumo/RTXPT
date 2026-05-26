@@ -498,7 +498,8 @@ RTXDI_LightBufferParameters PrepareLightsPass::Process(nvrhi::ICommandList* comm
         }
     }
 
-    commandList->writeBuffer(m_GeometryInstanceToLightBuffer, geometryInstanceToLight.data(), geometryInstanceToLight.size() * sizeof(uint32_t));
+    if (!geometryInstanceToLight.empty())
+        commandList->writeBuffer(m_GeometryInstanceToLightBuffer, geometryInstanceToLight.data(), geometryInstanceToLight.size() * sizeof(uint32_t));
 
 	lightBufferParams.localLightBufferRegion.firstLightIndex = 0;
 	lightBufferParams.localLightBufferRegion.numLights = lightBufferOffset;

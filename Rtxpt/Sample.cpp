@@ -155,6 +155,22 @@ namespace
         }
     }
 
+    bool NodeSubtreeContains(SceneGraphNode* root, SceneGraphNode* candidate)
+    {
+        if (root == nullptr || candidate == nullptr)
+            return false;
+
+        SceneGraphWalker walker(root);
+        while (walker)
+        {
+            if (walker.Get() == candidate)
+                return true;
+            walker.Next(true);
+        }
+
+        return false;
+    }
+
     bool IsGaussianSplatEmissionEnabled(const SampleUIData& ui)
     {
         return ui.EnableGaussianSplats
@@ -4690,6 +4706,75 @@ void Sample::FinalizeRuntimeSceneMutation(const std::shared_ptr<donut::engine::S
         m_ommBaker->SceneLoaded(*m_scene);
 
     RequestFullRebuild();
+}
+
+bool Sample::DeleteSceneNode(const std::shared_ptr<SceneGraphNode>& node)
+{
+    if (node == nullptr || m_scene == nullptr)
+        return false;
+
+    auto sceneGraph = m_scene->GetSceneGraph();
+    if (sceneGraph == nullptr)
+        return false;
+
+    auto rootNode = sceneGraph->GetRootNode();
+    if (rootNode == nullptr || node == rootNode)
+        return false;
+
+    if (node->GetGraph() != sceneGraph || node->GetParent() == nullptr)
+        return false;
+
+    GetDevice()->waitForIdle();
+
+    bool removedGaussianSplat = false;
+    auto removedSplatBegin = std::remove_if(
+        m_gaussianSplatSceneObjects.begin(),
+        m_gaussianSplatSceneObjects.end(),
+        [&node, &removedGaussianSplat](const GaussianSplatSceneObject& object)
+        {
+            auto objectNode = object.node.lock();
+            const bool remove = objectNode != nullptr && NodeSubtreeContains(node.get(), objectNode.get());
+            removedGaussianSplat = removedGaussianSplat || remove;
+            return remove;
+        });
+    if (removedSplatBegin != m_gaussianSplatSceneObjects.end())
+        m_gaussianSplatSceneObjects.erase(removedSplatBegin, m_gaussianSplatSceneObjects.end());
+
+    sceneGraph->Detach(node, true);
+    m_scene->FinishedLoading(GetFrameIndex());
+
+    m_lights.clear();
+    for (auto light : sceneGraph->GetLights())
+        m_lights.push_back(light);
+
+    if (m_ui.TogglableNodes != nullptr)
+    {
+        m_ui.TogglableNodes->clear();
+        UpdateTogglableNodes(*m_ui.TogglableNodes, rootNode.get());
+    }
+
+    m_ui.SelectedMaterial = nullptr;
+    m_ui.SelectedNode = nullptr;
+    m_ui.InspectorRotationNode.reset();
+    m_ui.InspectorRotationEulerValid = false;
+    m_ui.SelectedGaussianSplat = false;
+
+    if (removedGaussianSplat)
+    {
+        UpdateGaussianSplatUIState();
+        m_gaussianSplatEmissionProxies.clear();
+        m_gaussianSplatTemporalReset = true;
+    }
+
+    if (m_materialsBaker != nullptr)
+        m_materialsBaker->SceneReloaded();
+    if (m_lightsBaker != nullptr)
+        m_lightsBaker->SceneReloaded();
+    if (m_ommBaker != nullptr)
+        m_ommBaker->SceneLoaded(*m_scene);
+
+    RequestFullRebuild();
+    return true;
 }
 
 

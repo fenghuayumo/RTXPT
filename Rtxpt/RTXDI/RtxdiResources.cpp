@@ -94,7 +94,7 @@ RtxdiResources::RtxdiResources(
 
 
     nvrhi::BufferDesc geometryInstanceToLightBufferDesc;
-    geometryInstanceToLightBufferDesc.byteSize = sizeof(uint32_t) * maxGeometryInstances;
+    geometryInstanceToLightBufferDesc.byteSize = sizeof(uint32_t) * std::max(maxGeometryInstances, 1u);
     geometryInstanceToLightBufferDesc.structStride = sizeof(uint32_t);
     geometryInstanceToLightBufferDesc.initialState = nvrhi::ResourceStates::ShaderResource;
     geometryInstanceToLightBufferDesc.keepInitialState = true;

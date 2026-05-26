@@ -93,6 +93,7 @@ public:
     bool                                    LoadGltfMeshFile(const std::filesystem::path& filePath);
     bool                                    LoadObjMeshFile(const std::filesystem::path& filePath);
     void                                    FinalizeRuntimeSceneMutation(const std::shared_ptr<donut::engine::SceneGraphNode>& importedRoot);
+    bool                                    DeleteSceneNode(const std::shared_ptr<donut::engine::SceneGraphNode>& node);
     void                                    RequestFullRebuild();
     std::vector<donut::math::float3>        GetMeshVertices(const std::shared_ptr<donut::engine::MeshInfo>& mesh) const;
     void                                    SetMeshVertices(const std::shared_ptr<donut::engine::MeshInfo>& mesh,

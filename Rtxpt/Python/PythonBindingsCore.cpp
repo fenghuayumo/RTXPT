@@ -35,6 +35,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <optional>
 
 namespace nb = nanobind;
 using namespace donut::engine;
@@ -335,6 +336,40 @@ namespace
             return nb::none();
         return Float3ToTuple(bbox->diagonal());
     }
+
+    nb::object MaterialTexturePath(const PTMaterial& material, PTMaterialTextureSlot slot)
+    {
+        const PTTexture& texture = material.GetTexture(slot);
+        if (texture.Loaded == nullptr || texture.LocalPath.empty())
+            return nb::none();
+        return nb::str(texture.LocalPath.generic_string().c_str());
+    }
+
+    bool SetMaterialTextureFromPython(
+        PTMaterial& material,
+        PTMaterialTextureSlot slot,
+        const std::string& path,
+        std::optional<bool> sRGB = std::nullopt,
+        std::optional<bool> normalMap = std::nullopt)
+    {
+        if (material.RuntimeBaker == nullptr)
+            throw std::runtime_error("Material is not attached to a live MaterialsBaker. Reload the scene and look up the material again.");
+
+        return material.RuntimeBaker->SetMaterialTexture(
+            material,
+            slot,
+            std::filesystem::path(path),
+            sRGB,
+            normalMap);
+    }
+
+    void ClearMaterialTextureFromPython(PTMaterial& material, PTMaterialTextureSlot slot)
+    {
+        if (material.RuntimeBaker == nullptr)
+            throw std::runtime_error("Material is not attached to a live MaterialsBaker. Reload the scene and look up the material again.");
+
+        material.RuntimeBaker->ClearMaterialTexture(material, slot);
+    }
 }
 
 namespace rtxpt_py
@@ -476,6 +511,17 @@ void RegisterCoreBindings(nb::module_& m)
         .value("Interlock", GaussianSplatFTBSyncMode::Interlock)
         .export_values();
 
+    nb::enum_<PTMaterialTextureSlot>(m, "TextureSlot",
+        "Material texture slot for runtime texture replacement.",
+        nb::is_arithmetic())
+        .value("Base", PTMaterialTextureSlot::Base)
+        .value("ORM", PTMaterialTextureSlot::OcclusionRoughnessMetallic)
+        .value("OcclusionRoughnessMetallic", PTMaterialTextureSlot::OcclusionRoughnessMetallic)
+        .value("Normal", PTMaterialTextureSlot::Normal)
+        .value("Emissive", PTMaterialTextureSlot::Emissive)
+        .value("Transmission", PTMaterialTextureSlot::Transmission)
+        .export_values();
+
     // --- PTMaterial -------------------------------------------------------
     nb::class_<PTMaterial>(m, "Material",
         "RTXPT material wrapper (PTMaterial). All edits flag the material as\n"
@@ -573,6 +619,63 @@ void RegisterCoreBindings(nb::module_& m)
         .def_prop_rw("enable_transmission_texture",
             [](PTMaterial& self) { return self.EnableTransmissionTexture; },
             [](PTMaterial& self, bool v) { self.EnableTransmissionTexture = v; self.GPUDataDirty = true; })
+
+        .def_prop_ro("base_texture_path",
+            [](PTMaterial& self) { return MaterialTexturePath(self, PTMaterialTextureSlot::Base); })
+        .def_prop_ro("orm_texture_path",
+            [](PTMaterial& self) { return MaterialTexturePath(self, PTMaterialTextureSlot::OcclusionRoughnessMetallic); })
+        .def_prop_ro("normal_texture_path",
+            [](PTMaterial& self) { return MaterialTexturePath(self, PTMaterialTextureSlot::Normal); })
+        .def_prop_ro("emissive_texture_path",
+            [](PTMaterial& self) { return MaterialTexturePath(self, PTMaterialTextureSlot::Emissive); })
+        .def_prop_ro("transmission_texture_path",
+            [](PTMaterial& self) { return MaterialTexturePath(self, PTMaterialTextureSlot::Transmission); })
+
+        .def("set_texture",
+            [](PTMaterial& self, PTMaterialTextureSlot slot, const std::string& path, std::optional<bool> sRGB, std::optional<bool> normalMap) {
+                return SetMaterialTextureFromPython(self, slot, path, sRGB, normalMap);
+            },
+            nb::arg("slot"), nb::arg("path"), nb::arg("srgb") = nb::none(), nb::arg("normal_map") = nb::none(),
+            "Replace one material texture slot from a file path. Returns False if the file cannot be resolved.")
+        .def("set_base_texture",
+            [](PTMaterial& self, const std::string& path, std::optional<bool> sRGB) {
+                return SetMaterialTextureFromPython(self, PTMaterialTextureSlot::Base, path, sRGB, false);
+            },
+            nb::arg("path"), nb::arg("srgb") = nb::none())
+        .def("set_orm_texture",
+            [](PTMaterial& self, const std::string& path, std::optional<bool> sRGB) {
+                return SetMaterialTextureFromPython(self, PTMaterialTextureSlot::OcclusionRoughnessMetallic, path, sRGB, false);
+            },
+            nb::arg("path"), nb::arg("srgb") = nb::none())
+        .def("set_normal_texture",
+            [](PTMaterial& self, const std::string& path) {
+                return SetMaterialTextureFromPython(self, PTMaterialTextureSlot::Normal, path, false, true);
+            },
+            nb::arg("path"))
+        .def("set_emissive_texture",
+            [](PTMaterial& self, const std::string& path, std::optional<bool> sRGB) {
+                return SetMaterialTextureFromPython(self, PTMaterialTextureSlot::Emissive, path, sRGB, false);
+            },
+            nb::arg("path"), nb::arg("srgb") = nb::none())
+        .def("set_transmission_texture",
+            [](PTMaterial& self, const std::string& path, std::optional<bool> sRGB) {
+                return SetMaterialTextureFromPython(self, PTMaterialTextureSlot::Transmission, path, sRGB, false);
+            },
+            nb::arg("path"), nb::arg("srgb") = nb::none())
+        .def("clear_texture",
+            [](PTMaterial& self, PTMaterialTextureSlot slot) { ClearMaterialTextureFromPython(self, slot); },
+            nb::arg("slot"),
+            "Disconnect and disable one material texture slot.")
+        .def("clear_base_texture",
+            [](PTMaterial& self) { ClearMaterialTextureFromPython(self, PTMaterialTextureSlot::Base); })
+        .def("clear_orm_texture",
+            [](PTMaterial& self) { ClearMaterialTextureFromPython(self, PTMaterialTextureSlot::OcclusionRoughnessMetallic); })
+        .def("clear_normal_texture",
+            [](PTMaterial& self) { ClearMaterialTextureFromPython(self, PTMaterialTextureSlot::Normal); })
+        .def("clear_emissive_texture",
+            [](PTMaterial& self) { ClearMaterialTextureFromPython(self, PTMaterialTextureSlot::Emissive); })
+        .def("clear_transmission_texture",
+            [](PTMaterial& self) { ClearMaterialTextureFromPython(self, PTMaterialTextureSlot::Transmission); })
 
         .def("mark_dirty", [](PTMaterial& self) { self.GPUDataDirty = true; },
              "Force this material's GPU buffer slot to be refreshed next frame.")

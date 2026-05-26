@@ -62,15 +62,51 @@ static size_t ShortHash(const std::array<unsigned char, picosha2::k_digest_size>
     return h;
 }
 
+static std::string LowerCopy(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return char(std::tolower(ch));
+    });
+    return value;
+}
+
+static std::filesystem::path ResolveMaterialTexturePath(
+    const std::filesystem::path& localPath,
+    const std::filesystem::path& sceneDirectory,
+    const std::filesystem::path& mediaPath,
+    std::filesystem::path& localPathForStorage)
+{
+    localPathForStorage = localPath;
+    std::filesystem::path fullPath = ResolveSceneMediaPath(localPath, sceneDirectory, mediaPath);
+
+    constexpr bool cSearchForDDS = true;
+    const std::string extension = LowerCopy(fullPath.extension().string());
+    if (cSearchForDDS && extension == ".png")
+    {
+        std::filesystem::path ddsLocalPath = localPathForStorage;
+        ddsLocalPath.replace_extension(".dds");
+        std::filesystem::path ddsFullPath = ResolveSceneMediaPath(ddsLocalPath, sceneDirectory, mediaPath);
+
+        if (std::filesystem::exists(ddsFullPath))
+        {
+            localPathForStorage = ddsLocalPath;
+            fullPath = ddsFullPath;
+        }
+    }
+
+    return fullPath;
+}
+
 void PTTexture::InitFromLoadedTexture(std::shared_ptr<donut::engine::LoadedTexture> & loaded, bool _sRGB, bool _normalMap, const std::filesystem::path & mediaPath)
 {
     if (loaded == nullptr)
-    { LocalPath = ""; sRGB = false; Loaded = nullptr; return; }
+    { LocalPath = ""; sRGB = false; Loaded = nullptr; NormalMap = false; Enabled = false; return; }
 
     LocalPath = std::filesystem::relative(loaded->path, mediaPath);
     sRGB = _sRGB;
     Loaded = loaded;
     NormalMap = _normalMap;
+    Enabled = true;
 }
 
 std::shared_ptr<PTMaterial> PTMaterial::SafeCast(const std::shared_ptr<Material>& donutMaterial)
@@ -179,29 +215,16 @@ bool PTMaterial::Read(
         texJ["sRGB"] >> output.sRGB;
         texJ["NormalMap"] >> output.NormalMap;
 
-        std::filesystem::path fullPath = ResolveSceneMediaPath(
+        std::filesystem::path storagePath;
+        std::filesystem::path fullPath = ResolveMaterialTexturePath(
             output.LocalPath,
             sceneDirectory,
-            mediaPath);
-
-        bool cSearchForDDS = true;
-        std::string extension = fullPath.extension().string();
-        std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
-        if (cSearchForDDS && extension == ".png")
-        {
-            std::filesystem::path filePathDDS = ResolveSceneMediaPath(
-                std::filesystem::path(output.LocalPath).replace_extension(".dds"),
-                sceneDirectory,
-                mediaPath);
-
-            if (std::filesystem::exists(filePathDDS))
-            {
-                fullPath = filePathDDS;
-                output.LocalPath.replace_extension(".dds");
-            }
-        }
+            mediaPath,
+            storagePath);
+        output.LocalPath = storagePath;
 
         output.Loaded = textureCache->LoadTextureFromFileDeferred(fullPath, output.sRGB);
+        output.Enabled = output.Loaded != nullptr;
     };
 
     loadTexture(input, this->BaseTexture, "BaseTexture");
@@ -274,6 +297,76 @@ std::shared_ptr<PTMaterial> PTMaterial::FromJson(
     material->ModelName = modelName;
 
     return material;
+}
+
+PTTexture& PTMaterial::GetTexture(PTMaterialTextureSlot slot)
+{
+    switch (slot)
+    {
+    case PTMaterialTextureSlot::Base:
+        return BaseTexture;
+    case PTMaterialTextureSlot::OcclusionRoughnessMetallic:
+        return OcclusionRoughnessMetallicTexture;
+    case PTMaterialTextureSlot::Normal:
+        return NormalTexture;
+    case PTMaterialTextureSlot::Emissive:
+        return EmissiveTexture;
+    case PTMaterialTextureSlot::Transmission:
+        return TransmissionTexture;
+    default:
+        assert(false);
+        return BaseTexture;
+    }
+}
+
+const PTTexture& PTMaterial::GetTexture(PTMaterialTextureSlot slot) const
+{
+    return const_cast<PTMaterial*>(this)->GetTexture(slot);
+}
+
+bool PTMaterial::IsTextureEnabled(PTMaterialTextureSlot slot) const
+{
+    switch (slot)
+    {
+    case PTMaterialTextureSlot::Base:
+        return EnableBaseTexture;
+    case PTMaterialTextureSlot::OcclusionRoughnessMetallic:
+        return EnableOcclusionRoughnessMetallicTexture;
+    case PTMaterialTextureSlot::Normal:
+        return EnableNormalTexture;
+    case PTMaterialTextureSlot::Emissive:
+        return EnableEmissiveTexture;
+    case PTMaterialTextureSlot::Transmission:
+        return EnableTransmissionTexture;
+    default:
+        assert(false);
+        return false;
+    }
+}
+
+void PTMaterial::SetTextureEnabled(PTMaterialTextureSlot slot, bool enabled)
+{
+    switch (slot)
+    {
+    case PTMaterialTextureSlot::Base:
+        EnableBaseTexture = enabled;
+        break;
+    case PTMaterialTextureSlot::OcclusionRoughnessMetallic:
+        EnableOcclusionRoughnessMetallicTexture = enabled;
+        break;
+    case PTMaterialTextureSlot::Normal:
+        EnableNormalTexture = enabled;
+        break;
+    case PTMaterialTextureSlot::Emissive:
+        EnableEmissiveTexture = enabled;
+        break;
+    case PTMaterialTextureSlot::Transmission:
+        EnableTransmissionTexture = enabled;
+        break;
+    default:
+        assert(false);
+        break;
+    }
 }
 
 bool PTMaterial::EditorGUI(MaterialsBaker & baker)
@@ -627,6 +720,157 @@ MaterialsBaker::MaterialsBaker(const std::string & relativeShaderSourcePath, nvr
 {
 }
 
+static bool DefaultTextureSRGB(const PTMaterial& material, PTMaterialTextureSlot slot)
+{
+    switch (slot)
+    {
+    case PTMaterialTextureSlot::Base:
+    case PTMaterialTextureSlot::Emissive:
+        return true;
+    case PTMaterialTextureSlot::OcclusionRoughnessMetallic:
+        return material.UseSpecularGlossModel;
+    case PTMaterialTextureSlot::Normal:
+    case PTMaterialTextureSlot::Transmission:
+        return false;
+    default:
+        assert(false);
+        return false;
+    }
+}
+
+static bool DefaultTextureNormalMap(PTMaterialTextureSlot slot)
+{
+    return slot == PTMaterialTextureSlot::Normal;
+}
+
+static void UpdateDonutMaterialTexture(
+    PTMaterial& material,
+    PTMaterialTextureSlot slot,
+    const std::shared_ptr<LoadedTexture>& loaded,
+    bool enabled)
+{
+    if (material.DonutCounterpart == nullptr)
+        return;
+
+    switch (slot)
+    {
+    case PTMaterialTextureSlot::Base:
+        material.DonutCounterpart->baseOrDiffuseTexture = loaded;
+        material.DonutCounterpart->enableBaseOrDiffuseTexture = enabled;
+        break;
+    case PTMaterialTextureSlot::OcclusionRoughnessMetallic:
+        material.DonutCounterpart->metalRoughOrSpecularTexture = loaded;
+        material.DonutCounterpart->enableMetalRoughOrSpecularTexture = enabled;
+        break;
+    case PTMaterialTextureSlot::Normal:
+        material.DonutCounterpart->normalTexture = loaded;
+        material.DonutCounterpart->enableNormalTexture = enabled;
+        break;
+    case PTMaterialTextureSlot::Emissive:
+        material.DonutCounterpart->emissiveTexture = loaded;
+        material.DonutCounterpart->enableEmissiveTexture = enabled;
+        break;
+    case PTMaterialTextureSlot::Transmission:
+        material.DonutCounterpart->transmissionTexture = loaded;
+        material.DonutCounterpart->enableTransmissionTexture = enabled;
+        break;
+    default:
+        assert(false);
+        break;
+    }
+}
+
+void MaterialsBaker::RecordTexture(const PTTexture& texture)
+{
+    if (texture.Loaded == nullptr)
+        return;
+
+    assert(texture.LocalPath != "");
+
+    auto existing = m_textures.find(texture.LocalPath.generic_string());
+    if (existing != m_textures.end())
+    {
+        if (existing->second.NormalMap != texture.NormalMap)
+        {
+            donut::log::warning("Texture with path '%s' is used as a NormalMap and not a NormalMap - this is not supported, expect errors.", texture.LocalPath.string().c_str());
+            assert(false);
+        }
+        if (existing->second.sRGB != texture.sRGB)
+        {
+            donut::log::warning("Texture with path '%s' is marked as both sRGB and not sRGB in different places - this is not supported, expect errors.", texture.LocalPath.string().c_str());
+            assert(false);
+        }
+    }
+    else
+    {
+        m_textures.insert(std::make_pair(texture.LocalPath.generic_string(), texture));
+    }
+}
+
+bool MaterialsBaker::SetMaterialTexture(
+    PTMaterial& material,
+    PTMaterialTextureSlot slot,
+    const std::filesystem::path& localPath,
+    std::optional<bool> sRGB,
+    std::optional<bool> normalMap)
+{
+    if (localPath.empty())
+    {
+        ClearMaterialTexture(material, slot);
+        return true;
+    }
+
+    if (m_textureCache == nullptr)
+        return false;
+
+    std::filesystem::path storagePath;
+    const std::filesystem::path fullPath = ResolveMaterialTexturePath(
+        localPath,
+        m_sceneDirectory,
+        m_mediaPath,
+        storagePath);
+
+    if (!std::filesystem::exists(fullPath))
+    {
+        donut::log::warning("Material texture '%s' resolved to missing file '%s'.", localPath.string().c_str(), fullPath.string().c_str());
+        return false;
+    }
+
+    PTTexture& texture = material.GetTexture(slot);
+    texture.LocalPath = storagePath;
+    texture.sRGB = sRGB.value_or(DefaultTextureSRGB(material, slot));
+    texture.NormalMap = normalMap.value_or(DefaultTextureNormalMap(slot));
+    texture.Loaded = m_textureCache->LoadTextureFromFileDeferred(fullPath, texture.sRGB);
+    texture.Enabled = texture.Loaded != nullptr;
+
+    if (texture.Loaded == nullptr ||
+        (!m_textureCache->IsTextureLoaded(texture.Loaded) && !m_textureCache->IsTextureFinalized(texture.Loaded)))
+    {
+        texture = PTTexture();
+        texture.Enabled = false;
+        return false;
+    }
+
+    material.SetTextureEnabled(slot, true);
+    UpdateDonutMaterialTexture(material, slot, texture.Loaded, true);
+    material.GPUDataDirty = true;
+
+    m_deferredTextureLoadInProgress = true;
+    RecordTexture(texture);
+    return true;
+}
+
+void MaterialsBaker::ClearMaterialTexture(PTMaterial& material, PTMaterialTextureSlot slot)
+{
+    PTTexture& texture = material.GetTexture(slot);
+    texture = PTTexture();
+    texture.Enabled = false;
+
+    material.SetTextureEnabled(slot, false);
+    UpdateDonutMaterialTexture(material, slot, nullptr, false);
+    material.GPUDataDirty = true;
+}
+
 void MaterialsBaker::InitializeUniqueDeterministicName(const std::shared_ptr<PTMaterialBase> & material)
 {
     std::string hashBase = material->ModelName + "_" + material->Name;
@@ -651,6 +895,12 @@ void MaterialsBaker::InitializeUniqueDeterministicName(const std::shared_ptr<PTM
 
 void MaterialsBaker::Clear() 
 {
+    for (auto& material : m_materials)
+    {
+        if (material)
+            material->RuntimeBaker = nullptr;
+    }
+
     m_materialDataWasReset = true;
     m_materials.clear();
     m_materialsGPU.clear();
@@ -666,6 +916,7 @@ void MaterialsBaker::Clear()
 
 MaterialsBaker::~MaterialsBaker()
 {
+    Clear();
 }
 
 static std::string ModelNameFromModelFileName(const std::string& modelFileName)
@@ -999,6 +1250,7 @@ void MaterialsBaker::CreateRenderPassesAndLoadMaterials(nvrhi::IBindingLayout* b
                     }
                 }
                 materialEx->PTMaterial->DonutCounterpart = materialEx.get(); // keep the link - only needed if using material animation from Donut
+                materialEx->PTMaterial->RuntimeBaker = this;
 
                 std::string keyName = materialEx->PTMaterial->ModelName+"."+materialEx->PTMaterial->Name;
                 auto existing = materialsPTUniqueNames.find(keyName);
@@ -1030,34 +1282,14 @@ void MaterialsBaker::CreateRenderPassesAndLoadMaterials(nvrhi::IBindingLayout* b
 
     CompleteDeferredTexturesLoad(nullptr);
 
-    // currently unused
-    auto recordTexture = [&]( const PTTexture & texture )
-    {
-        if( texture.Loaded == nullptr ) return;
-        
-        assert( texture.LocalPath != "" );
-    
-        auto existing = m_textures.find( texture.LocalPath.generic_string() );
-
-        if (existing != m_textures.end())
-        {
-            if( existing->second.NormalMap != texture.NormalMap )
-            { donut::log::warning("Texture with path '%s' is used as a NormalMap and not a NormalMap - this is not supported, expect errors.", texture.LocalPath.string().c_str()); assert( false ); }
-            if( existing->second.sRGB != texture.sRGB )
-            { donut::log::warning("Texture with path '%s' is marked as both sRGB and not sRGB in different places - this is not supported, expect errors.", texture.LocalPath.string().c_str()); assert( false ); }
-        }
-        else
-            m_textures.insert( std::make_pair(texture.LocalPath.generic_string(), texture) );
-    };
-
     m_uniqueNames.clear(); // must be done before InitializeUniqueDeterministicName
     for (auto& materialPT : m_materials)
     {
-        recordTexture(materialPT->BaseTexture);
-        recordTexture(materialPT->OcclusionRoughnessMetallicTexture);
-        recordTexture(materialPT->NormalTexture);
-        recordTexture(materialPT->EmissiveTexture);
-        recordTexture(materialPT->TransmissionTexture);
+        RecordTexture(materialPT->BaseTexture);
+        RecordTexture(materialPT->OcclusionRoughnessMetallicTexture);
+        RecordTexture(materialPT->NormalTexture);
+        RecordTexture(materialPT->EmissiveTexture);
+        RecordTexture(materialPT->TransmissionTexture);
 
         InitializeUniqueDeterministicName(materialPT);
     }

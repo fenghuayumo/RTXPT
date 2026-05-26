@@ -2497,6 +2497,7 @@ void SampleUI::buildUI(void)
 
         if (sceneGraph && rootNode)
         {
+            bool deleteSelectedNode = false;
             ImGui::Text("Objects: %zu mesh, %u 3DGS", sceneGraph->GetMeshInstances().size(), m_ui.GaussianSplatObjectCount);
             ImGui::Separator();
 
@@ -2504,6 +2505,17 @@ void SampleUI::buildUI(void)
             {
                 BuildHierarchyNodeUI(m_ui, rootNode.get());
                 ImGui::TreePop();
+            }
+
+            const bool hierarchyFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+            const bool canDeleteSelected = m_ui.SelectedNode != nullptr && m_ui.SelectedNode->GetParent() != nullptr;
+            if (canDeleteSelected && hierarchyFocused && !ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Delete))
+                deleteSelectedNode = true;
+
+            if (deleteSelectedNode)
+            {
+                auto selectedNode = m_ui.SelectedNode;
+                m_app.DeleteSceneNode(selectedNode);
             }
         }
         else

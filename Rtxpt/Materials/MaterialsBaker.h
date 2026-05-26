@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 
 #include <donut/engine/BindingCache.h>
 #include <nvrhi/nvrhi.h>
@@ -41,6 +42,16 @@ namespace donut::engine
 
 class ShaderDebug;
 class ExtendedScene;
+class MaterialsBaker;
+
+enum class PTMaterialTextureSlot
+{
+    Base,
+    OcclusionRoughnessMetallic,
+    Normal,
+    Emissive,
+    Transmission
+};
 
 struct MaterialShaderPermutation
 {
@@ -82,12 +93,12 @@ struct MaterialShaderPermutationKeyHash
 struct PTTexture
 {
     std::filesystem::path   LocalPath;
-    bool                    sRGB;           // whether to assume that, when loading from sRGB agnostic formats, the texture's .rgb channels are in sRGB (.a is always linear)
+    bool                    sRGB = false;   // whether to assume that, when loading from sRGB agnostic formats, the texture's .rgb channels are in sRGB (.a is always linear)
     std::shared_ptr<donut::engine::LoadedTexture>
         Loaded;
-    bool                    NormalMap;      // determines unpacking (not actually used as a flag now by shading, but normalmaps are marked as so for future use)
+    bool                    NormalMap = false; // determines unpacking (not actually used as a flag now by shading, but normalmaps are marked as so for future use)
 
-    bool                    Enabled;        // an easy way to disable/enable texture slot without actually disconnecting a texture
+    bool                    Enabled = true; // an easy way to disable/enable texture slot without actually disconnecting a texture
 
     // float4                  ValueDefault;   // when texture is not enabled or can't be loaded
     // float4                  ValueMultiply;
@@ -100,6 +111,7 @@ struct PTTexture
 struct PTMaterialBase
 {
     donut::engine::Material * DonutCounterpart = nullptr;
+    MaterialsBaker*          RuntimeBaker = nullptr;
 
     // ModelName + Name is unique identifier for the material; there cannot be two materials with the same ModelName and Name - hopefully.
     std::string             Name;
@@ -210,6 +222,10 @@ struct PTMaterial : public PTMaterialBase
     void                    FillData(PTMaterialData & data);
     bool                    EditorGUI(class MaterialsBaker & baker);
     bool                    IsEmissive() const;
+    PTTexture&              GetTexture(PTMaterialTextureSlot slot);
+    const PTTexture&        GetTexture(PTMaterialTextureSlot slot) const;
+    bool                    IsTextureEnabled(PTMaterialTextureSlot slot) const;
+    void                    SetTextureEnabled(PTMaterialTextureSlot slot, bool enabled);
 
     static std::shared_ptr<PTMaterial> SafeCast(const std::shared_ptr<donut::engine::Material>& donutMaterial);
 
@@ -269,6 +285,15 @@ public:
 
     bool                            SaveSingle(PTMaterialBase& material);
     bool                            LoadSingle(PTMaterialBase& material);
+    bool                            SetMaterialTexture(
+                                        PTMaterial& material,
+                                        PTMaterialTextureSlot slot,
+                                        const std::filesystem::path& localPath,
+                                        std::optional<bool> sRGB = std::nullopt,
+                                        std::optional<bool> normalMap = std::nullopt);
+    void                            ClearMaterialTexture(
+                                        PTMaterial& material,
+                                        PTMaterialTextureSlot slot);
 
     std::shared_ptr<PTMaterial>     FindByUniqueID(const std::string & name);
 
@@ -280,6 +305,7 @@ private:
     void                            SaveAll();
 
     void                            CompleteDeferredTexturesLoad(nvrhi::ICommandList* commandList);
+    void                            RecordTexture(const PTTexture& texture);
 
     void                            BakeShaderPermutations();
 

@@ -533,7 +533,10 @@ void PTPipelineBaker::Update(const std::shared_ptr<class ExtendedScene>& scene, 
         }
     }
 
-    bool needsUpdate = m_uniqueHitGroups.size() == 0;
+    bool needsUpdate = m_perSubInstanceHitGroup.size() != subInstanceCount;
+    needsUpdate |= subInstanceCount > 0 && m_uniqueHitGroups.empty();
+    for (const std::shared_ptr<PTPipelineVariant>& variant : m_variants)
+        needsUpdate |= variant->m_pipeline == nullptr;
 
     std::vector<donut::engine::ShaderMacro> newMacros;
     globalMacrosGetter(newMacros);
@@ -548,7 +551,6 @@ void PTPipelineBaker::Update(const std::shared_ptr<class ExtendedScene>& scene, 
     // no need to update these if already set up
     if (needsUpdate) // m_uniqueHitGroups.size() == 0)
     {
-        assert(subInstanceCount > 0);
         // Note: these map 1-1 to m_subInstanceData, and are used to (see '->addHitGroup' below) build 1-1 mapped hit groups 
         m_perSubInstanceHitGroup.clear();
         m_perSubInstanceHitGroup.reserve(subInstanceCount);

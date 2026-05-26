@@ -218,6 +218,7 @@ The current OBJ/MTL importer recognizes these common material fields:
 - Emissive / opacity / transmission: `map_Ke`, `map_emissive`, `map_d`, `map_opacity`, `map_Tf`.
 
 When an MTL file provides separate roughness and metallic maps, the importer builds an in-memory ORM texture for RTXPT: `R=AO`, `G=roughness`, `B=metallic`, `A=1`. The `-imfchan` channel selector is honored when reading single-channel maps.
+If `map_Ke` or `map_emissive` is present without an explicit `Ke` color, the importer uses `(1, 1, 1)` as the emissive factor so the emissive texture is visible.
 
 ```python
 import rtxpt
@@ -263,11 +264,12 @@ with rtxpt.Renderer(scene="bistro-programmer-art.scene.json", headless=True) as 
     mat.metalness = 0.0
     mat.normal_texture_scale = 0.75
 
-    # Texture bindings are created by the loader. Python can enable/disable
-    # already-loaded texture slots at runtime.
+    # Texture bindings can be enabled/disabled, or replaced from Python.
     mat.enable_base_texture = False
     mat.enable_orm_texture = True
     mat.enable_normal_texture = True
+    mat.set_base_texture(r"D:/assets/replacement_albedo.png")
+    mat.set_normal_texture(r"D:/assets/replacement_normal.png")
 
     # In reference accumulation mode, reset after any visible edit so old
     # accumulated samples do not remain mixed into the image.
@@ -277,7 +279,7 @@ with rtxpt.Renderer(scene="bistro-programmer-art.scene.json", headless=True) as 
     r.save_screenshot("material_edit.png")
 ```
 
-All writable `Material` properties mark the material GPU data dirty automatically; calling `mark_dirty()` is only needed if native-side data was changed without going through a Python property setter. Texture replacement from Python is not exposed yet, so changing from one image file to another currently requires reloading the scene/model or editing the source material files before import.
+All writable `Material` properties mark the material GPU data dirty automatically; calling `mark_dirty()` is only needed if native-side data was changed without going through a Python property setter. Texture replacement helpers load the new image through the runtime texture cache, enable the slot, and upload updated material data on the next rendered frame.
 
 ### Edit Lights
 
@@ -427,6 +429,16 @@ All enums are arithmetic, so `int(enum_value)` works and enum values can be assi
 | `GaussianSplatFrustumCulling` | `Disabled=0`, `AtDistanceStage=1`, `AtRasterStage=2` |
 | `GaussianSplatShadowMode` | `Disabled=0`, `Hard=1`, `Soft=2` |
 | `GaussianSplatFTBSyncMode` | `Disabled=0`, `Interlock=1` |
+
+### `TextureSlot`
+
+| Value | Meaning |
+| --- | --- |
+| `Base` | Base/diffuse texture. |
+| `ORM` / `OcclusionRoughnessMetallic` | ORM texture, or spec-gloss texture when `use_specular_gloss=True`. |
+| `Normal` | Normal texture. |
+| `Emissive` | Emissive texture. |
+| `Transmission` | Transmission texture. |
 
 ## `Renderer` Class
 
@@ -912,11 +924,29 @@ Editable properties automatically mark GPU data dirty:
 | `enable_emissive_texture` | `bool` |
 | `enable_transmission_texture` | `bool` |
 
+Read-only texture paths, or `None` when the slot has no texture:
+
+| Property | Type |
+| --- | --- |
+| `base_texture_path` | `str | None` |
+| `orm_texture_path` | `str | None` |
+| `normal_texture_path` | `str | None` |
+| `emissive_texture_path` | `str | None` |
+| `transmission_texture_path` | `str | None` |
+
 Methods:
 
 | API | Notes |
 | --- | --- |
 | `mark_dirty()` | Force material GPU buffer refresh next frame. |
+| `set_texture(slot, path, srgb=None, normal_map=None)` | Replace a texture slot. `slot` is a `TextureSlot` enum value. Returns `False` if the file cannot be resolved. |
+| `set_base_texture(path, srgb=None)` | Replace base/diffuse texture. Defaults to sRGB. |
+| `set_orm_texture(path, srgb=None)` | Replace ORM/spec-gloss texture. Defaults to linear for metal-rough and sRGB for spec-gloss. |
+| `set_normal_texture(path)` | Replace normal texture. |
+| `set_emissive_texture(path, srgb=None)` | Replace emissive texture. Defaults to sRGB. |
+| `set_transmission_texture(path, srgb=None)` | Replace transmission texture. Defaults to linear. |
+| `clear_texture(slot)` | Disconnect and disable a texture slot. |
+| `clear_base_texture()`, `clear_orm_texture()`, `clear_normal_texture()`, `clear_emissive_texture()`, `clear_transmission_texture()` | Slot-specific clear helpers. |
 
 Runtime update rules:
 
@@ -925,7 +955,7 @@ Runtime update rules:
 - Color values are linear RGB. The Python setter does not clamp inputs, so keep factors in the physically meaningful range unless deliberately testing extremes.
 - If a texture slot is enabled, scalar/color parameters multiply the texture sample. In metal-rough mode, effective base color is `base_color * base_texture.rgb`, roughness is `roughness * ORM.g`, and metalness is `metalness * ORM.b` unless `metalness_in_red_channel=True`.
 - `opacity` is multiplied by the base texture alpha when `enable_base_texture=True`.
-- Python currently exposes texture slot toggles, not texture file replacement. Use `enable_base_texture`, `enable_orm_texture`, `enable_normal_texture`, `enable_emissive_texture`, and `enable_transmission_texture` to turn imported textures on/off at runtime.
+- Use `set_base_texture`, `set_orm_texture`, `set_normal_texture`, `set_emissive_texture`, or `set_transmission_texture` to replace an imported texture at runtime. Relative paths are resolved the same way as material JSON paths: runtime `Assets/` first, then the current scene directory. For `.png` inputs, an existing sibling `.dds` is preferred, matching material JSON loading.
 - Pure parameter edits such as color, roughness, metalness, opacity, texture toggles, emissive intensity, normal scale, and IOR are next-frame updates. Bigger classification edits such as `use_specular_gloss`, `enable_alpha_testing`, `alpha_cutoff`, `enable_transmission`, `exclude_from_nee`, or `skip_render` can change shader hit groups, alpha handling, lighting participation, or acceleration-structure metadata; after those edits, request a shader/acceleration refresh.
 
 Typical runtime material override:
@@ -940,7 +970,7 @@ if mat is not None:
     mat.base_color = (0.8, 0.9, 1.0)
     mat.roughness = 0.18
     mat.metalness = 0.85
-    mat.enable_base_texture = False
+    mat.set_base_texture(r"D:/assets/replacement_albedo.png")
     mat.enable_orm_texture = True
     mat.normal_texture_scale = 1.0
     app.reset_accumulation()
@@ -977,7 +1007,8 @@ Returned by `Scene.find_node()` and `Sample.find_node()`.
 
 `rotation` and `euler` both write the node's local Transform rotation. Assigning
 `euler` converts XYZ radians to the stored quaternion; assigning `rotation` expects
-an XYZW quaternion, matching scene JSON.
+an XYZW quaternion, matching scene JSON. Python Transform edits reset accumulation
+automatically so the next rendered frame does not blend with the previous pose.
 
 ## `Mesh` Class
 
