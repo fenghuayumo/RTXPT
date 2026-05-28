@@ -1205,6 +1205,65 @@ void RegisterCoreBindings(nb::module_& m)
             nb::arg("rebuild_acceleration_structure") = true,
             "Apply a Python callback to each vertex. callback(index, (x,y,z))\n"
             "may return a replacement triple, or None to keep the vertex unchanged.")
+        .def("get_mesh_vertices_world", [](Sample& self, const std::shared_ptr<MeshInfo>& mesh) {
+                return Float3VectorToList(self.GetMeshVerticesWorld(mesh));
+            }, nb::arg("mesh"),
+            "Return mesh positions as a list of (x, y, z) tuples in world space.\n"
+            "The mesh must have exactly one scene instance; pass a SceneNode for instanced meshes.")
+        .def("get_mesh_vertices_world", [](Sample& self, const std::shared_ptr<SceneGraphNode>& node) {
+                return Float3VectorToList(self.GetMeshVerticesWorld(node));
+            }, nb::arg("node"),
+            "Return vertex positions for this mesh node as world-space (x, y, z) tuples.")
+        .def("set_mesh_vertices_world",
+            [](Sample& self, const std::shared_ptr<MeshInfo>& mesh, nb::object vertices,
+               bool recomputeNormals, bool rebuildAccelerationStructure) {
+                self.SetMeshVerticesWorld(mesh, ToFloat3Vector(vertices), recomputeNormals, rebuildAccelerationStructure);
+            },
+            nb::arg("mesh"), nb::arg("vertices"), nb::arg("recompute_normals") = true,
+            nb::arg("rebuild_acceleration_structure") = true,
+            "Replace all positions using world-space coordinates. The mesh must have\n"
+            "exactly one scene instance; pass a SceneNode for instanced meshes.")
+        .def("set_mesh_vertices_world",
+            [](Sample& self, const std::shared_ptr<SceneGraphNode>& node, nb::object vertices,
+               bool recomputeNormals, bool rebuildAccelerationStructure) {
+                self.SetMeshVerticesWorld(node, ToFloat3Vector(vertices), recomputeNormals, rebuildAccelerationStructure);
+            },
+            nb::arg("node"), nb::arg("vertices"), nb::arg("recompute_normals") = true,
+            nb::arg("rebuild_acceleration_structure") = true,
+            "Replace all positions for this mesh node using world-space coordinates.")
+        .def("deform_mesh_world",
+            [](Sample& self, const std::shared_ptr<MeshInfo>& mesh, nb::object callback,
+               bool recomputeNormals, bool rebuildAccelerationStructure) {
+                std::vector<float3> vertices = self.GetMeshVerticesWorld(mesh);
+                for (size_t i = 0; i < vertices.size(); ++i)
+                {
+                    nb::object updated = callback(i, Float3ToTuple(vertices[i]));
+                    if (!updated.is_none())
+                        vertices[i] = ToFloat3(updated);
+                }
+                self.SetMeshVerticesWorld(mesh, vertices, recomputeNormals, rebuildAccelerationStructure);
+                return vertices.size();
+            },
+            nb::arg("mesh"), nb::arg("callback"), nb::arg("recompute_normals") = true,
+            nb::arg("rebuild_acceleration_structure") = true,
+            "Apply a Python callback to world-space vertices. callback(index, (x,y,z))\n"
+            "may return a replacement world-space triple, or None to keep the vertex unchanged.")
+        .def("deform_mesh_world",
+            [](Sample& self, const std::shared_ptr<SceneGraphNode>& node, nb::object callback,
+               bool recomputeNormals, bool rebuildAccelerationStructure) {
+                std::vector<float3> vertices = self.GetMeshVerticesWorld(node);
+                for (size_t i = 0; i < vertices.size(); ++i)
+                {
+                    nb::object updated = callback(i, Float3ToTuple(vertices[i]));
+                    if (!updated.is_none())
+                        vertices[i] = ToFloat3(updated);
+                }
+                self.SetMeshVerticesWorld(node, vertices, recomputeNormals, rebuildAccelerationStructure);
+                return vertices.size();
+            },
+            nb::arg("node"), nb::arg("callback"), nb::arg("recompute_normals") = true,
+            nb::arg("rebuild_acceleration_structure") = true,
+            "Apply a Python callback to this mesh node's world-space vertices.")
 
         .def("set_environment_map", [](Sample& self, const std::string& path) {
                 self.SetEnvMapOverrideSource(path);

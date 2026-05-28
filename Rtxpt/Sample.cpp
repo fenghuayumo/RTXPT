@@ -4807,6 +4807,111 @@ std::vector<float3> Sample::GetMeshVertices(const std::shared_ptr<MeshInfo>& mes
     return std::vector<float3>(positions.begin() + begin, positions.begin() + end);
 }
 
+static std::shared_ptr<MeshInfo> GetMeshFromSceneNodeForDeform(
+    const std::shared_ptr<SceneGraphNode>& node,
+    const char* caller)
+{
+    if (!node)
+        throw std::runtime_error(std::string(caller) + ": node is null");
+
+    auto meshInstance = std::dynamic_pointer_cast<MeshInstance>(node->GetLeaf());
+    if (!meshInstance || !meshInstance->GetMesh())
+        throw std::runtime_error(std::string(caller) + ": node is not a mesh instance");
+
+    return meshInstance->GetMesh();
+}
+
+static std::shared_ptr<SceneGraphNode> FindUniqueMeshInstanceNodeForDeform(
+    const std::shared_ptr<Scene>& scene,
+    const std::shared_ptr<MeshInfo>& mesh,
+    const char* caller)
+{
+    if (!mesh)
+        throw std::runtime_error(std::string(caller) + ": mesh is null");
+    if (!scene || !scene->GetSceneGraph())
+        throw std::runtime_error(std::string(caller) + ": no scene is loaded");
+
+    std::shared_ptr<SceneGraphNode> result;
+    size_t instanceCount = 0;
+
+    for (const auto& instance : scene->GetSceneGraph()->GetMeshInstances())
+    {
+        if (!instance || instance->GetMesh() != mesh)
+            continue;
+
+        if (auto node = instance->GetNodeSharedPtr())
+        {
+            result = node;
+            ++instanceCount;
+        }
+    }
+
+    if (instanceCount == 0)
+        throw std::runtime_error(std::string(caller) + ": mesh has no scene instance");
+    if (instanceCount > 1)
+        throw std::runtime_error(std::string(caller) + ": mesh has multiple scene instances; pass a SceneNode instead");
+
+    return result;
+}
+
+std::vector<float3> Sample::GetMeshVerticesWorld(const std::shared_ptr<MeshInfo>& mesh)
+{
+    auto node = FindUniqueMeshInstanceNodeForDeform(m_scene, mesh, "GetMeshVerticesWorld");
+    return GetMeshVerticesWorld(node);
+}
+
+std::vector<float3> Sample::GetMeshVerticesWorld(const std::shared_ptr<SceneGraphNode>& node)
+{
+    if (!m_scene)
+        throw std::runtime_error("GetMeshVerticesWorld: no scene is loaded");
+
+    m_scene->RefreshSceneGraph(GetFrameIndex());
+
+    auto mesh = GetMeshFromSceneNodeForDeform(node, "GetMeshVerticesWorld");
+    std::vector<float3> vertices = GetMeshVertices(mesh);
+
+    const affine3 localToWorld = node->GetLocalToWorldTransformFloat();
+    for (float3& vertex : vertices)
+        vertex = localToWorld.transformPoint(vertex);
+
+    return vertices;
+}
+
+void Sample::SetMeshVerticesWorld(const std::shared_ptr<MeshInfo>& mesh,
+                                  const std::vector<float3>& vertices,
+                                  bool recomputeNormals,
+                                  bool rebuildAccelerationStructure)
+{
+    auto node = FindUniqueMeshInstanceNodeForDeform(m_scene, mesh, "SetMeshVerticesWorld");
+    SetMeshVerticesWorld(node, vertices, recomputeNormals, rebuildAccelerationStructure);
+}
+
+void Sample::SetMeshVerticesWorld(const std::shared_ptr<SceneGraphNode>& node,
+                                  const std::vector<float3>& vertices,
+                                  bool recomputeNormals,
+                                  bool rebuildAccelerationStructure)
+{
+    if (!m_scene)
+        throw std::runtime_error("SetMeshVerticesWorld: no scene is loaded");
+
+    m_scene->RefreshSceneGraph(GetFrameIndex());
+
+    auto mesh = GetMeshFromSceneNodeForDeform(node, "SetMeshVerticesWorld");
+    const affine3 worldToLocal = affine3(inverse(node->GetLocalToWorldTransform()));
+
+    std::vector<float3> objectVertices;
+    objectVertices.reserve(vertices.size());
+    for (const float3& vertex : vertices)
+    {
+        const float3 objectVertex = worldToLocal.transformPoint(vertex);
+        if (!donut::math::all(donut::math::isfinite(objectVertex)))
+            throw std::runtime_error("SetMeshVerticesWorld: world-to-object transform produced a non-finite vertex");
+        objectVertices.push_back(objectVertex);
+    }
+
+    SetMeshVertices(mesh, objectVertices, recomputeNormals, rebuildAccelerationStructure);
+}
+
 static float3 NormalizeOrFallbackForDeform(const float3& v, const float3& fallback)
 {
     const float len2 = dot(v, v);

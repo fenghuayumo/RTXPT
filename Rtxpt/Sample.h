@@ -100,6 +100,16 @@ public:
                                                             const std::vector<donut::math::float3>& vertices,
                                                             bool recomputeNormals = true,
                                                             bool rebuildAccelerationStructure = true);
+    std::vector<donut::math::float3>        GetMeshVerticesWorld(const std::shared_ptr<donut::engine::MeshInfo>& mesh);
+    std::vector<donut::math::float3>        GetMeshVerticesWorld(const std::shared_ptr<donut::engine::SceneGraphNode>& node);
+    void                                    SetMeshVerticesWorld(const std::shared_ptr<donut::engine::MeshInfo>& mesh,
+                                                            const std::vector<donut::math::float3>& vertices,
+                                                            bool recomputeNormals = true,
+                                                            bool rebuildAccelerationStructure = true);
+    void                                    SetMeshVerticesWorld(const std::shared_ptr<donut::engine::SceneGraphNode>& node,
+                                                            const std::vector<donut::math::float3>& vertices,
+                                                            bool recomputeNormals = true,
+                                                            bool rebuildAccelerationStructure = true);
     
     void                                    CollectUncompressedTextures();
     auto &                                  GetUncompressedTextures()               { return m_uncompressedTextures; }

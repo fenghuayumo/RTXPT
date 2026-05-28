@@ -435,6 +435,21 @@ def wave(index, p):
 app.deform_mesh(mesh, wave, recompute_normals=True)
 ```
 
+Use the `_world` variants when the values you read and return should be scene
+world coordinates. Passing a `Mesh` works when that mesh has exactly one scene
+instance. For instanced/shared meshes, pass the owning `SceneNode` so RTXPT can
+use that node's local-to-world transform:
+
+```python
+node = app.find_node("cube")  # or any mesh node/path
+
+def lift_world(index, p):
+    x, y, z = p
+    return (x, y + 0.25, z)
+
+app.deform_mesh_world(node, lift_world, recompute_normals=True)
+```
+
 ## API Reference
 
 The sections below are grouped by topic so you can jump directly to the API you need:
@@ -675,12 +690,21 @@ Mesh geometry, scene graph nodes, and vertex deformation. Access meshes through 
 | `sample.get_mesh_vertices(mesh)` | `list[tuple]` | Returns object-space `(x, y, z)` vertex positions. |
 | `sample.set_mesh_vertices(mesh, vertices, recompute_normals=True, rebuild_acceleration_structure=True)` | `None` | Replaces all positions. `vertices` must contain exactly `mesh.vertex_count` triples. |
 | `sample.deform_mesh(mesh, callback, recompute_normals=True, rebuild_acceleration_structure=True)` | `int` | Calls `callback(index, (x, y, z))` for each vertex. Return a new triple or `None`; returns the processed vertex count. |
+| `sample.get_mesh_vertices_world(mesh_or_node)` | `list[tuple]` | Returns world-space `(x, y, z)` vertex positions. Pass a `SceneNode` for instanced/shared meshes. |
+| `sample.set_mesh_vertices_world(mesh_or_node, vertices, recompute_normals=True, rebuild_acceleration_structure=True)` | `None` | Replaces all positions from world-space coordinates, converting through the selected node transform. |
+| `sample.deform_mesh_world(mesh_or_node, callback, recompute_normals=True, rebuild_acceleration_structure=True)` | `int` | Callback receives world-space `(x, y, z)` and returns a world-space replacement or `None`. |
 
 `set_mesh_vertices(...)` updates object-space mesh bounds, optionally recomputes normals,
 refreshes GPU vertex data, resets accumulation, and requests acceleration structure rebuild
 by default. Keep `rebuild_acceleration_structure=True` for ray tracing-correct geometry.
 Only set it to `False` when batching several edits and calling `request_accel_rebuild()`
 after the final update.
+
+The `_world` variants refresh the scene graph transform state before converting
+coordinates, so recent Python transform edits such as `node.translation = ...`
+are reflected immediately. The underlying mesh vertex buffer is still shared:
+editing a mesh through one node updates the mesh data used by any other nodes
+that instance the same `Mesh`.
 
 ### Scene Bounds
 
