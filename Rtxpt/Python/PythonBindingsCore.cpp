@@ -36,6 +36,9 @@
 #include <string>
 #include <vector>
 #include <optional>
+#include <array>
+#include <cstring>
+#include <unordered_set>
 
 namespace nb = nanobind;
 using namespace donut::engine;
@@ -269,6 +272,45 @@ namespace
     {
         auto meshInstance = std::dynamic_pointer_cast<MeshInstance>(node.GetLeaf());
         return meshInstance ? meshInstance->GetMesh() : nullptr;
+    }
+
+    std::array<uint32_t, 3> MeshPositionKey(const float3& p)
+    {
+        std::array<uint32_t, 3> key{};
+        std::memcpy(&key[0], &p.x, sizeof(uint32_t));
+        std::memcpy(&key[1], &p.y, sizeof(uint32_t));
+        std::memcpy(&key[2], &p.z, sizeof(uint32_t));
+        return key;
+    }
+
+    struct MeshPositionKeyHash
+    {
+        size_t operator()(const std::array<uint32_t, 3>& key) const noexcept
+        {
+            size_t h = std::hash<uint32_t>{}(key[0]);
+            h ^= std::hash<uint32_t>{}(key[1]) + 0x9e3779b9u + (h << 6) + (h >> 2);
+            h ^= std::hash<uint32_t>{}(key[2]) + 0x9e3779b9u + (h << 6) + (h >> 2);
+            return h;
+        }
+    };
+
+    size_t UniqueMeshPositionCount(const MeshInfo& mesh)
+    {
+        if (!mesh.buffers || mesh.totalVertices == 0)
+            return 0;
+
+        const auto& positions = mesh.buffers->positionData;
+        const size_t begin = size_t(mesh.vertexOffset);
+        const size_t end = begin + size_t(mesh.totalVertices);
+        if (positions.size() < end)
+            return size_t(mesh.totalVertices);
+
+        std::unordered_set<std::array<uint32_t, 3>, MeshPositionKeyHash> uniquePositions;
+        uniquePositions.reserve(mesh.totalVertices);
+        for (size_t i = begin; i < end; ++i)
+            uniquePositions.insert(MeshPositionKey(positions[i]));
+
+        return uniquePositions.size();
     }
 
     std::vector<float3> ToFloat3Vector(const nb::object& src)
@@ -735,7 +777,8 @@ void RegisterCoreBindings(nb::module_& m)
         "Sample.set_mesh_vertices(mesh, vertices) for deformation.")
         .def_ro("name", &MeshInfo::name)
         .def_ro("global_mesh_index", &MeshInfo::globalMeshIndex)
-        .def_ro("vertex_count", &MeshInfo::totalVertices)
+        .def_prop_ro("vertex_count", [](MeshInfo& self) { return UniqueMeshPositionCount(self); },
+            "Number of unique position vertices returned by Sample.get_mesh_vertices(mesh).")
         .def_ro("index_count", &MeshInfo::totalIndices)
         .def_prop_ro("geometry_count", [](MeshInfo& self) { return self.geometries.size(); })
         .def_prop_ro("bounds", [](MeshInfo& self) -> nb::object {
@@ -1178,7 +1221,7 @@ void RegisterCoreBindings(nb::module_& m)
         .def("get_mesh_vertices", [](Sample& self, const std::shared_ptr<MeshInfo>& mesh) {
                 return Float3VectorToList(self.GetMeshVertices(mesh));
             }, nb::arg("mesh"),
-            "Return mesh positions as a list of (x, y, z) tuples in object space.")
+            "Return unique mesh positions as a list of (x, y, z) tuples in object space.")
         .def("set_mesh_vertices",
             [](Sample& self, const std::shared_ptr<MeshInfo>& mesh, nb::object vertices,
                bool recomputeNormals, bool rebuildAccelerationStructure) {
@@ -1186,8 +1229,8 @@ void RegisterCoreBindings(nb::module_& m)
             },
             nb::arg("mesh"), nb::arg("vertices"), nb::arg("recompute_normals") = true,
             nb::arg("rebuild_acceleration_structure") = true,
-            "Replace all object-space positions for a mesh and refresh GPU buffers.\n"
-            "`vertices` must contain exactly mesh.vertex_count triples.")
+            "Replace all unique object-space positions for a mesh and refresh GPU buffers.\n"
+            "Updates are propagated to all render vertices split by normals or UVs.")
         .def("deform_mesh",
             [](Sample& self, const std::shared_ptr<MeshInfo>& mesh, nb::object callback,
                bool recomputeNormals, bool rebuildAccelerationStructure) {
@@ -1203,17 +1246,17 @@ void RegisterCoreBindings(nb::module_& m)
             },
             nb::arg("mesh"), nb::arg("callback"), nb::arg("recompute_normals") = true,
             nb::arg("rebuild_acceleration_structure") = true,
-            "Apply a Python callback to each vertex. callback(index, (x,y,z))\n"
+            "Apply a Python callback to each unique vertex. callback(index, (x,y,z))\n"
             "may return a replacement triple, or None to keep the vertex unchanged.")
         .def("get_mesh_vertices_world", [](Sample& self, const std::shared_ptr<MeshInfo>& mesh) {
                 return Float3VectorToList(self.GetMeshVerticesWorld(mesh));
             }, nb::arg("mesh"),
-            "Return mesh positions as a list of (x, y, z) tuples in world space.\n"
+            "Return unique mesh positions as a list of (x, y, z) tuples in world space.\n"
             "The mesh must have exactly one scene instance; pass a SceneNode for instanced meshes.")
         .def("get_mesh_vertices_world", [](Sample& self, const std::shared_ptr<SceneGraphNode>& node) {
                 return Float3VectorToList(self.GetMeshVerticesWorld(node));
             }, nb::arg("node"),
-            "Return vertex positions for this mesh node as world-space (x, y, z) tuples.")
+            "Return unique vertex positions for this mesh node as world-space (x, y, z) tuples.")
         .def("set_mesh_vertices_world",
             [](Sample& self, const std::shared_ptr<MeshInfo>& mesh, nb::object vertices,
                bool recomputeNormals, bool rebuildAccelerationStructure) {
@@ -1221,7 +1264,7 @@ void RegisterCoreBindings(nb::module_& m)
             },
             nb::arg("mesh"), nb::arg("vertices"), nb::arg("recompute_normals") = true,
             nb::arg("rebuild_acceleration_structure") = true,
-            "Replace all positions using world-space coordinates. The mesh must have\n"
+            "Replace all unique positions using world-space coordinates. The mesh must have\n"
             "exactly one scene instance; pass a SceneNode for instanced meshes.")
         .def("set_mesh_vertices_world",
             [](Sample& self, const std::shared_ptr<SceneGraphNode>& node, nb::object vertices,
@@ -1230,7 +1273,7 @@ void RegisterCoreBindings(nb::module_& m)
             },
             nb::arg("node"), nb::arg("vertices"), nb::arg("recompute_normals") = true,
             nb::arg("rebuild_acceleration_structure") = true,
-            "Replace all positions for this mesh node using world-space coordinates.")
+            "Replace all unique positions for this mesh node using world-space coordinates.")
         .def("deform_mesh_world",
             [](Sample& self, const std::shared_ptr<MeshInfo>& mesh, nb::object callback,
                bool recomputeNormals, bool rebuildAccelerationStructure) {
@@ -1246,7 +1289,7 @@ void RegisterCoreBindings(nb::module_& m)
             },
             nb::arg("mesh"), nb::arg("callback"), nb::arg("recompute_normals") = true,
             nb::arg("rebuild_acceleration_structure") = true,
-            "Apply a Python callback to world-space vertices. callback(index, (x,y,z))\n"
+            "Apply a Python callback to unique world-space vertices. callback(index, (x,y,z))\n"
             "may return a replacement world-space triple, or None to keep the vertex unchanged.")
         .def("deform_mesh_world",
             [](Sample& self, const std::shared_ptr<SceneGraphNode>& node, nb::object callback,
@@ -1263,7 +1306,7 @@ void RegisterCoreBindings(nb::module_& m)
             },
             nb::arg("node"), nb::arg("callback"), nb::arg("recompute_normals") = true,
             nb::arg("rebuild_acceleration_structure") = true,
-            "Apply a Python callback to this mesh node's world-space vertices.")
+            "Apply a Python callback to this mesh node's unique world-space vertices.")
 
         .def("set_environment_map", [](Sample& self, const std::string& path) {
                 self.SetEnvMapOverrideSource(path);

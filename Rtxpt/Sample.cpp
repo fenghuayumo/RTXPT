@@ -4789,12 +4789,68 @@ void Sample::RequestFullRebuild()
         m_bindingCache->Clear();
 }
 
-std::vector<float3> Sample::GetMeshVertices(const std::shared_ptr<MeshInfo>& mesh) const
+struct UniquePositionMapForDeform
+{
+    std::vector<float3> uniquePositions;
+    std::vector<uint32_t> renderToUnique;
+};
+
+static std::array<uint32_t, 3> PositionKeyForDeform(const float3& p)
+{
+    std::array<uint32_t, 3> key{};
+    std::memcpy(&key[0], &p.x, sizeof(uint32_t));
+    std::memcpy(&key[1], &p.y, sizeof(uint32_t));
+    std::memcpy(&key[2], &p.z, sizeof(uint32_t));
+    return key;
+}
+
+static UniquePositionMapForDeform BuildUniquePositionMapForDeform(const std::vector<float3>& renderVertices)
+{
+    struct KeyHash
+    {
+        size_t operator()(const std::array<uint32_t, 3>& key) const noexcept
+        {
+            size_t h = std::hash<uint32_t>{}(key[0]);
+            h ^= std::hash<uint32_t>{}(key[1]) + 0x9e3779b9u + (h << 6) + (h >> 2);
+            h ^= std::hash<uint32_t>{}(key[2]) + 0x9e3779b9u + (h << 6) + (h >> 2);
+            return h;
+        }
+    };
+
+    UniquePositionMapForDeform result;
+    result.renderToUnique.reserve(renderVertices.size());
+
+    std::unordered_map<std::array<uint32_t, 3>, uint32_t, KeyHash> uniqueLookup;
+    uniqueLookup.reserve(renderVertices.size());
+
+    for (const float3& vertex : renderVertices)
+    {
+        const auto key = PositionKeyForDeform(vertex);
+        auto found = uniqueLookup.find(key);
+        if (found == uniqueLookup.end())
+        {
+            const uint32_t uniqueIndex = static_cast<uint32_t>(result.uniquePositions.size());
+            uniqueLookup.emplace(key, uniqueIndex);
+            result.uniquePositions.push_back(vertex);
+            result.renderToUnique.push_back(uniqueIndex);
+        }
+        else
+        {
+            result.renderToUnique.push_back(found->second);
+        }
+    }
+
+    return result;
+}
+
+static std::vector<float3> GetMeshRenderVerticesForDeform(
+    const std::shared_ptr<MeshInfo>& mesh,
+    const char* caller)
 {
     if (!mesh)
-        throw std::runtime_error("GetMeshVertices: mesh is null");
+        throw std::runtime_error(std::string(caller) + ": mesh is null");
     if (!mesh->buffers)
-        throw std::runtime_error("GetMeshVertices: mesh has no buffer group");
+        throw std::runtime_error(std::string(caller) + ": mesh has no buffer group");
     if (mesh->totalVertices == 0)
         return {};
 
@@ -4802,9 +4858,14 @@ std::vector<float3> Sample::GetMeshVertices(const std::shared_ptr<MeshInfo>& mes
     const size_t begin = size_t(mesh->vertexOffset);
     const size_t end = begin + size_t(mesh->totalVertices);
     if (positions.size() < end)
-        throw std::runtime_error("GetMeshVertices: CPU vertex cache is unavailable; reload the scene with the Python deformation build");
+        throw std::runtime_error(std::string(caller) + ": CPU vertex cache is unavailable; reload the scene with the Python deformation build");
 
     return std::vector<float3>(positions.begin() + begin, positions.begin() + end);
+}
+
+std::vector<float3> Sample::GetMeshVertices(const std::shared_ptr<MeshInfo>& mesh) const
+{
+    return BuildUniquePositionMapForDeform(GetMeshRenderVerticesForDeform(mesh, "GetMeshVertices")).uniquePositions;
 }
 
 static std::shared_ptr<MeshInfo> GetMeshFromSceneNodeForDeform(
@@ -5012,16 +5073,25 @@ void Sample::SetMeshVertices(const std::shared_ptr<MeshInfo>& mesh,
         throw std::runtime_error("SetMeshVertices: mesh is null");
     if (!mesh->buffers)
         throw std::runtime_error("SetMeshVertices: mesh has no buffer group");
-    if (vertices.size() != size_t(mesh->totalVertices))
-        throw std::runtime_error("SetMeshVertices: vertex count does not match mesh.total_vertices");
+
+    std::vector<float3> renderVertices = GetMeshRenderVerticesForDeform(mesh, "SetMeshVertices");
+    UniquePositionMapForDeform uniqueMap = BuildUniquePositionMapForDeform(renderVertices);
+    if (vertices.size() != uniqueMap.uniquePositions.size())
+    {
+        throw std::runtime_error(
+            "SetMeshVertices: vertex count must match get_mesh_vertices(...) length");
+    }
+
+    for (size_t i = 0; i < renderVertices.size(); ++i)
+        renderVertices[i] = vertices[uniqueMap.renderToUnique[i]];
 
     auto& buffers = *mesh->buffers;
     const size_t begin = size_t(mesh->vertexOffset);
-    const size_t end = begin + vertices.size();
+    const size_t end = begin + renderVertices.size();
     if (buffers.positionData.size() < end)
         throw std::runtime_error("SetMeshVertices: CPU vertex cache is unavailable; reload the scene with the Python deformation build");
 
-    std::copy(vertices.begin(), vertices.end(), buffers.positionData.begin() + begin);
+    std::copy(renderVertices.begin(), renderVertices.end(), buffers.positionData.begin() + begin);
     UpdateMeshBoundsFromPositions(mesh);
 
     if (recomputeNormals)

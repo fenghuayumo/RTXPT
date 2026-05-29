@@ -396,9 +396,12 @@ r.close()
 
 ### Deform Mesh Vertices
 
-Mesh deformation works on object-space vertex positions. After `set_mesh_vertices(...)`
-or `deform_mesh(...)`, RTXPT refreshes the mesh GPU buffer and can rebuild ray tracing
-acceleration structures so the edited geometry is used by subsequent frames.
+Mesh deformation works on unique object-space position vertices. Importers may
+split one OBJ/glTF position into multiple render vertices for UV or normal
+seams; Python returns that position once, and write-back propagates the edit to
+all split render vertices. After `set_mesh_vertices(...)` or `deform_mesh(...)`,
+RTXPT refreshes the mesh GPU buffer and can rebuild ray tracing acceleration
+structures so the edited geometry is used by subsequent frames.
 
 ```python
 import math
@@ -687,18 +690,23 @@ Mesh geometry, scene graph nodes, and vertex deformation. Access meshes through 
 
 | API | Return | Notes |
 | --- | --- | --- |
-| `sample.get_mesh_vertices(mesh)` | `list[tuple]` | Returns object-space `(x, y, z)` vertex positions. |
-| `sample.set_mesh_vertices(mesh, vertices, recompute_normals=True, rebuild_acceleration_structure=True)` | `None` | Replaces all positions. `vertices` must contain exactly `mesh.vertex_count` triples. |
-| `sample.deform_mesh(mesh, callback, recompute_normals=True, rebuild_acceleration_structure=True)` | `int` | Calls `callback(index, (x, y, z))` for each vertex. Return a new triple or `None`; returns the processed vertex count. |
-| `sample.get_mesh_vertices_world(mesh_or_node)` | `list[tuple]` | Returns world-space `(x, y, z)` vertex positions. Pass a `SceneNode` for instanced/shared meshes. |
-| `sample.set_mesh_vertices_world(mesh_or_node, vertices, recompute_normals=True, rebuild_acceleration_structure=True)` | `None` | Replaces all positions from world-space coordinates, converting through the selected node transform. |
-| `sample.deform_mesh_world(mesh_or_node, callback, recompute_normals=True, rebuild_acceleration_structure=True)` | `int` | Callback receives world-space `(x, y, z)` and returns a world-space replacement or `None`. |
+| `sample.get_mesh_vertices(mesh)` | `list[tuple]` | Returns unique object-space `(x, y, z)` position vertices. |
+| `sample.set_mesh_vertices(mesh, vertices, recompute_normals=True, rebuild_acceleration_structure=True)` | `None` | Replaces unique positions. `vertices` must contain exactly `mesh.vertex_count` triples. |
+| `sample.deform_mesh(mesh, callback, recompute_normals=True, rebuild_acceleration_structure=True)` | `int` | Calls `callback(index, (x, y, z))` for each unique position. Return a new triple or `None`; returns the processed vertex count. |
+| `sample.get_mesh_vertices_world(mesh_or_node)` | `list[tuple]` | Returns unique world-space `(x, y, z)` position vertices. Pass a `SceneNode` for instanced/shared meshes. |
+| `sample.set_mesh_vertices_world(mesh_or_node, vertices, recompute_normals=True, rebuild_acceleration_structure=True)` | `None` | Replaces unique positions from world-space coordinates, converting through the selected node transform. |
+| `sample.deform_mesh_world(mesh_or_node, callback, recompute_normals=True, rebuild_acceleration_structure=True)` | `int` | Callback receives unique world-space `(x, y, z)` and returns a world-space replacement or `None`. |
 
 `set_mesh_vertices(...)` updates object-space mesh bounds, optionally recomputes normals,
 refreshes GPU vertex data, resets accumulation, and requests acceleration structure rebuild
 by default. Keep `rebuild_acceleration_structure=True` for ray tracing-correct geometry.
 Only set it to `False` when batching several edits and calling `request_accel_rebuild()`
 after the final update.
+
+For OBJ files, `mesh.vertex_count` usually matches the number of distinct
+position records used by faces, not the number of UV/normal-split render
+vertices. Editing one returned position updates every render vertex that shared
+that original position.
 
 The `_world` variants refresh the scene graph transform state before converting
 coordinates, so recent Python transform edits such as `node.translation = ...`
@@ -726,7 +734,7 @@ Returned by `Scene.get_meshes()`, `Scene.find_mesh()`, `Sample.get_meshes()`,
 | --- | --- | --- |
 | `name` | `str` | Mesh name from the source model or builtin primitive. |
 | `global_mesh_index` | `int` | Internal scene mesh index. |
-| `vertex_count` | `int` | Number of object-space positions expected by `set_mesh_vertices(...)`. |
+| `vertex_count` | `int` | Number of unique positions returned by `get_mesh_vertices(...)` and expected by `set_mesh_vertices(...)`. |
 | `index_count` | `int` | Total index count. |
 | `geometry_count` | `int` | Number of mesh geometry groups/submeshes. |
 | `bounds` | `((min.xyz), (max.xyz)) \| None` | Object-space mesh AABB. |
