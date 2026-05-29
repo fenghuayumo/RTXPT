@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include <donut/engine/BindingCache.h>
 #include <nvrhi/nvrhi.h>
@@ -67,6 +68,7 @@ struct MeshInfoEx : public donut::engine::MeshInfo
 {
     nvrhi::rt::AccelStructHandle AccelStructOMM; // for use by application
     std::vector<nvrhi::rt::OpacityMicromapHandle> OpacityMicroMaps; // for use by application
+    std::vector<uint32_t> DeformationSourcePositionIndices; // per render vertex; preserves OBJ v-order for deformation APIs
 
     std::unique_ptr<MeshDebugData> DebugData;
     bool DebugDataDirty = true; // set this to true to make Scene update the debug data

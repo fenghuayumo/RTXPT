@@ -703,10 +703,10 @@ by default. Keep `rebuild_acceleration_structure=True` for ray tracing-correct g
 Only set it to `False` when batching several edits and calling `request_accel_rebuild()`
 after the final update.
 
-For OBJ files, `mesh.vertex_count` usually matches the number of distinct
-position records used by faces, not the number of UV/normal-split render
-vertices. Editing one returned position updates every render vertex that shared
-that original position.
+For OBJ files, `mesh.vertex_count` matches the number of source `v` position
+records used by faces, in the same order as those `v` records appear in the OBJ
+file. Editing one returned position updates every render vertex split from that
+source position by normals or UVs.
 
 The `_world` variants refresh the scene graph transform state before converting
 coordinates, so recent Python transform edits such as `node.translation = ...`

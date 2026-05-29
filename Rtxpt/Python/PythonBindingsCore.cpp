@@ -24,6 +24,7 @@
 #include "../SampleCommon/ExtendedScene.h"
 #include "../Materials/MaterialsBaker.h"
 #include "../Lighting/LightsBaker.h"
+#include "../OpacityMicroMap/OmmBaker.h"
 
 #include <donut/engine/Scene.h>
 #include <donut/engine/SceneTypes.h>
@@ -304,6 +305,16 @@ namespace
         const size_t end = begin + size_t(mesh.totalVertices);
         if (positions.size() < end)
             return size_t(mesh.totalVertices);
+
+        const auto* meshEx = dynamic_cast<const MeshInfoEx*>(&mesh);
+        if (meshEx && meshEx->DeformationSourcePositionIndices.size() == size_t(mesh.totalVertices))
+        {
+            std::unordered_set<uint32_t> uniqueSourcePositions;
+            uniqueSourcePositions.reserve(mesh.totalVertices);
+            for (uint32_t sourceIndex : meshEx->DeformationSourcePositionIndices)
+                uniqueSourcePositions.insert(sourceIndex);
+            return uniqueSourcePositions.size();
+        }
 
         std::unordered_set<std::array<uint32_t, 3>, MeshPositionKeyHash> uniquePositions;
         uniquePositions.reserve(mesh.totalVertices);

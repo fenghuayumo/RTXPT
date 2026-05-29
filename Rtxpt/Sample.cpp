@@ -4353,6 +4353,7 @@ static bool LoadObjModelFile(
         const dm::float3 position = positions[key.position];
         mesh->buffers->positionData.push_back(position);
         mesh->buffers->texcoord1Data.push_back(key.texcoord >= 0 ? texcoords[key.texcoord] : dm::float2(0.0f));
+        mesh->DeformationSourcePositionIndices.push_back(static_cast<uint32_t>(key.position));
         vertexNormalRefs.push_back(key.normal);
         mesh->objectSpaceBounds |= position;
 
@@ -4804,8 +4805,51 @@ static std::array<uint32_t, 3> PositionKeyForDeform(const float3& p)
     return key;
 }
 
-static UniquePositionMapForDeform BuildUniquePositionMapForDeform(const std::vector<float3>& renderVertices)
+static UniquePositionMapForDeform BuildUniquePositionMapForDeform(
+    const std::vector<float3>& renderVertices,
+    const std::vector<uint32_t>* sourcePositionIndices = nullptr)
 {
+    if (sourcePositionIndices && sourcePositionIndices->size() == renderVertices.size())
+    {
+        UniquePositionMapForDeform result;
+        result.renderToUnique.resize(renderVertices.size());
+
+        std::vector<size_t> renderOrder;
+        renderOrder.reserve(renderVertices.size());
+        for (size_t i = 0; i < renderVertices.size(); ++i)
+            renderOrder.push_back(i);
+
+        std::sort(renderOrder.begin(), renderOrder.end(),
+            [&](size_t a, size_t b)
+            {
+                const uint32_t sourceA = (*sourcePositionIndices)[a];
+                const uint32_t sourceB = (*sourcePositionIndices)[b];
+                return sourceA == sourceB ? a < b : sourceA < sourceB;
+            });
+
+        std::unordered_map<uint32_t, uint32_t> uniqueLookup;
+        uniqueLookup.reserve(renderVertices.size());
+
+        for (size_t renderIndex : renderOrder)
+        {
+            const uint32_t sourceIndex = (*sourcePositionIndices)[renderIndex];
+            auto found = uniqueLookup.find(sourceIndex);
+            if (found == uniqueLookup.end())
+            {
+                const uint32_t uniqueIndex = static_cast<uint32_t>(result.uniquePositions.size());
+                uniqueLookup.emplace(sourceIndex, uniqueIndex);
+                result.uniquePositions.push_back(renderVertices[renderIndex]);
+                result.renderToUnique[renderIndex] = uniqueIndex;
+            }
+            else
+            {
+                result.renderToUnique[renderIndex] = found->second;
+            }
+        }
+
+        return result;
+    }
+
     struct KeyHash
     {
         size_t operator()(const std::array<uint32_t, 3>& key) const noexcept
@@ -4863,9 +4907,23 @@ static std::vector<float3> GetMeshRenderVerticesForDeform(
     return std::vector<float3>(positions.begin() + begin, positions.begin() + end);
 }
 
+static const std::vector<uint32_t>* GetMeshSourcePositionIndicesForDeform(
+    const std::shared_ptr<MeshInfo>& mesh,
+    size_t renderVertexCount)
+{
+    auto meshEx = std::dynamic_pointer_cast<MeshInfoEx>(mesh);
+    if (!meshEx || meshEx->DeformationSourcePositionIndices.size() != renderVertexCount)
+        return nullptr;
+
+    return &meshEx->DeformationSourcePositionIndices;
+}
+
 std::vector<float3> Sample::GetMeshVertices(const std::shared_ptr<MeshInfo>& mesh) const
 {
-    return BuildUniquePositionMapForDeform(GetMeshRenderVerticesForDeform(mesh, "GetMeshVertices")).uniquePositions;
+    std::vector<float3> renderVertices = GetMeshRenderVerticesForDeform(mesh, "GetMeshVertices");
+    return BuildUniquePositionMapForDeform(
+        renderVertices,
+        GetMeshSourcePositionIndicesForDeform(mesh, renderVertices.size())).uniquePositions;
 }
 
 static std::shared_ptr<MeshInfo> GetMeshFromSceneNodeForDeform(
@@ -5075,7 +5133,9 @@ void Sample::SetMeshVertices(const std::shared_ptr<MeshInfo>& mesh,
         throw std::runtime_error("SetMeshVertices: mesh has no buffer group");
 
     std::vector<float3> renderVertices = GetMeshRenderVerticesForDeform(mesh, "SetMeshVertices");
-    UniquePositionMapForDeform uniqueMap = BuildUniquePositionMapForDeform(renderVertices);
+    UniquePositionMapForDeform uniqueMap = BuildUniquePositionMapForDeform(
+        renderVertices,
+        GetMeshSourcePositionIndicesForDeform(mesh, renderVertices.size()));
     if (vertices.size() != uniqueMap.uniquePositions.size())
     {
         throw std::runtime_error(
