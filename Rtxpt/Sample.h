@@ -150,6 +150,8 @@ public:
     void                                    CreateTlas(nvrhi::ICommandList* commandList);
     void                                    CreateAccelStructs(nvrhi::ICommandList* commandList);
     void                                    RecreateAccelStructs(nvrhi::ICommandList* commandList);
+    void                                    RequestMeshAccelRebuild(const std::shared_ptr<donut::engine::MeshInfo>& mesh);
+    void                                    RebuildDirtyMeshAccelStructs(nvrhi::ICommandList* commandList);
     void                                    UpdateSkinnedBLASs(nvrhi::ICommandList* commandList, uint32_t frameIndex) const;
     void                                    BuildTLAS(nvrhi::ICommandList* commandList) const;
     void                                    TransitionMeshBuffersToReadOnly(nvrhi::ICommandList* commandList);
@@ -360,6 +362,7 @@ private:
 
     // raytracing basics
     nvrhi::rt::AccelStructHandle                m_topLevelAS;
+    std::vector<std::shared_ptr<donut::engine::MeshInfo>> m_meshesPendingAccelRebuild;
 
     // camera
     donut::app::FirstPersonCamera               m_camera;

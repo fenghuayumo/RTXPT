@@ -1817,6 +1817,8 @@ void Sample::RecreateAccelStructs(nvrhi::ICommandList* commandList)
             mesh->DebugData = nullptr;
             mesh->DebugDataDirty = true;
         }
+        m_meshesPendingAccelRebuild.clear();
+        GetDevice()->runGarbageCollection();
 
         // raytracing acceleration structures
         commandList->open();
@@ -1824,6 +1826,62 @@ void Sample::RecreateAccelStructs(nvrhi::ICommandList* commandList)
         commandList->close();
         GetDevice()->executeCommandList(commandList);
         GetDevice()->waitForIdle();
+    }
+}
+
+void Sample::RequestMeshAccelRebuild(const std::shared_ptr<MeshInfo>& mesh)
+{
+    if (!mesh)
+        return;
+
+    m_ui.ResetAccumulation = true;
+
+    if (!m_topLevelAS)
+    {
+        m_ui.AccelerationStructRebuildRequested = true;
+        return;
+    }
+
+    const auto it = std::find(m_meshesPendingAccelRebuild.begin(), m_meshesPendingAccelRebuild.end(), mesh);
+    if (it == m_meshesPendingAccelRebuild.end())
+        m_meshesPendingAccelRebuild.push_back(mesh);
+}
+
+void Sample::RebuildDirtyMeshAccelStructs(nvrhi::ICommandList* commandList)
+{
+    if (m_meshesPendingAccelRebuild.empty())
+        return;
+
+    std::vector<std::shared_ptr<MeshInfo>> dirtyMeshes;
+    dirtyMeshes.swap(m_meshesPendingAccelRebuild);
+
+    for (const std::shared_ptr<MeshInfo>& mesh : dirtyMeshes)
+    {
+        if (!mesh || mesh->isSkinPrototype)
+            continue;
+
+        if (!mesh->buffers || !mesh->buffers->vertexBuffer || !mesh->buffers->indexBuffer)
+        {
+            m_ui.AccelerationStructRebuildRequested = true;
+            continue;
+        }
+
+        bvh::Config cfg = { .excludeTransmissive = m_ui.AS.ExcludeTransmissive };
+        nvrhi::rt::AccelStructDesc blasDesc = bvh::GetMeshBlasDesc(cfg, *mesh, nullptr, false);
+        blasDesc.buildFlags = nvrhi::rt::AccelStructBuildFlags::PreferFastBuild;
+        assert((int)blasDesc.bottomLevelGeometries.size() < (1 << 12));
+
+        nvrhi::rt::AccelStructHandle as = GetDevice()->createAccelStruct(blasDesc);
+        nvrhi::utils::BuildBottomLevelAccelStruct(commandList, as, blasDesc);
+        mesh->accelStruct = as;
+
+        if (auto meshEx = std::dynamic_pointer_cast<MeshInfoEx>(mesh))
+        {
+            meshEx->AccelStructOMM = nullptr;
+            meshEx->OpacityMicroMaps.clear();
+            meshEx->DebugData = nullptr;
+            meshEx->DebugDataDirty = true;
+        }
     }
 }
 
@@ -2972,6 +3030,7 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
         m_scene->Refresh(m_commandList, GetFrameIndex());
 
         if(m_ommBaker) m_ommBaker->BuildOpacityMicromaps(*m_commandList, *m_scene);
+        RebuildDirtyMeshAccelStructs(m_commandList);
         UpdateSkinnedBLASs(m_commandList, GetFrameIndex());
         m_commandList->compactBottomLevelAccelStructs(); // Compact acceleration structures that are tagged for compaction and have finished executing the original build
         BuildTLAS(m_commandList);
@@ -5048,7 +5107,12 @@ static void RecomputeMeshNormalsFromPositions(const std::shared_ptr<MeshInfo>& m
     if (buffers.normalData.size() < vertexEnd || buffers.indexData.empty())
         return;
 
-    std::vector<float3> accumulated(mesh->totalVertices, float3(0.0f));
+    std::vector<float3> renderVertices(buffers.positionData.begin() + vertexBegin, buffers.positionData.begin() + vertexEnd);
+    UniquePositionMapForDeform uniqueMap = BuildUniquePositionMapForDeform(
+        renderVertices,
+        GetMeshSourcePositionIndicesForDeform(mesh, renderVertices.size()));
+
+    std::vector<float3> accumulated(uniqueMap.uniquePositions.size(), float3(0.0f));
 
     for (const auto& geometry : mesh->geometries)
     {
@@ -5082,17 +5146,19 @@ static void RecomputeMeshNormalsFromPositions(const std::shared_ptr<MeshInfo>& m
             const float3& p0 = buffers.positionData[vertexBegin + local[0]];
             const float3& p1 = buffers.positionData[vertexBegin + local[1]];
             const float3& p2 = buffers.positionData[vertexBegin + local[2]];
-            const float3 faceNormal = NormalizeOrFallbackForDeform(cross(p1 - p0, p2 - p0), float3(0.0f, 1.0f, 0.0f));
+            const float3 faceNormal = cross(p1 - p0, p2 - p0);
+            if (!std::isfinite(dot(faceNormal, faceNormal)))
+                continue;
 
-            accumulated[local[0]] += faceNormal;
-            accumulated[local[1]] += faceNormal;
-            accumulated[local[2]] += faceNormal;
+            accumulated[uniqueMap.renderToUnique[local[0]]] += faceNormal;
+            accumulated[uniqueMap.renderToUnique[local[1]]] += faceNormal;
+            accumulated[uniqueMap.renderToUnique[local[2]]] += faceNormal;
         }
     }
 
     for (uint32_t i = 0; i < mesh->totalVertices; ++i)
     {
-        const float3 normal = NormalizeOrFallbackForDeform(accumulated[i], float3(0.0f, 1.0f, 0.0f));
+        const float3 normal = NormalizeOrFallbackForDeform(accumulated[uniqueMap.renderToUnique[i]], float3(0.0f, 1.0f, 0.0f));
         buffers.normalData[vertexBegin + i] = vectorToSnorm8(normal);
     }
 }
@@ -5120,6 +5186,63 @@ static void UpdateMeshBoundsFromPositions(const std::shared_ptr<MeshInfo>& mesh)
         geometry->objectSpaceBounds = bounds;
         mesh->objectSpaceBounds |= bounds;
     }
+}
+
+static bool BufferRangeContainsBytes(const nvrhi::BufferRange& range, uint64_t relativeOffset, uint64_t byteSize)
+{
+    return range.byteSize != 0 && relativeOffset <= range.byteSize && byteSize <= range.byteSize - relativeOffset;
+}
+
+static bool UploadMeshDeformationToGpu(
+    nvrhi::IDevice* device,
+    const std::shared_ptr<MeshInfo>& mesh,
+    size_t renderVertexCount,
+    bool uploadNormals)
+{
+    if (!device || !mesh || !mesh->buffers)
+        return false;
+
+    auto& buffers = *mesh->buffers;
+    if (!buffers.vertexBuffer)
+        return false;
+
+    const size_t begin = size_t(mesh->vertexOffset);
+    const size_t end = begin + renderVertexCount;
+    if (buffers.positionData.size() < end)
+        return false;
+
+    const nvrhi::BufferRange& positionRange = buffers.getVertexBufferRange(VertexAttribute::Position);
+    const uint64_t positionOffset = uint64_t(begin) * sizeof(float3);
+    const uint64_t positionBytes = uint64_t(renderVertexCount) * sizeof(float3);
+    if (!BufferRangeContainsBytes(positionRange, positionOffset, positionBytes))
+        return false;
+
+    nvrhi::CommandListHandle commandList = device->createCommandList();
+    commandList->open();
+    commandList->writeBuffer(
+        buffers.vertexBuffer,
+        buffers.positionData.data() + begin,
+        positionBytes,
+        positionRange.byteOffset + positionOffset);
+
+    if (uploadNormals && buffers.normalData.size() >= end)
+    {
+        const nvrhi::BufferRange& normalRange = buffers.getVertexBufferRange(VertexAttribute::Normal);
+        const uint64_t normalOffset = uint64_t(begin) * sizeof(uint32_t);
+        const uint64_t normalBytes = uint64_t(renderVertexCount) * sizeof(uint32_t);
+        if (BufferRangeContainsBytes(normalRange, normalOffset, normalBytes))
+        {
+            commandList->writeBuffer(
+                buffers.vertexBuffer,
+                buffers.normalData.data() + begin,
+                normalBytes,
+                normalRange.byteOffset + normalOffset);
+        }
+    }
+
+    commandList->close();
+    device->executeCommandList(commandList);
+    return true;
 }
 
 void Sample::SetMeshVertices(const std::shared_ptr<MeshInfo>& mesh,
@@ -5157,48 +5280,51 @@ void Sample::SetMeshVertices(const std::shared_ptr<MeshInfo>& mesh,
     if (recomputeNormals)
         RecomputeMeshNormalsFromPositions(mesh);
 
-    if (buffers.vertexBuffer)
+    const bool uploadedToExistingGpuBuffer = UploadMeshDeformationToGpu(
+        GetDevice(),
+        mesh,
+        renderVertices.size(),
+        recomputeNormals);
+
+    if (!uploadedToExistingGpuBuffer)
     {
         GetDevice()->waitForIdle();
-        buffers.vertexBuffer = nullptr;
-        buffers.vertexBufferDescriptor.reset();
-        buffers.vertexBufferRanges.fill(nvrhi::BufferRange());
-    }
 
-    std::vector<std::shared_ptr<SceneGraphNode>> affectedNodes;
-    if (m_scene && m_scene->GetSceneGraph())
-    {
-        for (const auto& instance : m_scene->GetSceneGraph()->GetMeshInstances())
+        if (buffers.vertexBuffer)
         {
-            if (instance && instance->GetMesh() == mesh)
+            buffers.vertexBuffer = nullptr;
+            buffers.vertexBufferDescriptor.reset();
+            buffers.vertexBufferRanges.fill(nvrhi::BufferRange());
+        }
+
+        std::vector<std::shared_ptr<SceneGraphNode>> affectedNodes;
+        if (m_scene && m_scene->GetSceneGraph())
+        {
+            for (const auto& instance : m_scene->GetSceneGraph()->GetMeshInstances())
             {
-                if (auto node = instance->GetNodeSharedPtr())
-                    affectedNodes.push_back(node);
+                if (instance && instance->GetMesh() == mesh)
+                {
+                    if (auto node = instance->GetNodeSharedPtr())
+                        affectedNodes.push_back(node);
+                }
             }
         }
-    }
 
-    for (const auto& node : affectedNodes)
-    {
-        if (node && node->GetLeaf())
+        for (const auto& node : affectedNodes)
         {
-            auto leaf = node->GetLeaf();
-            node->SetLeaf(leaf);
+            if (node && node->GetLeaf())
+            {
+                auto leaf = node->GetLeaf();
+                node->SetLeaf(leaf);
+            }
         }
+
+        if (m_scene)
+            m_scene->FinishedLoading(GetFrameIndex());
     }
-
-    if (m_scene)
-        m_scene->FinishedLoading(GetFrameIndex());
-
-    if (m_materialsBaker != nullptr)
-        m_materialsBaker->SceneReloaded();
-    if (m_lightsBaker != nullptr)
-        m_lightsBaker->SceneReloaded();
-    if (m_ommBaker != nullptr && m_scene)
-        m_ommBaker->SceneLoaded(*m_scene);
 
     if (rebuildAccelerationStructure)
-        RequestFullRebuild();
+        RequestMeshAccelRebuild(mesh);
     else
         m_ui.ResetAccumulation = true;
 }
