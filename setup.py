@@ -107,7 +107,7 @@ class BuildPyWithRuntime(_build_py):
 
 setup(
     name="rtxpt",
-    version=os.environ.get("RTXPT_WHEEL_VERSION", "0.5"),
+    version=os.environ.get("RTXPT_WHEEL_VERSION", "0.6.0"),
     description="Python bindings for RTXPT",
     long_description=(ROOT / "py_rtxpt.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",

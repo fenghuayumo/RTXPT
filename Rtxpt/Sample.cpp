@@ -5193,6 +5193,14 @@ static bool BufferRangeContainsBytes(const nvrhi::BufferRange& range, uint64_t r
     return range.byteSize != 0 && relativeOffset <= range.byteSize && byteSize <= range.byteSize - relativeOffset;
 }
 
+static nvrhi::ResourceStates GetMeshVertexBufferReadyState(const nvrhi::BufferDesc& desc)
+{
+    nvrhi::ResourceStates state = nvrhi::ResourceStates::VertexBuffer | nvrhi::ResourceStates::ShaderResource;
+    if (desc.isAccelStructBuildInput)
+        state = state | nvrhi::ResourceStates::AccelStructBuildInput;
+    return state;
+}
+
 static bool UploadMeshDeformationToGpu(
     nvrhi::IDevice* device,
     const std::shared_ptr<MeshInfo>& mesh,
@@ -5240,6 +5248,7 @@ static bool UploadMeshDeformationToGpu(
         }
     }
 
+    commandList->setBufferState(buffers.vertexBuffer, GetMeshVertexBufferReadyState(buffers.vertexBuffer->getDesc()));
     commandList->close();
     device->executeCommandList(commandList);
     return true;
