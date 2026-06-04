@@ -90,7 +90,8 @@ public:
     bool WaitUntilReady(int maxFrames = 256);
 
     // Single frame.  `dt` is the simulation delta time in seconds.  Pass a
-    // negative value to use the wall clock since the previous Step.
+    // negative value to use the wall clock in windowed mode; headless sessions
+    // use a fixed 1/60 s step for deterministic offline rendering.
     bool Step(float dt = -1.0f);
 
     // Convenience: call Step() N times.

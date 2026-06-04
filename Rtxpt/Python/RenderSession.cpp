@@ -57,6 +57,8 @@ using namespace donut;
 
 namespace
 {
+    constexpr double c_HeadlessFrameTimeSeconds = 1.0 / 60.0;
+
     void AppendUnique(std::vector<std::string>& values, const std::string& value)
     {
         if (std::find(values.begin(), values.end(), value) == values.end())
@@ -592,14 +594,13 @@ bool RenderSession::Step(float dt)
     if (window && glfwWindowShouldClose(window))
         return false;
 
-    if (dt < 0.0f)
-    {
-        // Negative dt -> use real-time elapsed since last call.
-        // Donut tracks this internally via m_PreviousFrameTimestamp so we
-        // simply forward to RunSingleFrame() and let it compute the delta.
-    }
+    const bool frameOk = dt >= 0.0f
+        ? m_deviceManager->RunSingleFrame(double(dt))
+        : (m_config.headless
+            ? m_deviceManager->RunSingleFrame(c_HeadlessFrameTimeSeconds)
+            : m_deviceManager->RunSingleFrame());
 
-    if (!m_deviceManager->RunSingleFrame())
+    if (!frameOk)
         return false;
 
     // Headless Python stepping can outrun the GPU and cause resource hazards

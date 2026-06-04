@@ -1940,8 +1940,24 @@ void Sample::BuildTLAS(nvrhi::ICommandList* commandList) const
         const bool hasAttachementOMM    = m_ommBaker && mesh->AccelStructOMM.Get() != nullptr;
         const bool useOmmBLAS           = m_ommBaker && m_ommBaker->UIData().Enable && hasAttachementOMM && !forceOpaque;
 
+        const uint meshSubInstanceCount = (uint)mesh->geometries.size();
+        assert(subInstanceCount == instance->GetGeometryInstanceIndex());
+
+        auto* bottomLevelAS = useOmmBLAS ? mesh->AccelStructOMM.Get() : mesh->accelStruct.Get();
+        if (bottomLevelAS == nullptr)
+        {
+            static bool warnedNullBlas = false;
+            if (!warnedNullBlas)
+            {
+                log::warning("BuildTLAS skipped one or more mesh instances with null BLAS to avoid invalid TLAS input.");
+                warnedNullBlas = true;
+            }
+            subInstanceCount += meshSubInstanceCount;
+            continue;
+        }
+
         nvrhi::rt::InstanceDesc instanceDesc;
-        instanceDesc.bottomLevelAS = useOmmBLAS ? mesh->AccelStructOMM.Get() : mesh->accelStruct.Get();
+        instanceDesc.bottomLevelAS = bottomLevelAS;
         instanceDesc.instanceMask = (m_ommBaker && m_ommBaker->UIData().OnlyOMMs && !hasAttachementOMM) ? 0 : 1;
         instanceDesc.instanceID = instance->GetGeometryInstanceIndex();
         instanceDesc.instanceContributionToHitGroupIndex = subInstanceCount;
@@ -1949,8 +1965,7 @@ void Sample::BuildTLAS(nvrhi::ICommandList* commandList) const
         if (forceOpaque)
             instanceDesc.flags = (nvrhi::rt::InstanceFlags)((uint32_t)instanceDesc.flags | (uint32_t)nvrhi::rt::InstanceFlags::ForceOpaque);
 
-        assert( subInstanceCount == instance->GetGeometryInstanceIndex() );
-        subInstanceCount += (uint)mesh->geometries.size();
+        subInstanceCount += meshSubInstanceCount;
 
         auto node = instance->GetNode();
         assert(node);
@@ -1961,7 +1976,11 @@ void Sample::BuildTLAS(nvrhi::ICommandList* commandList) const
     assert (m_subInstanceCount == subInstanceCount);
 
     commandList->beginMarker("TLAS Update");
-    commandList->buildTopLevelAccelStruct(m_topLevelAS, instances.data(), instances.size(), nvrhi::rt::AccelStructBuildFlags::AllowEmptyInstances);
+    commandList->buildTopLevelAccelStruct(
+        m_topLevelAS,
+        instances.empty() ? nullptr : instances.data(),
+        instances.size(),
+        nvrhi::rt::AccelStructBuildFlags::AllowEmptyInstances);
     commandList->endMarker();
 }
 
@@ -5974,6 +5993,13 @@ void Sample::ApplyReferenceOIDN()
     m_commandList->copyTexture(stagingTexture, nvrhi::TextureSlice(), sourceTexture, nvrhi::TextureSlice());
     m_commandList->close();
     GetDevice()->executeCommandList(m_commandList);
+    if (!GetDevice()->waitForIdle())
+    {
+        m_commandList->open();
+        donut::log::warning("OIDN reference denoiser readback failed because the GPU device was lost.");
+        m_oidnDenoiserFailed = true;
+        return;
+    }
 
     size_t rowPitch = 0;
     const uint8_t* mappedData = static_cast<const uint8_t*>(GetDevice()->mapStagingTexture(stagingTexture, nvrhi::TextureSlice(), nvrhi::CpuAccessMode::Read, &rowPitch));
