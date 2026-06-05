@@ -70,6 +70,36 @@ static std::string LowerCopy(std::string value)
     return value;
 }
 
+static bool IsOpenPBRMaterialModel(const std::string& materialModel)
+{
+    std::string normalized = LowerCopy(materialModel);
+    return normalized == "openpbr" || normalized == "openpbr-lite" || normalized == "openpbr_lite";
+}
+
+static bool HasOpenPBRLiteFields(const Json::Value& input)
+{
+    return input.isObject()
+        && (input.isMember("base_weight")
+            || input.isMember("base_color")
+            || input.isMember("base_metalness")
+            || input.isMember("specular_weight")
+            || input.isMember("specular_roughness")
+            || input.isMember("specular_roughness_anisotropy")
+            || input.isMember("transmission_weight")
+            || input.isMember("geometry_opacity")
+            || input.isMember("fuzz_weight"));
+}
+
+template <typename T>
+static bool ReadJsonMember(const Json::Value& input, const char* name, T& value)
+{
+    if (!input.isObject() || !input.isMember(name))
+        return false;
+
+    input[name] >> value;
+    return true;
+}
+
 static std::filesystem::path ResolveMaterialTexturePath(
     const std::filesystem::path& localPath,
     const std::filesystem::path& sceneDirectory,
@@ -145,6 +175,14 @@ void PTMaterial::Write(Json::Value& output)
     STORE_FIELD(SpecularColor);
     STORE_FIELD(EmissiveColor);
 
+    STORE_FIELD(MaterialModel);
+    STORE_FIELD(BaseWeight);
+    STORE_FIELD(SpecularWeight);
+    STORE_FIELD(Anisotropy);
+    STORE_FIELD(FuzzWeight);
+    STORE_FIELD(FuzzColor);
+    STORE_FIELD(FuzzRoughness);
+
     STORE_FIELD(EmissiveIntensity);
     STORE_FIELD(Metalness);
     STORE_FIELD(Roughness);
@@ -183,6 +221,28 @@ void PTMaterial::Write(Json::Value& output)
     STORE_FIELD(UseDonutEmissiveIntensity);
 
     STORE_FIELD(SkipRender);
+
+    if (IsOpenPBRMaterialModel(MaterialModel))
+    {
+        Json::Value& openPBR = output["OpenPBR"];
+        openPBR["base_weight"] << BaseWeight;
+        openPBR["base_color"] << BaseOrDiffuseColor;
+        openPBR["base_metalness"] << Metalness;
+        openPBR["specular_weight"] << SpecularWeight;
+        openPBR["specular_color"] << SpecularColor;
+        openPBR["specular_roughness"] << Roughness;
+        openPBR["specular_roughness_anisotropy"] << Anisotropy;
+        openPBR["specular_ior"] << IoR;
+        openPBR["transmission_weight"] << TransmissionFactor;
+        openPBR["transmission_diffuse_weight"] << DiffuseTransmissionFactor;
+        openPBR["geometry_opacity"] << Opacity;
+        openPBR["geometry_thin_walled"] << ThinSurface;
+        openPBR["emission_color"] << EmissiveColor;
+        openPBR["emission_luminance"] << EmissiveIntensity;
+        openPBR["fuzz_weight"] << FuzzWeight;
+        openPBR["fuzz_color"] << FuzzColor;
+        openPBR["fuzz_roughness"] << FuzzRoughness;
+    }
 }
 
 bool PTMaterial::Read(
@@ -197,6 +257,10 @@ bool PTMaterial::Read(
     // {
     //     donut::log::warning("Unsupported/missing material version"); return nullptr;
     // }
+
+    const bool hasMaterialModelField = input.isMember("MaterialModel");
+    const bool hasOpenPBRBlock = input.isMember("OpenPBR");
+    const bool hasTopLevelOpenPBRFields = HasOpenPBRLiteFields(input);
 
     auto loadTexture = [ & ](Json::Value& input, PTTexture& output, const std::string& name)
     {
@@ -239,6 +303,14 @@ bool PTMaterial::Read(
     LOAD_FIELD(SpecularColor);
     LOAD_FIELD(EmissiveColor);
 
+    LOAD_FIELD(MaterialModel);
+    LOAD_FIELD(BaseWeight);
+    LOAD_FIELD(SpecularWeight);
+    LOAD_FIELD(Anisotropy);
+    LOAD_FIELD(FuzzWeight);
+    LOAD_FIELD(FuzzColor);
+    LOAD_FIELD(FuzzRoughness);
+
     LOAD_FIELD(EmissiveIntensity);
     LOAD_FIELD(Metalness);
     LOAD_FIELD(Roughness);
@@ -278,6 +350,61 @@ bool PTMaterial::Read(
     LOAD_FIELD(UseDonutEmissiveIntensity);
 
     LOAD_FIELD(SkipRender);
+
+    auto readOpenPBRLite = [this](const Json::Value& openPBR)
+    {
+        if (!openPBR.isObject())
+            return;
+
+        MaterialModel = "OpenPBR";
+
+        if (!openPBR.isMember("specular_color"))
+            SpecularColor = dm::float3(1.f);
+
+        ReadJsonMember(openPBR, "base_weight", BaseWeight);
+        ReadJsonMember(openPBR, "base_color", BaseOrDiffuseColor);
+        ReadJsonMember(openPBR, "base_metalness", Metalness);
+
+        ReadJsonMember(openPBR, "specular_weight", SpecularWeight);
+        ReadJsonMember(openPBR, "specular_color", SpecularColor);
+        ReadJsonMember(openPBR, "specular_roughness", Roughness);
+        ReadJsonMember(openPBR, "specular_roughness_anisotropy", Anisotropy);
+        ReadJsonMember(openPBR, "specular_ior", IoR);
+
+        bool hasSpecularTransmission = ReadJsonMember(openPBR, "transmission_weight", TransmissionFactor);
+        bool hasDiffuseTransmission = ReadJsonMember(openPBR, "transmission_diffuse_weight", DiffuseTransmissionFactor);
+        EnableTransmission |= hasSpecularTransmission || hasDiffuseTransmission || TransmissionFactor > 0.0f || DiffuseTransmissionFactor > 0.0f;
+
+        ReadJsonMember(openPBR, "geometry_opacity", Opacity);
+        ReadJsonMember(openPBR, "geometry_thin_walled", ThinSurface);
+
+        ReadJsonMember(openPBR, "emission_color", EmissiveColor);
+        ReadJsonMember(openPBR, "emission_luminance", EmissiveIntensity);
+
+        ReadJsonMember(openPBR, "fuzz_weight", FuzzWeight);
+        ReadJsonMember(openPBR, "fuzz_color", FuzzColor);
+        ReadJsonMember(openPBR, "fuzz_roughness", FuzzRoughness);
+
+        UseSpecularGlossModel = false;
+    };
+
+    if (hasOpenPBRBlock)
+        readOpenPBRLite(input["OpenPBR"]);
+    else if ((hasMaterialModelField && IsOpenPBRMaterialModel(MaterialModel)) || hasTopLevelOpenPBRFields)
+        readOpenPBRLite(input);
+    else if (!hasMaterialModelField && !UseSpecularGlossModel)
+    {
+        MaterialModel = "OpenPBR";
+        SpecularColor = dm::float3(1.f);
+    }
+    else if (!hasMaterialModelField && UseSpecularGlossModel)
+        MaterialModel = "RTXPT";
+
+    BaseWeight = std::clamp(BaseWeight, 0.0f, 1.0f);
+    SpecularWeight = std::max(SpecularWeight, 0.0f);
+    Anisotropy = std::clamp(Anisotropy, -1.0f, 1.0f);
+    FuzzWeight = std::clamp(FuzzWeight, 0.0f, 1.0f);
+    FuzzRoughness = std::clamp(FuzzRoughness, 0.0f, 1.0f);
 
     return true;
 }
@@ -425,23 +552,95 @@ bool PTMaterial::EditorGUI(MaterialsBaker & baker)
 
     const ImVec4 filenameColor = ImVec4(0.474f, 0.722f, 0.176f, 1.0f);
 
-    if (UseSpecularGlossModel)
+    auto drawTextureToggle = [&](const char* label, PTTexture& texture, bool& enabled)
     {
-        if (BaseTexture.Loaded != nullptr)
+        if (texture.Loaded != nullptr)
         {
-            update |= ImGui::Checkbox("Use Base (Diffuse) Texture", &EnableBaseTexture);
+            update |= ImGui::Checkbox(label, &enabled);
             ImGui::SameLine();
-            ImGui::TextColored(filenameColor, "%s", getShortTexturePath(BaseTexture).c_str());
+            ImGui::TextColored(filenameColor, "%s", getShortTexturePath(texture).c_str());
         }
+    };
+
+    bool useOpenPBRLite = IsOpenPBRMaterialModel(MaterialModel);
+    int materialModelIndex = useOpenPBRLite ? 0 : 1;
+    if (ImGui::Combo("Material Model", &materialModelIndex, "OpenPBR-lite\0RTXPT legacy\0\0"))
+    {
+        useOpenPBRLite = (materialModelIndex == 0);
+        MaterialModel = useOpenPBRLite ? "OpenPBR" : "RTXPT";
+        if (useOpenPBRLite)
+        {
+            UseSpecularGlossModel = false;
+            const float* specularColor = SpecularColor.data();
+            if (specularColor[0] == 0.f && specularColor[1] == 0.f && specularColor[2] == 0.f)
+                SpecularColor = dm::float3(1.f);
+        }
+        update = true;
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("OpenPBR-lite exposes standard material parameter names and maps them onto the RTXPT backend.");
+
+    if (useOpenPBRLite && UseSpecularGlossModel)
+    {
+        UseSpecularGlossModel = false;
+        update = true;
+    }
+
+    if (useOpenPBRLite)
+    {
+        drawTextureToggle("Use base_color texture", BaseTexture, EnableBaseTexture);
+
+        update |= ImGui::ColorEdit3(EnableBaseTexture ? "base_color factor" : "base_color", BaseOrDiffuseColor.data(), ImGuiColorEditFlags_Float);
+        update |= ImGui::SliderFloat("base_weight", &BaseWeight, 0.f, 1.f);
+
+        drawTextureToggle("Use base_metalness/specular_roughness texture", OcclusionRoughnessMetallicTexture, EnableOcclusionRoughnessMetallicTexture);
+
+        update |= ImGui::SliderFloat(EnableOcclusionRoughnessMetallicTexture ? "base_metalness factor" : "base_metalness", &Metalness, 0.f, 1.f);
+        update |= ImGui::SliderFloat("specular_weight", &SpecularWeight, 0.f, 2.f);
+        update |= ImGui::ColorEdit3("specular_color", SpecularColor.data(), ImGuiColorEditFlags_Float);
+        update |= ImGui::SliderFloat(EnableOcclusionRoughnessMetallicTexture ? "specular_roughness factor" : "specular_roughness", &Roughness, 0.f, 1.f);
+        update |= ImGui::SliderFloat("specular_roughness_anisotropy", &Anisotropy, -1.f, 1.f);
+        update |= ImGui::InputFloat("specular_ior", &IoR);
+        if (IoR < 1.0f) { IoR = 1.0f; update = true; }
+
+        update |= ImGui::SliderFloat("fuzz_weight", &FuzzWeight, 0.f, 1.f);
+        update |= ImGui::ColorEdit3("fuzz_color", FuzzColor.data(), ImGuiColorEditFlags_Float);
+        update |= ImGui::SliderFloat("fuzz_roughness", &FuzzRoughness, 0.f, 1.f);
+
+        update |= ImGui::SliderFloat("geometry_opacity", &Opacity, 0.f, 1.f);
+        update |= ImGui::Checkbox("geometry_thin_walled", &ThinSurface);
+
+        drawTextureToggle("Use transmission_weight texture", TransmissionTexture, EnableTransmissionTexture);
+
+        float previousTransmissionFactor = TransmissionFactor;
+        float previousDiffuseTransmissionFactor = DiffuseTransmissionFactor;
+        update |= ImGui::SliderFloat("transmission_weight", &TransmissionFactor, 0.f, 1.f);
+        update |= ImGui::SliderFloat("transmission_diffuse_weight", &DiffuseTransmissionFactor, 0.f, 1.f);
+
+        bool openPBRTransmissionEnabled = (TransmissionFactor > 0.f) || (DiffuseTransmissionFactor > 0.f);
+        if (openPBRTransmissionEnabled != EnableTransmission)
+        {
+            EnableTransmission = openPBRTransmissionEnabled;
+            update = true;
+        }
+        if (previousTransmissionFactor != TransmissionFactor || previousDiffuseTransmissionFactor != DiffuseTransmissionFactor)
+            EnableTransmission = openPBRTransmissionEnabled;
+
+        if (EnableTransmission && !ThinSurface)
+        {
+            update |= ImGui::InputFloat("volume_attenuation_distance", &VolumeAttenuationDistance);
+            if (VolumeAttenuationDistance < 0.0f) { VolumeAttenuationDistance = 0.0f; update = true; }
+            update |= ImGui::ColorEdit3("volume_attenuation_color", VolumeAttenuationColor.data(), ImGuiColorEditFlags_Float);
+            update |= ImGui::InputInt("nested_priority", &NestedPriority);
+            if (NestedPriority < 0 || NestedPriority > 14) { NestedPriority = dm::clamp(NestedPriority, 0, 14); update = true; }
+        }
+    }
+    else if (UseSpecularGlossModel)
+    {
+        drawTextureToggle("Use Base (Diffuse) Texture", BaseTexture, EnableBaseTexture);
 
         update |= ImGui::ColorEdit3(EnableBaseTexture ? "Diffuse Factor" : "Diffuse Color", BaseOrDiffuseColor.data(), ImGuiColorEditFlags_Float);
 
-        if (OcclusionRoughnessMetallicTexture.Loaded != nullptr)
-        {
-            update |= ImGui::Checkbox("Use Specular Texture", &EnableOcclusionRoughnessMetallicTexture);
-            ImGui::SameLine();
-            ImGui::TextColored(filenameColor, "%s", getShortTexturePath(OcclusionRoughnessMetallicTexture).c_str());
-        }
+        drawTextureToggle("Use Specular Texture", OcclusionRoughnessMetallicTexture, EnableOcclusionRoughnessMetallicTexture);
 
         update |= ImGui::ColorEdit3(EnableOcclusionRoughnessMetallicTexture ? "Specular Factor" : "Specular Color", SpecularColor.data(), ImGuiColorEditFlags_Float);
 
@@ -451,39 +650,24 @@ bool PTMaterial::EditorGUI(MaterialsBaker & baker)
     }
     else
     {
-        if (BaseTexture.Loaded)
-        {
-            update |= ImGui::Checkbox("Use Base (Diffuse) Texture", &EnableBaseTexture);
-            ImGui::SameLine();
-            ImGui::TextColored(filenameColor, "%s", getShortTexturePath(BaseTexture).c_str());
-        }
+        drawTextureToggle("Use Base (Diffuse) Texture", BaseTexture, EnableBaseTexture);
 
         update |= ImGui::ColorEdit3(EnableBaseTexture ? "Base Color Factor" : "Base Color", BaseOrDiffuseColor.data(), ImGuiColorEditFlags_Float);
 
-        if (OcclusionRoughnessMetallicTexture.Loaded)
-        {
-            update |= ImGui::Checkbox("Use Metal-Rough Texture", &EnableOcclusionRoughnessMetallicTexture);
-            ImGui::SameLine();
-            ImGui::TextColored(filenameColor, "%s", getShortTexturePath(OcclusionRoughnessMetallicTexture).c_str());
-        }
+        drawTextureToggle("Use Metal-Rough Texture", OcclusionRoughnessMetallicTexture, EnableOcclusionRoughnessMetallicTexture);
 
         update |= ImGui::SliderFloat(EnableOcclusionRoughnessMetallicTexture ? "Metalness Factor" : "Metalness", &Metalness, 0.f, 1.f);
         update |= ImGui::SliderFloat(EnableOcclusionRoughnessMetallicTexture ? "Roughness Factor" : "Roughness", &Roughness, 0.f, 1.f);
     }
 
-    update |= ImGui::Checkbox("Enable Alpha Testing", &EnableAlphaTesting);
+    update |= ImGui::Checkbox(useOpenPBRLite ? "geometry_enable_alpha_test" : "Enable Alpha Testing", &EnableAlphaTesting);
 
     if (EnableAlphaTesting && BaseTexture.Loaded)
     {
-        update |= ImGui::SliderFloat("Alpha Cutoff", &AlphaCutoff, 0.f, 1.f);
+        update |= ImGui::SliderFloat(useOpenPBRLite ? "geometry_alpha_cutoff" : "Alpha Cutoff", &AlphaCutoff, 0.f, 1.f);
     }
 
-    if (NormalTexture.Loaded != nullptr)
-    {
-        update |= ImGui::Checkbox("Use Normal Texture", &EnableNormalTexture);
-        ImGui::SameLine();
-        ImGui::TextColored(filenameColor, "%s", getShortTexturePath(NormalTexture).c_str());
-    }
+    drawTextureToggle(useOpenPBRLite ? "Use geometry_normal texture" : "Use Normal Texture", NormalTexture, EnableNormalTexture);
 
     if (EnableNormalTexture)
     {
@@ -497,49 +681,42 @@ bool PTMaterial::EditorGUI(MaterialsBaker & baker)
             update = true;
         }
         ImGui::SameLine();
-        ImGui::Text("Normal Scale");
+        ImGui::Text(useOpenPBRLite ? "geometry_normal_scale" : "Normal Scale");
     }
 
-    if (EmissiveTexture.Loaded)
+    drawTextureToggle(useOpenPBRLite ? "Use emission_color texture" : "Use Emissive Texture", EmissiveTexture, EnableEmissiveTexture);
+
+    update |= ImGui::ColorEdit3(useOpenPBRLite ? "emission_color" : "Emissive Color", EmissiveColor.data(), ImGuiColorEditFlags_Float);
+    update |= ImGui::SliderFloat(useOpenPBRLite ? "emission_luminance" : "Emissive Intensity", &EmissiveIntensity, 0.f, 100000.f, "%.3f", ImGuiSliderFlags_Logarithmic);
+
+    if (!useOpenPBRLite)
     {
-        update |= ImGui::Checkbox("Use Emissive Texture", &EnableEmissiveTexture);
-        ImGui::SameLine();
-        ImGui::TextColored(filenameColor, "%s", getShortTexturePath(EmissiveTexture).c_str());
-    }
+        update |= ImGui::Checkbox("Enable Transmission", &EnableTransmission);
 
-    update |= ImGui::ColorEdit3("Emissive Color", EmissiveColor.data(), ImGuiColorEditFlags_Float);
-    update |= ImGui::SliderFloat("Emissive Intensity", &EmissiveIntensity, 0.f, 100000.f, "%.3f", ImGuiSliderFlags_Logarithmic);
-
-    update |= ImGui::Checkbox("Enable Transmission", &EnableTransmission);
-
-    if (EnableTransmission)   // transmissive
-    {
-        update |= ImGui::InputFloat("Index of Refraction", &IoR);
-        if (IoR < 1.0f) { IoR = 1.0f; update = true; }
-
-        if (TransmissionTexture.Loaded)
+        if (EnableTransmission)   // transmissive
         {
-            update |= ImGui::Checkbox("Use Transmission Texture", &EnableTransmissionTexture);
-            ImGui::SameLine();
-            ImGui::TextColored(filenameColor, "%s", getShortTexturePath(TransmissionTexture).c_str());
-        }
+            update |= ImGui::InputFloat("Index of Refraction", &IoR);
+            if (IoR < 1.0f) { IoR = 1.0f; update = true; }
 
-        update |= ImGui::SliderFloat("Transmission Factor", &TransmissionFactor, 0.f, 1.f);
-        update |= ImGui::SliderFloat("Diff Transmission Factor", &DiffuseTransmissionFactor, 0.f, 1.f);
+            drawTextureToggle("Use Transmission Texture", TransmissionTexture, EnableTransmissionTexture);
 
-        if (!ThinSurface)
-        {
-            update |= ImGui::InputFloat("Attenuation Distance", &VolumeAttenuationDistance);
-            if (VolumeAttenuationDistance < 0.0f) { VolumeAttenuationDistance = 0.0f; update = true; }
+            update |= ImGui::SliderFloat("Transmission Factor", &TransmissionFactor, 0.f, 1.f);
+            update |= ImGui::SliderFloat("Diff Transmission Factor", &DiffuseTransmissionFactor, 0.f, 1.f);
 
-            update |= ImGui::ColorEdit3("Attenuation Color", VolumeAttenuationColor.data(), ImGuiColorEditFlags_Float);
+            if (!ThinSurface)
+            {
+                update |= ImGui::InputFloat("Attenuation Distance", &VolumeAttenuationDistance);
+                if (VolumeAttenuationDistance < 0.0f) { VolumeAttenuationDistance = 0.0f; update = true; }
 
-            update |= ImGui::InputInt("Nested Priority", &NestedPriority);
-            if (NestedPriority < 0 || NestedPriority > 14) { NestedPriority = dm::clamp(NestedPriority, 0, 14); update = true; }
-        }
-        else
-        {
-            ImGui::Text("Thin surface transmissive materials have no volume properties");
+                update |= ImGui::ColorEdit3("Attenuation Color", VolumeAttenuationColor.data(), ImGuiColorEditFlags_Float);
+
+                update |= ImGui::InputInt("Nested Priority", &NestedPriority);
+                if (NestedPriority < 0 || NestedPriority > 14) { NestedPriority = dm::clamp(NestedPriority, 0, 14); update = true; }
+            }
+            else
+            {
+                ImGui::Text("Thin surface transmissive materials have no volume properties");
+            }
         }
     }
 
@@ -667,6 +844,9 @@ void PTMaterial::FillData(PTMaterialData & data)
     if (IgnoreMeshTangentSpace)
         data.Flags |= PTMaterialFlags_IgnoreMeshTangentSpace;
 
+    if (IsOpenPBRMaterialModel(MaterialModel))
+        data.Flags |= PTMaterialFlags_UseOpenPBRMaterialModel;
+
     // free parameters
 
     data.BaseOrDiffuseColor = BaseOrDiffuseColor;
@@ -674,6 +854,12 @@ void PTMaterial::FillData(PTMaterialData & data)
     data.EmissiveColor = EmissiveColor * EmissiveIntensity;
     data.Roughness = Roughness;
     data.Metalness = Metalness;
+    data.BaseWeight = std::clamp(BaseWeight, 0.0f, 1.0f);
+    data.SpecularWeight = std::max(SpecularWeight, 0.0f);
+    data.Anisotropy = std::clamp(Anisotropy, -1.0f, 1.0f);
+    data.FuzzWeight = std::clamp(FuzzWeight, 0.0f, 1.0f);
+    data.FuzzColor = FuzzColor;
+    data.FuzzRoughness = std::clamp(FuzzRoughness, 0.0f, 1.0f);
     data.NormalTextureScale = NormalTextureScale;
     data.TransmissionFactor = (EnableTransmission)?(TransmissionFactor):(0);
     data.DiffuseTransmissionFactor = (EnableTransmission)?(DiffuseTransmissionFactor):(0);

@@ -360,7 +360,8 @@ PathTracerCollectedSurfaceData RunDecompress(PackedPathTracerSurfaceData c)
 	bsdfDataMetallic = roughnessMetallicEta.y;
 	bsdfDataEta = roughnessMetallicEta.z;
 
-    d._data = StandardBSDFData::make( bsdfDataDiffuse, bsdfDataSpecular, bsdfDataRoughness, bsdfDataMetallic, bsdfDataEta, bsdfDataTransmission, bsdfDataDiffuseTransmission, bsdfDataSpecularTransmission );
+    d._data = StandardBSDFData::make( bsdfDataDiffuse, bsdfDataSpecular, bsdfDataRoughness, bsdfDataMetallic, bsdfDataEta, bsdfDataTransmission, bsdfDataDiffuseTransmission, bsdfDataSpecularTransmission,
+        0, 0, lpfloat3(1,1,1), 0.6 );
 
 	return d;
 }

@@ -24,6 +24,12 @@ struct MaterialProperties
     lpfloat opacity;
     //lpfloat occlusion;
     lpfloat roughness;
+    lpfloat baseWeight;
+    lpfloat specularWeight;
+    lpfloat anisotropy;
+    lpfloat fuzzWeight;
+    lpfloat3 fuzzColor;
+    lpfloat fuzzRoughness;
     lpfloat3 baseColor; // native in metal-rough, derived in spec-gloss
     lpfloat metalness; // native in metal-rough, derived in spec-gloss
 #if !defined(RTXPT_MATERIAL_HAS_TRANSMISSION) || RTXPT_MATERIAL_HAS_TRANSMISSION
@@ -45,6 +51,12 @@ struct MaterialProperties
         result.opacity = 1;
         //result.occlusion = 1;
         result.roughness = 0;
+        result.baseWeight = 1;
+        result.specularWeight = 1;
+        result.anisotropy = 0;
+        result.fuzzWeight = 0;
+        result.fuzzColor = 1;
+        result.fuzzRoughness = 0.6;
         result.baseColor = 0;
         result.metalness = 0;
 #if !defined(RTXPT_MATERIAL_HAS_TRANSMISSION) || RTXPT_MATERIAL_HAS_TRANSMISSION

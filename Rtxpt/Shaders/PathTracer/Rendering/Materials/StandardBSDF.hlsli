@@ -109,7 +109,7 @@ struct StandardBSDF // : IBSDF
         lpfloat3 specularTransmissionAlbedo = dataSpecularTransmission * dataTransmission;
 
         // Note - not clamping estimate here - it can be zero; clamp it at use location
-        outDiffEstimate = diffuseReflectionAlbedo+diffuseTransmissionAlbedo; // note, also adding base path throughput to modulation here!
+        outDiffEstimate = diffuseReflectionAlbedo+diffuseTransmissionAlbedo + data.FuzzColor() * data.FuzzWeight(); // note, also adding base path throughput to modulation here!
         const float NdotV = saturate(dot(normal, viewVector));
         const float ggxAlpha = roughness * roughness;
         float3 specularReflectance = approxSpecularIntegralGGX(specularReflectionAlbedo, ggxAlpha, NdotV); // note, also adding base path throughput to modulation here!
@@ -141,7 +141,7 @@ struct StandardBSDF // : IBSDF
         lpfloat dataSpecularTransmission = data.SpecularTransmission();
         lpfloat3 dataTransmission = data.Transmission();
         lpfloat3 dataSpecular = data.Specular();
-        p.diffuseReflectionAlbedo = (1.f - dataDiffuseTransmission) * (1.f - dataSpecularTransmission) * data.Diffuse();
+        p.diffuseReflectionAlbedo = (1.f - dataDiffuseTransmission) * (1.f - dataSpecularTransmission) * data.Diffuse() + data.FuzzColor() * data.FuzzWeight();
         p.diffuseTransmissionAlbedo = dataDiffuseTransmission * dataTransmission * (1.f - dataSpecularTransmission); // used to have  "* (1.f - dataSpecularTransmission)" too
         p.specularReflectionAlbedo = (1.f - dataSpecularTransmission) * dataSpecular;
         p.specularTransmissionAlbedo = dataSpecularTransmission * dataTransmission;

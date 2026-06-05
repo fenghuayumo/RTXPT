@@ -315,11 +315,17 @@ MaterialProperties EvaluateSceneMaterialRTXPT(float3 normal, float4 tangent, PTM
     result.geometryNormal   = normalize(normal);
     result.shadingNormal    = result.geometryNormal;
     result.flags = material.Flags;
+    result.baseWeight = lpfloat(saturate(material.BaseWeight));
+    result.specularWeight = lpfloat(max(material.SpecularWeight, 0.0));
+    result.anisotropy = lpfloat(clamp(material.Anisotropy, -1.0, 1.0));
+    result.fuzzWeight = lpfloat(saturate(material.FuzzWeight));
+    result.fuzzColor = lpfloat3(saturate(material.FuzzColor));
+    result.fuzzRoughness = lpfloat(saturate(material.FuzzRoughness));
     
     if ((material.Flags & PTMaterialFlags_UseSpecularGlossModel) != 0)
     {
-        float3 diffuseColor = material.BaseOrDiffuseColor.rgb * textures.baseOrDiffuse.rgb;
-        float3 specularColor = material.SpecularColor.rgb * textures.metalRoughOrSpecular.rgb;
+        float3 diffuseColor = material.BaseOrDiffuseColor.rgb * textures.baseOrDiffuse.rgb * result.baseWeight;
+        float3 specularColor = material.SpecularColor.rgb * textures.metalRoughOrSpecular.rgb * result.specularWeight;
         result.roughness = lpfloat(1.0 - textures.metalRoughOrSpecular.a * (1.0 - material.Roughness));
 
 #if ENABLE_METAL_ROUGH_RECONSTRUCTION
@@ -344,8 +350,11 @@ MaterialProperties EvaluateSceneMaterialRTXPT(float3 normal, float4 tangent, PTM
 
         // Compute the BRDF inputs for the metal-rough model
         // https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#metal-brdf-and-dielectric-brdf
-        result.diffuseAlbedo = result.baseColor * (1.0 - result.metalness); // Don't compensate for specular energy here. Energy compensation is built into Frostbite's diffuse, so this would be double dipping.
-        result.specularF0 = lpfloat3( lerp(c_DielectricSpecular, result.baseColor.rgb, result.metalness) );
+        float3 specularTint = (material.Flags & PTMaterialFlags_UseOpenPBRMaterialModel) != 0 ? material.SpecularColor.rgb : float3(1, 1, 1);
+        float f = (material.IoR - 1.f) / (material.IoR + 1.f);
+        float dielectricF0 = f * f;
+        result.diffuseAlbedo = result.baseColor * result.baseWeight * (1.0 - result.metalness); // Don't compensate for specular energy here. Energy compensation is built into Frostbite's diffuse, so this would be double dipping.
+        result.specularF0 = lpfloat3( lerp(dielectricF0 * result.specularWeight * specularTint, result.baseColor.rgb, result.metalness) );
     }
 
 #if 0    
@@ -358,7 +367,7 @@ MaterialProperties EvaluateSceneMaterialRTXPT(float3 normal, float4 tangent, PTM
 #endif
 
     result.opacity = lpfloat( material.Opacity );
-    if ((material.Flags & MaterialFlags_UseBaseOrDiffuseTexture) != 0)
+    if ((material.Flags & PTMaterialFlags_UseBaseOrDiffuseTexture) != 0)
         result.opacity *= lpfloat( textures.baseOrDiffuse.a );
     result.opacity = saturate(result.opacity);
 
@@ -785,14 +794,9 @@ static PathTracer::SurfaceData Bridge::loadSurface( const uint instanceIndex, co
 #error we rely on Donut to do the conversion! for more info on how to do it manually search for MATERIAL_SYSTEM_HAS_SPEC_GLOSS_MATERIALS 
 #endif
 
-    // Calculate the specular reflectance for dielectrics from the IoR, as in the Disney BSDF [Burley 2015].
-    // UE4 uses 0.08 multiplied by a default specular value of 0.5, hence F0=0.04 as default. The default IoR=1.5 gives the same result.
-    float f = (matIoR - 1.f) / (matIoR + 1.f);
-    float F0 = f * f;
-
     // G - Roughness; B - Metallic
-    bsdfDataDiffuse = lerp(baseColor, lpfloat3(0,0,0), donutMaterial.metalness);
-    bsdfDataSpecular = lerp(lpfloat3(F0,F0,F0), baseColor, donutMaterial.metalness);
+    bsdfDataDiffuse = donutMaterial.diffuseAlbedo;
+    bsdfDataSpecular = donutMaterial.specularF0;
     bsdfDataRoughness = donutMaterial.roughness;
     bsdfDataMetallic = donutMaterial.metalness;
 
@@ -842,7 +846,8 @@ static PathTracer::SurfaceData Bridge::loadSurface( const uint instanceIndex, co
 #endif
 
     StandardBSDF bsdf = StandardBSDF::make(
-        StandardBSDFData::make( bsdfDataDiffuse, bsdfDataSpecular, bsdfDataRoughness, bsdfDataMetallic, bsdfDataEta, bsdfDataTransmission, bsdfDataDiffuseTransmission, bsdfDataSpecularTransmission ) );
+        StandardBSDFData::make( bsdfDataDiffuse, bsdfDataSpecular, bsdfDataRoughness, bsdfDataMetallic, bsdfDataEta, bsdfDataTransmission, bsdfDataDiffuseTransmission, bsdfDataSpecularTransmission,
+            donutMaterial.anisotropy, donutMaterial.fuzzWeight, donutMaterial.fuzzColor, donutMaterial.fuzzRoughness ) );
 
     // if you think tangent space is broken, test with this (won't make it correctly oriented)
     //ConstructONB( ptShadingData.N, ptShadingData.T, ptShadingData.B );

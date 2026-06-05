@@ -798,31 +798,56 @@ Editable properties automatically mark GPU data dirty:
 | `base_color` | `(r, g, b)` |
 | `specular_color` | `(r, g, b)` |
 | `emissive_color` | `(r, g, b)` |
+| `emission_color` | `(r, g, b)` |
 | `emissive_intensity` | `float` |
+| `emission_luminance` | `float` |
 | `metalness` | `float` |
+| `base_metalness` | `float` |
 | `roughness` | `float` |
+| `specular_roughness` | `float` |
+| `material_model` | `str` |
+| `base_weight` | `float` |
+| `specular_weight` | `float` |
+| `anisotropy` | `float` |
+| `specular_roughness_anisotropy` | `float` |
+| `fuzz_weight` | `float` |
+| `fuzz_color` | `(r, g, b)` |
+| `fuzz_roughness` | `float` |
 | `opacity` | `float` |
+| `geometry_opacity` | `float` |
 | `transmission_factor` | `float` |
+| `transmission_weight` | `float` |
 | `diffuse_transmission_factor` | `float` |
+| `transmission_diffuse_weight` | `float` |
 | `normal_texture_scale` | `float` |
+| `geometry_normal_scale` | `float` |
 | `ior` | `float` |
+| `specular_ior` | `float` |
 | `alpha_cutoff` | `float` |
+| `geometry_alpha_cutoff` | `float` |
 | `volume_attenuation_distance` | `float` |
 | `volume_attenuation_color` | `(r, g, b)` |
 | `nested_priority` | `int` |
 | `use_specular_gloss` | `bool` |
 | `enable_alpha_testing` | `bool` |
+| `geometry_enable_alpha_test` | `bool` |
 | `enable_transmission` | `bool` |
 | `thin_surface` | `bool` |
+| `geometry_thin_walled` | `bool` |
 | `exclude_from_nee` | `bool` |
 | `enable_as_analytic_light_proxy` | `bool` |
 | `skip_render` | `bool` |
 | `metalness_in_red_channel` | `bool` |
 | `enable_base_texture` | `bool` |
+| `enable_base_color_texture` | `bool` |
 | `enable_orm_texture` | `bool` |
+| `enable_base_metalness_specular_roughness_texture` | `bool` |
 | `enable_normal_texture` | `bool` |
+| `enable_geometry_normal_texture` | `bool` |
 | `enable_emissive_texture` | `bool` |
+| `enable_emission_color_texture` | `bool` |
 | `enable_transmission_texture` | `bool` |
+| `enable_transmission_weight_texture` | `bool` |
 
 #### Texture Paths (read-only)
 
@@ -854,6 +879,8 @@ Editable properties automatically mark GPU data dirty:
 - In reference/accumulation mode, call `Sample.reset_accumulation()` or set `settings.reset_accumulation = True` after visible edits, otherwise previous samples remain blended with the old material.
 - Color values are linear RGB. The Python setter does not clamp inputs, so keep factors in the physically meaningful range unless deliberately testing extremes.
 - If a texture slot is enabled, scalar/color parameters multiply the texture sample. In metal-rough mode, effective base color is `base_color * base_texture.rgb`, roughness is `roughness * ORM.g`, and metalness is `metalness * ORM.b` unless `metalness_in_red_channel=True`.
+- Set `material_model = "OpenPBR"` to use OpenPBR-lite naming. Python exposes the same OpenPBR-lite aliases as the material UI, including `base_metalness`, `specular_roughness`, `specular_roughness_anisotropy`, `specular_ior`, `transmission_weight`, `transmission_diffuse_weight`, `geometry_opacity`, `geometry_thin_walled`, `emission_color`, `emission_luminance`, and `fuzz_*`. Legacy aliases such as `metalness`, `roughness`, `opacity`, and `transmission_factor` remain valid.
+- Setting `transmission_weight` or `transmission_diffuse_weight` from Python automatically updates `enable_transmission` from the two OpenPBR transmission weights.
 - `opacity` is multiplied by the base texture alpha when `enable_base_texture=True`.
 - Use `set_base_texture`, `set_orm_texture`, `set_normal_texture`, `set_emissive_texture`, or `set_transmission_texture` to replace an imported texture at runtime. Relative paths are resolved the same way as material JSON paths: runtime `Assets/` first, then the current scene directory. For `.png` inputs, an existing sibling `.dds` is preferred, matching material JSON loading.
 - Pure parameter edits such as color, roughness, metalness, opacity, texture toggles, emissive intensity, normal scale, and IOR are next-frame updates. Bigger classification edits such as `use_specular_gloss`, `enable_alpha_testing`, `alpha_cutoff`, `enable_transmission`, `exclude_from_nee`, or `skip_render` can change shader hit groups, alpha handling, lighting participation, or acceleration-structure metadata; after those edits, request a shader/acceleration refresh.

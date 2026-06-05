@@ -40,6 +40,8 @@
 #include <array>
 #include <cstring>
 #include <unordered_set>
+#include <algorithm>
+#include <cctype>
 
 namespace nb = nanobind;
 using namespace donut::engine;
@@ -90,6 +92,46 @@ namespace
 
     nb::tuple Float3ToTuple(const float3& v) { return nb::make_tuple(v.x, v.y, v.z); }
     nb::tuple Double3ToTuple(const double3& v) { return nb::make_tuple(v.x, v.y, v.z); }
+
+    std::string LowerCopy(std::string value)
+    {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+            return char(std::tolower(ch));
+        });
+        return value;
+    }
+
+    bool IsOpenPBRMaterialModelName(const std::string& materialModel)
+    {
+        std::string normalized = LowerCopy(materialModel);
+        return normalized == "openpbr" || normalized == "openpbr-lite" || normalized == "openpbr_lite";
+    }
+
+    void SetMaterialModelFromPython(PTMaterial& self, const std::string& value)
+    {
+        self.MaterialModel = value;
+        if (IsOpenPBRMaterialModelName(value))
+        {
+            self.UseSpecularGlossModel = false;
+            if (self.SpecularColor.x == 0.f && self.SpecularColor.y == 0.f && self.SpecularColor.z == 0.f)
+                self.SpecularColor = float3(1.f);
+        }
+        self.GPUDataDirty = true;
+    }
+
+    void SetOpenPBRTransmissionWeightFromPython(PTMaterial& self, float value)
+    {
+        self.TransmissionFactor = value;
+        self.EnableTransmission = self.TransmissionFactor > 0.f || self.DiffuseTransmissionFactor > 0.f;
+        self.GPUDataDirty = true;
+    }
+
+    void SetOpenPBRDiffuseTransmissionWeightFromPython(PTMaterial& self, float value)
+    {
+        self.DiffuseTransmissionFactor = value;
+        self.EnableTransmission = self.TransmissionFactor > 0.f || self.DiffuseTransmissionFactor > 0.f;
+        self.GPUDataDirty = true;
+    }
 
     double3 ToDouble3(const nb::object& src)
     {
@@ -593,34 +635,99 @@ void RegisterCoreBindings(nb::module_& m)
         .def_prop_rw("emissive_color",
             [](PTMaterial& self) { return Float3ToTuple(self.EmissiveColor); },
             [](PTMaterial& self, nb::object v) { self.EmissiveColor = ToFloat3(v); self.GPUDataDirty = true; })
+        .def_prop_rw("emission_color",
+            [](PTMaterial& self) { return Float3ToTuple(self.EmissiveColor); },
+            [](PTMaterial& self, nb::object v) { self.EmissiveColor = ToFloat3(v); self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for emissive_color.")
 
         .def_prop_rw("emissive_intensity",
             [](PTMaterial& self) { return self.EmissiveIntensity; },
             [](PTMaterial& self, float v) { self.EmissiveIntensity = v; self.GPUDataDirty = true; })
+        .def_prop_rw("emission_luminance",
+            [](PTMaterial& self) { return self.EmissiveIntensity; },
+            [](PTMaterial& self, float v) { self.EmissiveIntensity = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for emissive_intensity.")
         .def_prop_rw("metalness",
             [](PTMaterial& self) { return self.Metalness; },
             [](PTMaterial& self, float v) { self.Metalness = v; self.GPUDataDirty = true; })
+        .def_prop_rw("base_metalness",
+            [](PTMaterial& self) { return self.Metalness; },
+            [](PTMaterial& self, float v) { self.Metalness = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for metalness.")
         .def_prop_rw("roughness",
             [](PTMaterial& self) { return self.Roughness; },
             [](PTMaterial& self, float v) { self.Roughness = v; self.GPUDataDirty = true; })
+        .def_prop_rw("specular_roughness",
+            [](PTMaterial& self) { return self.Roughness; },
+            [](PTMaterial& self, float v) { self.Roughness = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for roughness.")
+        .def_prop_rw("material_model",
+            [](PTMaterial& self) { return self.MaterialModel; },
+            [](PTMaterial& self, const std::string& v) { SetMaterialModelFromPython(self, v); })
+        .def_prop_rw("base_weight",
+            [](PTMaterial& self) { return self.BaseWeight; },
+            [](PTMaterial& self, float v) { self.BaseWeight = v; self.GPUDataDirty = true; })
+        .def_prop_rw("specular_weight",
+            [](PTMaterial& self) { return self.SpecularWeight; },
+            [](PTMaterial& self, float v) { self.SpecularWeight = v; self.GPUDataDirty = true; })
+        .def_prop_rw("anisotropy",
+            [](PTMaterial& self) { return self.Anisotropy; },
+            [](PTMaterial& self, float v) { self.Anisotropy = v; self.GPUDataDirty = true; })
+        .def_prop_rw("specular_roughness_anisotropy",
+            [](PTMaterial& self) { return self.Anisotropy; },
+            [](PTMaterial& self, float v) { self.Anisotropy = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for anisotropy.")
+        .def_prop_rw("fuzz_weight",
+            [](PTMaterial& self) { return self.FuzzWeight; },
+            [](PTMaterial& self, float v) { self.FuzzWeight = v; self.GPUDataDirty = true; })
+        .def_prop_rw("fuzz_color",
+            [](PTMaterial& self) { return Float3ToTuple(self.FuzzColor); },
+            [](PTMaterial& self, nb::object v) { self.FuzzColor = ToFloat3(v); self.GPUDataDirty = true; })
+        .def_prop_rw("fuzz_roughness",
+            [](PTMaterial& self) { return self.FuzzRoughness; },
+            [](PTMaterial& self, float v) { self.FuzzRoughness = v; self.GPUDataDirty = true; })
         .def_prop_rw("opacity",
             [](PTMaterial& self) { return self.Opacity; },
             [](PTMaterial& self, float v) { self.Opacity = v; self.GPUDataDirty = true; })
+        .def_prop_rw("geometry_opacity",
+            [](PTMaterial& self) { return self.Opacity; },
+            [](PTMaterial& self, float v) { self.Opacity = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for opacity.")
         .def_prop_rw("transmission_factor",
             [](PTMaterial& self) { return self.TransmissionFactor; },
             [](PTMaterial& self, float v) { self.TransmissionFactor = v; self.GPUDataDirty = true; })
+        .def_prop_rw("transmission_weight",
+            [](PTMaterial& self) { return self.TransmissionFactor; },
+            [](PTMaterial& self, float v) { SetOpenPBRTransmissionWeightFromPython(self, v); },
+            "OpenPBR-lite alias for transmission_factor; toggles enable_transmission from the weight.")
         .def_prop_rw("diffuse_transmission_factor",
             [](PTMaterial& self) { return self.DiffuseTransmissionFactor; },
             [](PTMaterial& self, float v) { self.DiffuseTransmissionFactor = v; self.GPUDataDirty = true; })
+        .def_prop_rw("transmission_diffuse_weight",
+            [](PTMaterial& self) { return self.DiffuseTransmissionFactor; },
+            [](PTMaterial& self, float v) { SetOpenPBRDiffuseTransmissionWeightFromPython(self, v); },
+            "OpenPBR-lite alias for diffuse_transmission_factor; toggles enable_transmission from the weight.")
         .def_prop_rw("normal_texture_scale",
             [](PTMaterial& self) { return self.NormalTextureScale; },
             [](PTMaterial& self, float v) { self.NormalTextureScale = v; self.GPUDataDirty = true; })
+        .def_prop_rw("geometry_normal_scale",
+            [](PTMaterial& self) { return self.NormalTextureScale; },
+            [](PTMaterial& self, float v) { self.NormalTextureScale = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for normal_texture_scale.")
         .def_prop_rw("ior",
             [](PTMaterial& self) { return self.IoR; },
             [](PTMaterial& self, float v) { self.IoR = v; self.GPUDataDirty = true; })
+        .def_prop_rw("specular_ior",
+            [](PTMaterial& self) { return self.IoR; },
+            [](PTMaterial& self, float v) { self.IoR = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for ior.")
         .def_prop_rw("alpha_cutoff",
             [](PTMaterial& self) { return self.AlphaCutoff; },
             [](PTMaterial& self, float v) { self.AlphaCutoff = v; self.GPUDataDirty = true; })
+        .def_prop_rw("geometry_alpha_cutoff",
+            [](PTMaterial& self) { return self.AlphaCutoff; },
+            [](PTMaterial& self, float v) { self.AlphaCutoff = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for alpha_cutoff.")
 
         .def_prop_rw("volume_attenuation_distance",
             [](PTMaterial& self) { return self.VolumeAttenuationDistance; },
@@ -638,12 +745,20 @@ void RegisterCoreBindings(nb::module_& m)
         .def_prop_rw("enable_alpha_testing",
             [](PTMaterial& self) { return self.EnableAlphaTesting; },
             [](PTMaterial& self, bool v) { self.EnableAlphaTesting = v; self.GPUDataDirty = true; })
+        .def_prop_rw("geometry_enable_alpha_test",
+            [](PTMaterial& self) { return self.EnableAlphaTesting; },
+            [](PTMaterial& self, bool v) { self.EnableAlphaTesting = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite UI alias for enable_alpha_testing.")
         .def_prop_rw("enable_transmission",
             [](PTMaterial& self) { return self.EnableTransmission; },
             [](PTMaterial& self, bool v) { self.EnableTransmission = v; self.GPUDataDirty = true; })
         .def_prop_rw("thin_surface",
             [](PTMaterial& self) { return self.ThinSurface; },
             [](PTMaterial& self, bool v) { self.ThinSurface = v; self.GPUDataDirty = true; })
+        .def_prop_rw("geometry_thin_walled",
+            [](PTMaterial& self) { return self.ThinSurface; },
+            [](PTMaterial& self, bool v) { self.ThinSurface = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for thin_surface.")
         .def_prop_rw("exclude_from_nee",
             [](PTMaterial& self) { return self.ExcludeFromNEE; },
             [](PTMaterial& self, bool v) { self.ExcludeFromNEE = v; self.GPUDataDirty = true; })
@@ -660,18 +775,38 @@ void RegisterCoreBindings(nb::module_& m)
         .def_prop_rw("enable_base_texture",
             [](PTMaterial& self) { return self.EnableBaseTexture; },
             [](PTMaterial& self, bool v) { self.EnableBaseTexture = v; self.GPUDataDirty = true; })
+        .def_prop_rw("enable_base_color_texture",
+            [](PTMaterial& self) { return self.EnableBaseTexture; },
+            [](PTMaterial& self, bool v) { self.EnableBaseTexture = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for enable_base_texture.")
         .def_prop_rw("enable_orm_texture",
             [](PTMaterial& self) { return self.EnableOcclusionRoughnessMetallicTexture; },
             [](PTMaterial& self, bool v) { self.EnableOcclusionRoughnessMetallicTexture = v; self.GPUDataDirty = true; })
+        .def_prop_rw("enable_base_metalness_specular_roughness_texture",
+            [](PTMaterial& self) { return self.EnableOcclusionRoughnessMetallicTexture; },
+            [](PTMaterial& self, bool v) { self.EnableOcclusionRoughnessMetallicTexture = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for enable_orm_texture.")
         .def_prop_rw("enable_normal_texture",
             [](PTMaterial& self) { return self.EnableNormalTexture; },
             [](PTMaterial& self, bool v) { self.EnableNormalTexture = v; self.GPUDataDirty = true; })
+        .def_prop_rw("enable_geometry_normal_texture",
+            [](PTMaterial& self) { return self.EnableNormalTexture; },
+            [](PTMaterial& self, bool v) { self.EnableNormalTexture = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for enable_normal_texture.")
         .def_prop_rw("enable_emissive_texture",
             [](PTMaterial& self) { return self.EnableEmissiveTexture; },
             [](PTMaterial& self, bool v) { self.EnableEmissiveTexture = v; self.GPUDataDirty = true; })
+        .def_prop_rw("enable_emission_color_texture",
+            [](PTMaterial& self) { return self.EnableEmissiveTexture; },
+            [](PTMaterial& self, bool v) { self.EnableEmissiveTexture = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for enable_emissive_texture.")
         .def_prop_rw("enable_transmission_texture",
             [](PTMaterial& self) { return self.EnableTransmissionTexture; },
             [](PTMaterial& self, bool v) { self.EnableTransmissionTexture = v; self.GPUDataDirty = true; })
+        .def_prop_rw("enable_transmission_weight_texture",
+            [](PTMaterial& self) { return self.EnableTransmissionTexture; },
+            [](PTMaterial& self, bool v) { self.EnableTransmissionTexture = v; self.GPUDataDirty = true; },
+            "OpenPBR-lite alias for enable_transmission_texture.")
 
         .def_prop_ro("base_texture_path",
             [](PTMaterial& self) { return MaterialTexturePath(self, PTMaterialTextureSlot::Base); })

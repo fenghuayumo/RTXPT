@@ -81,9 +81,7 @@ PBRSurface EvalMaterialSurface(uint materialIndex, float2 uv, float3 wsNormal)
     }
 
     float opacity = material.Opacity;
-    if ((material.Flags & MaterialFlags_UseOpacityTexture) != 0)
-        opacity *= textures.opacity;
-    else if ((material.Flags & MaterialFlags_UseBaseOrDiffuseTexture) != 0)
+    if ((material.Flags & PTMaterialFlags_UseBaseOrDiffuseTexture) != 0)
         opacity *= textures.baseOrDiffuse.a;
     
     opacity = saturate(opacity);
