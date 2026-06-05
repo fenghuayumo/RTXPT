@@ -960,6 +960,7 @@ void RegisterCoreBindings(nb::module_& m)
         .def_rw("realtime_samples_per_pixel",    &SampleUIData::RealtimeSamplesPerPixel)
         .def_rw("accumulation_target",           &SampleUIData::AccumulationTarget)
         .def_rw("reset_accumulation",            &SampleUIData::ResetAccumulation)
+        .def_rw("reset_realtime_caches",         &SampleUIData::ResetRealtimeCaches)
         .def_rw("accumulation_aa",               &SampleUIData::AccumulationAA)
         .def_rw("accumulation_prewarm_realtime_caches", &SampleUIData::AccumulationPreWarmRealtimeCaches)
 
@@ -1347,7 +1348,25 @@ void RegisterCoreBindings(nb::module_& m)
 
         .def("request_shader_reload",  [](Sample& self) { g_sampleUIData.ShaderReloadRequested = true; })
         .def("request_accel_rebuild",  [](Sample& self) { g_sampleUIData.AccelerationStructRebuildRequested = true; })
+        .def("request_mesh_accel_rebuild",
+            [](Sample& self, const std::shared_ptr<MeshInfo>& mesh) {
+                self.RequestMeshAccelRebuild(mesh);
+            },
+            nb::arg("mesh"),
+            "Request a BLAS rebuild for one dirty mesh without forcing a full scene AS rebuild.")
+        .def("request_mesh_accel_rebuild",
+            [](Sample& self, const std::shared_ptr<SceneGraphNode>& node) {
+                if (!node)
+                    throw std::runtime_error("request_mesh_accel_rebuild: node is null");
+                std::shared_ptr<MeshInfo> mesh = MeshFromNode(*node);
+                if (!mesh)
+                    throw std::runtime_error("request_mesh_accel_rebuild: node has no mesh");
+                self.RequestMeshAccelRebuild(mesh);
+            },
+            nb::arg("node"),
+            "Request a BLAS rebuild for the mesh attached to one scene node.")
         .def("reset_accumulation",     [](Sample& self) { g_sampleUIData.ResetAccumulation = true; })
+        .def("reset_realtime_caches",  [](Sample& self) { g_sampleUIData.ResetRealtimeCaches = true; })
 
         .def("set_realtime_mode", [](Sample&, bool standaloneDenoiser, int realtimeAA)
             {

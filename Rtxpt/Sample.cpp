@@ -5224,6 +5224,7 @@ static bool UploadMeshDeformationToGpu(
     nvrhi::IDevice* device,
     const std::shared_ptr<MeshInfo>& mesh,
     size_t renderVertexCount,
+    const std::vector<float3>* previousRenderVertices,
     bool uploadNormals)
 {
     if (!device || !mesh || !mesh->buffers)
@@ -5251,6 +5252,19 @@ static bool UploadMeshDeformationToGpu(
         buffers.positionData.data() + begin,
         positionBytes,
         positionRange.byteOffset + positionOffset);
+
+    if (previousRenderVertices && previousRenderVertices->size() == renderVertexCount)
+    {
+        const nvrhi::BufferRange& prevPositionRange = buffers.getVertexBufferRange(VertexAttribute::PrevPosition);
+        if (BufferRangeContainsBytes(prevPositionRange, positionOffset, positionBytes))
+        {
+            commandList->writeBuffer(
+                buffers.vertexBuffer,
+                previousRenderVertices->data(),
+                positionBytes,
+                prevPositionRange.byteOffset + positionOffset);
+        }
+    }
 
     if (uploadNormals && buffers.normalData.size() >= end)
     {
@@ -5302,6 +5316,7 @@ void Sample::SetMeshVertices(const std::shared_ptr<MeshInfo>& mesh,
     if (buffers.positionData.size() < end)
         throw std::runtime_error("SetMeshVertices: CPU vertex cache is unavailable; reload the scene with the Python deformation build");
 
+    const std::vector<float3> previousRenderVertices(buffers.positionData.begin() + begin, buffers.positionData.begin() + end);
     std::copy(renderVertices.begin(), renderVertices.end(), buffers.positionData.begin() + begin);
     UpdateMeshBoundsFromPositions(mesh);
 
@@ -5312,6 +5327,7 @@ void Sample::SetMeshVertices(const std::shared_ptr<MeshInfo>& mesh,
         GetDevice(),
         mesh,
         renderVertices.size(),
+        &previousRenderVertices,
         recomputeNormals);
 
     if (!uploadedToExistingGpuBuffer)
