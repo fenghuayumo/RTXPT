@@ -186,13 +186,14 @@ namespace PathTracer
                                 const ShadingData shadingData, const ActiveBSDF bsdf, const PathState preScatterPath, LightSampler lightSampler,
                                 inout UniformSampleSequenceGenerator sampleGenerator, const WorkingContext workingContext)
     {
-        bool visible = false;
+        float3 visibility = float3(0, 0, 0);
 
         /*[branch]*/ if (lightSample.Valid())   // if sample's bad, skip; we tried casting the ray anyway but ignoring the results - didn't yield better perf
         {
             RayDesc ray = ComputeVisibilityRay(lightSample, shadingData);
-            visible = Bridge::traceVisibilityRay(ray, preScatterPath.rayCone, preScatterPath.getVertexIndex(), workingContext.Debug);
+            visibility = Bridge::traceVisibilityRay(ray, preScatterPath.rayCone, preScatterPath.getVertexIndex(), workingContext.Debug);
         }
+        bool visible = any(visibility > 0.0);
 
         // if( workingContext.Debug.IsDebugPixel() )
         //     DebugLine( shadingData.posW, shadingData.posW+lightSample.Direction*lightSample.Distance, float4(!visible,visible,0,1.0) );
@@ -232,7 +233,7 @@ namespace PathTracer
 #endif
 
             // apply MIS and other multipliers to light here - reduces register pressure and computation later
-            lightSample.Li *= fadeOut * wrsMIS * pathMIS / (float)fullSamples;
+            lightSample.Li *= visibility * fadeOut * wrsMIS * pathMIS / (float)fullSamples;
 
             // compute BSDF throughput!
             float4 bsdfThp = bsdf.eval(shadingData, lightSample.Direction);

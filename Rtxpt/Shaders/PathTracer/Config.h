@@ -94,6 +94,10 @@
 
 #define  RTXPT_STOCHASTIC_TEXTURE_FILTERING_ENABLE 0        // 0 - disable STF; 1 - enable STF
 
+// Artistic/diagnostic boost for approximate transparent shadows. Real clear glass only loses a
+// small amount of direct light at each interface, so keep this at 0 for a more physical filter.
+#define  RTXPT_TRANSPARENT_SHADOW_INTERFACE_OPACITY 0.15f
+
 #if NON_PATH_TRACING_PASS || defined(__cplusplus) || (__SHADER_TARGET_MAJOR < 6 || __SHADER_TARGET_MINOR < 6)
     #define PAYLOAD_QUALIFIER
     #define PAYLOAD_FIELD_RW_ALL

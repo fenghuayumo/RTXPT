@@ -100,7 +100,7 @@ namespace Bridge
 
     // There's a relatively high cost to this when used in large shaders just due to register allocation required for alphaTest, even if all geometries are opaque.
     // Consider simplifying alpha testing - perhaps splitting it up from the main geometry path, load it with fewer indirections or something like that.
-    static bool traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pathVertexIndex, DebugContext debug);
+    static float3 traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pathVertexIndex, DebugContext debug);
 
     static void traceScatterRay(const PathState path, inout RTXPT_RayQuery(RAY_FLAG_NONE, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS) rayQuery, const float2 tMinMax, DebugContext debug);
 

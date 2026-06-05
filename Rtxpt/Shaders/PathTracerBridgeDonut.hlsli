@@ -941,48 +941,109 @@ float3 Bridge::computeSkyMotionVector( const uint2 pixelPos )
     return motion;
 }
 
+float2 GetSubInstanceTexcoord(SubInstanceData subInstanceData, uint triangleIndex, float2 rayBarycentrics)
+{
+#if !SUBINSTANCEDATA_EXTENDED
+    GeometryData geometry = t_GeometryData[subInstanceData.GlobalGeometryIndex_PTMaterialDataIndex>>16];
+    if (geometry.texCoord1Offset == 0xFFFFFFFF)
+        return float2(0, 0);
+
+    ByteAddressBuffer indexBuffer = t_BindlessBuffers[NonUniformResourceIndex(geometry.indexBufferIndex)];
+    ByteAddressBuffer vertexBuffer = t_BindlessBuffers[NonUniformResourceIndex(geometry.vertexBufferIndex)];
+
+    uint3 indices = indexBuffer.Load3(geometry.indexOffset + triangleIndex * c_SizeOfTriangleIndices);
+
+    float2 vertexTexcoords[3];
+    vertexTexcoords[0] = asfloat(vertexBuffer.Load2(geometry.texCoord1Offset + indices[0] * c_SizeOfTexcoord));
+    vertexTexcoords[1] = asfloat(vertexBuffer.Load2(geometry.texCoord1Offset + indices[1] * c_SizeOfTexcoord));
+    vertexTexcoords[2] = asfloat(vertexBuffer.Load2(geometry.texCoord1Offset + indices[2] * c_SizeOfTexcoord));
+#else
+    if (subInstanceData.TexCoord1Offset == 0xFFFFFFFF)
+        return float2(0, 0);
+
+    ByteAddressBuffer indexBuffer = t_BindlessBuffers[NonUniformResourceIndex( subInstanceData.IndexBufferIndex_VertexBufferIndex >> 16 /*geometry.indexBufferIndex*/ )];
+    ByteAddressBuffer vertexBuffer = t_BindlessBuffers[NonUniformResourceIndex(subInstanceData.IndexBufferIndex_VertexBufferIndex & 0xFFFF /*geometry.vertexBufferIndex*/ )];
+
+    uint3 indices = indexBuffer.Load3(subInstanceData.IndexOffset + triangleIndex * c_SizeOfTriangleIndices);
+
+    float2 vertexTexcoords[3];
+    vertexTexcoords[0] = asfloat(vertexBuffer.Load2(subInstanceData.TexCoord1Offset + indices[0] * c_SizeOfTexcoord));
+    vertexTexcoords[1] = asfloat(vertexBuffer.Load2(subInstanceData.TexCoord1Offset + indices[1] * c_SizeOfTexcoord));
+    vertexTexcoords[2] = asfloat(vertexBuffer.Load2(subInstanceData.TexCoord1Offset + indices[2] * c_SizeOfTexcoord));
+#endif
+
+    float3 barycentrics;
+    barycentrics.yz = rayBarycentrics;
+    barycentrics.x = 1.0 - (barycentrics.y + barycentrics.z);
+    return interpolate(vertexTexcoords, barycentrics);
+}
+
+float4 SamplePackedMaterialTexture(uint textureIndexAndInfo, float2 texcoord)
+{
+    uint textureIndex = textureIndexAndInfo & 0xFFFF;
+    uint baseLOD = textureIndexAndInfo >> 24;
+    Texture2D tex2D = t_BindlessTextures[NonUniformResourceIndex(textureIndex)];
+    return tex2D.SampleLevel(s_MaterialSampler, texcoord, baseLOD);
+}
+
 bool AlphaTestImpl(SubInstanceData subInstanceData, uint triangleIndex, float2 rayBarycentrics)
 {
     bool alphaTested = (subInstanceData.FlagsAndAlphaInfo & SubInstanceData::Flags_AlphaTested) != 0;
     if( !alphaTested ) // note: with correct use of D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE this is unnecessary, but there are cases (such as disabling texture but leaving alpha tested state) in which this isn't handled correctly
         return true;
-        
-    // have to do all this to figure out UVs!
-    float2 texcoord;
-    {
-#if !SUBINSTANCEDATA_EXTENDED
-        GeometryData geometry = t_GeometryData[subInstanceData.GlobalGeometryIndex_PTMaterialDataIndex>>16];
 
-        ByteAddressBuffer indexBuffer = t_BindlessBuffers[NonUniformResourceIndex(geometry.indexBufferIndex)];
-        ByteAddressBuffer vertexBuffer = t_BindlessBuffers[NonUniformResourceIndex(geometry.vertexBufferIndex)];
+    float2 texcoord = GetSubInstanceTexcoord(subInstanceData, triangleIndex, rayBarycentrics);
 
-        uint3 indices = indexBuffer.Load3(geometry.indexOffset + triangleIndex * c_SizeOfTriangleIndices);
-
-        float2 vertexTexcoords[3];
-        vertexTexcoords[0] = asfloat(vertexBuffer.Load2(geometry.texCoord1Offset + indices[0] * c_SizeOfTexcoord));
-        vertexTexcoords[1] = asfloat(vertexBuffer.Load2(geometry.texCoord1Offset + indices[1] * c_SizeOfTexcoord));
-        vertexTexcoords[2] = asfloat(vertexBuffer.Load2(geometry.texCoord1Offset + indices[2] * c_SizeOfTexcoord));
-#else
-        ByteAddressBuffer indexBuffer = t_BindlessBuffers[NonUniformResourceIndex( subInstanceData.IndexBufferIndex_VertexBufferIndex >> 16 /*geometry.indexBufferIndex*/ )];
-        ByteAddressBuffer vertexBuffer = t_BindlessBuffers[NonUniformResourceIndex(subInstanceData.IndexBufferIndex_VertexBufferIndex & 0xFFFF /*geometry.vertexBufferIndex*/ )];
-
-        uint3 indices = indexBuffer.Load3(subInstanceData.IndexOffset + triangleIndex * c_SizeOfTriangleIndices);
-
-        float2 vertexTexcoords[3];
-        vertexTexcoords[0] = asfloat(vertexBuffer.Load2(subInstanceData.TexCoord1Offset + indices[0] * c_SizeOfTexcoord));
-        vertexTexcoords[1] = asfloat(vertexBuffer.Load2(subInstanceData.TexCoord1Offset + indices[1] * c_SizeOfTexcoord));
-        vertexTexcoords[2] = asfloat(vertexBuffer.Load2(subInstanceData.TexCoord1Offset + indices[2] * c_SizeOfTexcoord));
-#endif
-
-        float3 barycentrics;
-        barycentrics.yz = rayBarycentrics;
-        barycentrics.x = 1.0 - (barycentrics.y + barycentrics.z);
-        texcoord = interpolate(vertexTexcoords, barycentrics);
-    }
     // sample the alpha (opacity) texture and test vs the threshold
     Texture2D diffuseTexture = t_BindlessTextures[NonUniformResourceIndex(subInstanceData.AlphaTextureIndex())];
     float opacityValue = diffuseTexture.SampleLevel(s_MaterialSampler, texcoord, 0).a; // <- hard coded to .a channel but we might want a separate alpha only texture, maybe in .g of BC1
     return opacityValue >= subInstanceData.AlphaCutoff();
+}
+
+bool IsTransparentShadowMaterial(PTMaterialData material)
+{
+    return max(material.TransmissionFactor, material.DiffuseTransmissionFactor) > 0.0;
+}
+
+float3 ComputeTransparentShadowSurfaceTransmittance(SubInstanceData subInstanceData, PTMaterialData material, uint triangleIndex, float2 rayBarycentrics)
+{
+    float transmission = saturate(max(material.TransmissionFactor, material.DiffuseTransmissionFactor));
+    float3 tint = saturate(material.BaseOrDiffuseColor.rgb);
+
+    const bool needsTexcoord =
+        ((material.Flags & PTMaterialFlags_UseBaseOrDiffuseTexture) != 0) ||
+        ((material.Flags & PTMaterialFlags_UseTransmissionTexture) != 0);
+
+    if (needsTexcoord)
+    {
+        float2 texcoord = GetSubInstanceTexcoord(subInstanceData, triangleIndex, rayBarycentrics);
+
+        if ((material.Flags & PTMaterialFlags_UseBaseOrDiffuseTexture) != 0)
+            tint *= saturate(SamplePackedMaterialTexture(material.BaseOrDiffuseTextureIndex, texcoord).rgb);
+
+        if ((material.Flags & PTMaterialFlags_UseTransmissionTexture) != 0)
+            transmission *= saturate(SamplePackedMaterialTexture(material.TransmissionTextureIndex, texcoord).r);
+    }
+
+    float3 interfaceTransmittance = saturate(tint * transmission.xxx);
+    if ((material.Flags & PTMaterialFlags_ThinSurface) == 0)
+        interfaceTransmittance = sqrt(interfaceTransmittance);
+
+    float fresnelF0 = square((material.IoR - 1.0) / max(material.IoR + 1.0, 1e-4));
+    float interfaceOpacity = saturate(max(fresnelF0, RTXPT_TRANSPARENT_SHADOW_INTERFACE_OPACITY) * transmission);
+    interfaceTransmittance *= (1.0 - interfaceOpacity);
+
+    return interfaceTransmittance;
+}
+
+float3 ComputeTransparentShadowVolumeTransmittance(PTMaterialData material, float distance)
+{
+    const float attenuationDistance = material.Volume.AttenuationDistance;
+    if (distance <= 0.0 || attenuationDistance <= 0.0 || attenuationDistance >= 1.0e20)
+        return float3(1, 1, 1);
+
+    const float3 sigmaA = -log(clamp(material.Volume.AttenuationColor, 1e-7.xxx, 1.0.xxx)) / max(1e-30, attenuationDistance).xxx;
+    return exp(-distance.xxx * sigmaA);
 }
 
 bool Bridge::AlphaTest(uint instanceID, uint instanceIndex, uint geometryIndex, uint triangleIndex, float2 rayBarycentrics)
@@ -1005,48 +1066,94 @@ bool Bridge::AlphaTestVisibilityRay(uint instanceID, uint instanceIndex, uint ge
 
 // There's a relatively high cost to this when used in large shaders just due to register allocation required for alphaTest, even if all geometries are opaque.
 // Consider simplifying alpha testing - perhaps splitting it up from the main geometry path, load it with fewer indirections or something like that.
-bool Bridge::traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pathVertexIndex, DebugContext debug)
+float3 Bridge::traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pathVertexIndex, DebugContext debug)
 {
     RTXPT_RayQuery(RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS) rayQuery;
     rayQuery.TraceRayInline(SceneBVH, RAY_FLAG_NONE, 0xff, ray);
+
+    float3 transmittance = float3(1, 1, 1);
+    uint insideTransparentMaterialID = 0xFFFFFFFFu;
+    float insideTransparentRayT = 0.0;
 
     while (rayQuery.Proceed())
     {
         if (rayQuery.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
         {
-            [branch]if (Bridge::AlphaTestVisibilityRay(
-                rayQuery.CandidateInstanceID(),
-                rayQuery.CandidateInstanceIndex(),
-                rayQuery.CandidateGeometryIndex(),
-                rayQuery.CandidatePrimitiveIndex(),
-                rayQuery.CandidateTriangleBarycentrics()
-                //, debug
-                ) )
+            const uint candidateInstanceID = rayQuery.CandidateInstanceID();
+            const uint candidateGeometryIndex = rayQuery.CandidateGeometryIndex();
+            const uint candidatePrimitiveIndex = rayQuery.CandidatePrimitiveIndex();
+            const float2 candidateBarycentrics = rayQuery.CandidateTriangleBarycentrics();
+
+            SubInstanceData subInstanceData = t_SubInstanceData[candidateInstanceID + candidateGeometryIndex];
+
+            bool excludeFromNEE = (subInstanceData.FlagsAndAlphaInfo & SubInstanceData::Flags_ExcludeFromNEE) != 0;
+            if (excludeFromNEE)
+                continue;
+
+            [branch]if (AlphaTestImpl(subInstanceData, candidatePrimitiveIndex, candidateBarycentrics))
             {
+                const uint materialID = subInstanceData.GlobalGeometryIndex_PTMaterialDataIndex & 0xFFFF;
+                if (materialID < g_Const.MaterialCount)
+                {
+                    PTMaterialData material = t_PTMaterialData[materialID];
+
+                    if (IsTransparentShadowMaterial(material))
+                    {
+                        const float candidateRayT = rayQuery.CandidateTriangleRayT();
+                        transmittance *= ComputeTransparentShadowSurfaceTransmittance(subInstanceData, material, candidatePrimitiveIndex, candidateBarycentrics);
+
+                        if ((material.Flags & PTMaterialFlags_ThinSurface) == 0)
+                        {
+                            if (insideTransparentMaterialID == materialID)
+                            {
+                                transmittance *= ComputeTransparentShadowVolumeTransmittance(material, candidateRayT - insideTransparentRayT);
+                                insideTransparentMaterialID = 0xFFFFFFFFu;
+                            }
+                            else if (insideTransparentMaterialID == 0xFFFFFFFFu)
+                            {
+                                insideTransparentMaterialID = materialID;
+                                insideTransparentRayT = candidateRayT;
+                            }
+                        }
+
+                        if (max(max(transmittance.x, transmittance.y), transmittance.z) <= 1e-4)
+                            return float3(0, 0, 0);
+
+                        continue;
+                    }
+                }
+
                 rayQuery.CommitNonOpaqueTriangleHit();
-                //break; // <- TODO: revisit - not needed when using RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH?
             }
         }
     }
         
 #if ENABLE_DEBUG_VIZUALISATIONS && ENABLE_DEBUG_LINES_VIZ && !NON_PATH_TRACING_PASS && PATH_TRACER_MODE!=PATH_TRACER_MODE_BUILD_STABLE_PLANES
-    float visible = rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+    float occluded = rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
     if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
         ray.TMax = rayQuery.CommittedRayT();    // <- this gets passed via NvMakeHitWithRecordIndex/NvInvokeHitObject as RayTCurrent() or similar in ubershader path
 
     if( debug.IsDebugPixel() )
-        debug.DrawLine(ray.Origin, ray.Origin+ray.Direction*ray.TMax, float4(visible.x, visible.x, 0.8, 0.2), float4(visible.x, visible.x, 0.8, 0.2));
+        debug.DrawLine(ray.Origin, ray.Origin+ray.Direction*ray.TMax, float4(occluded.xxx, 0.2), float4(occluded.xxx, 0.2));
 #endif
 
-    bool visibilityResult = rayQuery.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
-    if (visibilityResult && g_Const.GaussianSplatShadowsEnabled != 0)
+    if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+        return float3(0, 0, 0);
+
+    if (insideTransparentMaterialID != 0xFFFFFFFFu && insideTransparentMaterialID < g_Const.MaterialCount)
+    {
+        PTMaterialData material = t_PTMaterialData[insideTransparentMaterialID];
+        transmittance *= ComputeTransparentShadowVolumeTransmittance(material, ray.TMax - insideTransparentRayT);
+    }
+
+    if (g_Const.GaussianSplatShadowsEnabled != 0)
     {
         uint gaussianShadowSeed = HybridGaussian_MakeShadowSeed(
             ray,
             uint2(asuint(ray.Origin.x) ^ asuint(ray.Origin.y), asuint(ray.Origin.z)),
             Bridge::getSampleIndex(),
             uint(pathVertexIndex));
-        visibilityResult = !HybridGaussian_TraceGaussianShadowMode(
+        if (HybridGaussian_TraceGaussianShadowMode(
             GaussianSplatBVH,
             t_GaussianShadowSplats,
             g_Const.GaussianSplatShadowCount,
@@ -1062,10 +1169,13 @@ bool Bridge::traceVisibilityRay(RayDesc ray, const RayCone rayCone, const int pa
             g_Const.GaussianSplatShadowSoftRadius,
             g_Const.GaussianSplatShadowRayOffset,
             g_Const.GaussianSplatShadowWorldToObject,
-            gaussianShadowSeed);
+            gaussianShadowSeed))
+        {
+            return float3(0, 0, 0);
+        }
     }
 
-    return visibilityResult;
+    return transmittance;
 }
 
 void Bridge::traceScatterRay(const PathState path, inout RTXPT_RayQuery(RAY_FLAG_NONE, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS) rayQuery, const float2 tMinMax, DebugContext debug)

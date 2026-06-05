@@ -85,8 +85,8 @@ namespace bvh
 
             geometryDesc.geometryType = nvrhi::rt::GeometryType::Triangles;
             
-            // both EnableAlphaTesting and ExcludeFromNEE require custom shader handling
-            geometryDesc.flags = (materialPT.EnableAlphaTesting || materialPT.ExcludeFromNEE) ? nvrhi::rt::GeometryFlags::None : nvrhi::rt::GeometryFlags::Opaque;
+            // Alpha testing, NEE exclusion, and transparent shadow tinting require custom shader handling.
+            geometryDesc.flags = (materialPT.EnableAlphaTesting || materialPT.ExcludeFromNEE || materialPT.EnableTransmission) ? nvrhi::rt::GeometryFlags::None : nvrhi::rt::GeometryFlags::Opaque;
             blasDesc.bottomLevelGeometries.push_back(geometryDesc);
         }
 
