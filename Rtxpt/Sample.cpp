@@ -231,7 +231,7 @@ extern "C"
 }
 #endif
 
-const char* g_windowTitle = "RTX Path Tracing v1.8.1";
+const char* g_windowTitle = "caustica";
 
 const float c_envMapRadianceScale = 1.0f / 4.0f; // used to make input 32bit float radiance fit into 16bit float range that baker supports; going lower than 1/4 causes issues with current BC6U compression algorithm when used
 
