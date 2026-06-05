@@ -1655,6 +1655,7 @@ void Sample::FillPTPipelineGlobalMacros(std::vector<donut::engine::ShaderMacro> 
 
     macros.push_back({ "PT_USE_RESTIR_DI", (m_ui.ActualUseReSTIRDI()) ? ("1") : ("0") });   // these will match constants.useReSTIRDI but constants are used in other passes too
     macros.push_back({ "PT_USE_RESTIR_GI", (m_ui.ActualUseReSTIRGI()) ? ("1") : ("0") });   // these will match constants.useReSTIRGI but constants are used in other passes too
+    macros.push_back({ "PT_USE_RESTIR_PT", (m_ui.ActualUseReSTIRPT()) ? ("1") : ("0") });
     
 
     // minor perf gains but recompile time every time value changed is too annoying 
@@ -2292,6 +2293,9 @@ void Sample::UpdatePathTracerConstants( PathTracerConstants & constants, const P
 #endif // RTXPT_STOCHASTIC_TEXTURE_FILTERING_ENABLE
 
     constants.camera = cameraData;
+    constants.prevCamera = cameraData;
+    if (m_viewPrevious)
+        constants.prevCamera.PosW = m_viewPrevious->GetInverseViewMatrix().m_translation;
 
     constants.bounceCount = m_ui.BounceCount;
     constants.diffuseBounceCount = m_ui.DiffuseBounceCount;
@@ -2319,6 +2323,7 @@ void Sample::UpdatePathTracerConstants( PathTracerConstants & constants, const P
         constants.fireflyFilterThreshold = (m_ui.ReferenceFireflyFilterEnabled)?(m_ui.ReferenceFireflyFilterThreshold*sqrtf(constants.preExposedGrayLuminance)*1e3f):(disabledFF); // making it exposure-adaptive breaks determinism with accumulation (because there's a feedback loop), so that's disabled
     constants.useReSTIRDI = m_ui.ActualUseReSTIRDI();
     constants.useReSTIRGI = m_ui.ActualUseReSTIRGI();
+    constants.useReSTIRPT = m_ui.ActualUseReSTIRPT();
     constants.environmentMapVisibleToCamera = m_ui.EnvironmentMapParams.VisibleToCamera ? 1u : 0u;
     constants.denoiserRadianceClampK = m_ui.DenoiserRadianceClampK;
     constants.DLSSRRBrightnessClampK = (m_ui.DLSSRRBrightnessClampK>0)?(m_ui.DLSSRRBrightnessClampK * constants.preExposedGrayLuminance):(0.0f);
@@ -5474,6 +5479,9 @@ void Sample::PathTrace(nvrhi::IFramebuffer* framebuffer, const SampleConstants &
 
         if (useFusedDIGIFinal)
             m_rtxdiPass->ExecuteFusedDIGIFinal(m_commandList, m_bindingSet);
+
+        if (m_ui.ActualUseReSTIRPT())
+            m_rtxdiPass->ExecutePT(m_commandList, m_bindingSet);
     }
 
     {

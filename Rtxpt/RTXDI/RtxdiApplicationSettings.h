@@ -11,6 +11,7 @@
 #pragma once
 
 #include <rtxdi/ImportanceSamplingContext.h>
+#include <rtxdi/PT/ReSTIRPT.h>
 
 // Set default values RTXDI settings
 const rtxdi::ReSTIRDI_ResamplingMode GetReSTIRDI_ResamplingMode();
@@ -32,3 +33,17 @@ const ReSTIRGI_SpatialResamplingParameters getReSTIRGISpatialResamplingParams();
 const ReSTIRGI_FinalShadingParameters getReSTIRGIFinalShadingParams();
 
 const rtxdi::ReGIRDynamicParameters getReGIRDynamicParams();
+
+const rtxdi::ReSTIRPT_ResamplingMode GetReSTIRPT_ResamplingMode();
+
+const RTXDI_PTInitialSamplingParameters getReSTIRPTInitialSamplingParams();
+
+const RTXDI_PTTemporalResamplingParameters getReSTIRPTTemporalResamplingParams();
+
+const RTXDI_PTReconnectionParameters getReSTIRPTReconnectionParams();
+
+const RTXDI_PTHybridShiftPerFrameParameters getReSTIRPTHybridShiftParams();
+
+const RTXDI_BoilingFilterParameters getReSTIRPTBoilingFilterParams();
+
+const RTXDI_PTSpatialResamplingParameters getReSTIRPTSpatialResamplingParams();

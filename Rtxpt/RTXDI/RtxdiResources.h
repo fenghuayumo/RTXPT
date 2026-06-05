@@ -15,6 +15,7 @@
 namespace rtxdi
 {
     class ReSTIRDIContext;
+    class ReSTIRPTContext;
     class RISBufferSegmentAllocator;
 }
 
@@ -38,11 +39,13 @@ public:
     nvrhi::BufferHandle NeighborOffsetsBuffer;
     nvrhi::BufferHandle LightReservoirBuffer;
     nvrhi::BufferHandle GIReservoirBuffer;
+    nvrhi::BufferHandle PTReservoirBuffer;
     nvrhi::TextureHandle LocalLightPdfTexture;
 
     RtxdiResources(
         nvrhi::IDevice* device, 
         const rtxdi::ReSTIRDIContext& context,
+        const rtxdi::ReSTIRPTContext& ptContext,
         const rtxdi::RISBufferSegmentAllocator& risBufferSegmentAllocator,
         uint32_t maxEmissiveMeshes,
         uint32_t maxEmissiveTriangles,
@@ -62,5 +65,6 @@ public:
 
     static constexpr uint32_t c_NumReservoirBuffers = 3;
     static constexpr uint32_t c_NumGIReservoirBuffers = 2;
+    static constexpr uint32_t c_NumPTReservoirBuffers = 2;
 
 };

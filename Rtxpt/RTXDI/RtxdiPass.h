@@ -44,6 +44,8 @@ class ExtendedScene;
 
 struct RtxdiUserSettings
 {
+    rtxdi::CheckerboardMode checkerboardMode = rtxdi::CheckerboardMode::Off;
+
 	struct
 	{
 		rtxdi::ReSTIRDI_ResamplingMode resamplingMode = GetReSTIRDI_ResamplingMode();
@@ -60,6 +62,17 @@ struct RtxdiUserSettings
 		ReSTIRGI_SpatialResamplingParameters spatialResamplingParams = getReSTIRGISpatialResamplingParams();
 		ReSTIRGI_FinalShadingParameters finalShadingParams = getReSTIRGIFinalShadingParams();
 	} restirGI;
+
+    struct
+    {
+        rtxdi::ReSTIRPT_ResamplingMode resamplingMode = GetReSTIRPT_ResamplingMode();
+        RTXDI_PTInitialSamplingParameters initialSamplingParams = getReSTIRPTInitialSamplingParams();
+        RTXDI_PTTemporalResamplingParameters temporalResamplingParams = getReSTIRPTTemporalResamplingParams();
+        RTXDI_PTReconnectionParameters reconnectionParams = getReSTIRPTReconnectionParams();
+        RTXDI_PTHybridShiftPerFrameParameters hybridShiftParams = getReSTIRPTHybridShiftParams();
+        RTXDI_BoilingFilterParameters boilingFilterParams = getReSTIRPTBoilingFilterParams();
+        RTXDI_PTSpatialResamplingParameters spatialResamplingParams = getReSTIRPTSpatialResamplingParams();
+    } restirPT;
 
 	struct 
 	{
@@ -128,6 +141,8 @@ public:
 		nvrhi::BindingSetHandle extraBindingSet, bool skipFinal);
     void ExecuteFusedDIGIFinal(nvrhi::CommandListHandle commandList,
         nvrhi::BindingSetHandle extraBindingSet);
+    void ExecutePT(nvrhi::CommandListHandle commandList,
+        nvrhi::BindingSetHandle extraBindingSet);
 	void EndFrame();
 	
 	std::shared_ptr<RtxdiResources> GetRTXDIResources() { return m_rtxdiResources; }
@@ -140,6 +155,7 @@ private:
 	void CreateBindingSet(const RenderTargets& renderTargets);
 
 	std::unique_ptr<rtxdi::ImportanceSamplingContext> m_ImportanceSamplingContext;
+    std::unique_ptr<rtxdi::ReSTIRPTContext> m_ReSTIRPTContext;
 	std::shared_ptr<RtxdiResources> m_rtxdiResources;
 	std::unique_ptr<PrepareLightsPass> m_PrepareLightsPass;
 	std::unique_ptr<GenerateMipsPass> m_LocalLightPdfMipmapPass;
@@ -167,6 +183,10 @@ private:
 	RayTracingPass m_GIFinalShadingPass;
 
     RayTracingPass m_FusedDIGIFinalShadingPass;
+    RayTracingPass m_PTGenerateInitialSamplesPass;
+    RayTracingPass m_PTTemporalResamplingPass;
+    RayTracingPass m_PTSpatialResamplingPass;
+    RayTracingPass m_PTFinalShadingPass;
 
 	void ExecuteComputePass(
 		nvrhi::CommandListHandle& commandList, 
@@ -189,6 +209,7 @@ private:
 	void FillSharedConstants(struct RtxdiBridgeConstants& bridgeConstants) const;
 	void FillDIConstants(ReSTIRDI_Parameters& diParams);
 	void FillGIConstants(ReSTIRGI_Parameters& giParams);
+    void FillPTConstants(RTXDI_PTParameters& ptParams);
 	void FillReGIRConstant(ReGIR_Parameters& regirParams);
 	void FillReGirIndirectConstants(ReGirIndirectConstants& regirIndirectConstants);
 

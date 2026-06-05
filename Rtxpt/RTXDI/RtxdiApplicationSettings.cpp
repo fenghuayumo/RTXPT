@@ -112,3 +112,38 @@ const rtxdi::ReGIRDynamicParameters getReGIRDynamicParams()
 	rtxdi::ReGIRDynamicParameters params = {};
 	return params;
 }
+
+const rtxdi::ReSTIRPT_ResamplingMode GetReSTIRPT_ResamplingMode()
+{
+    return rtxdi::ReSTIRPT_ResamplingMode::TemporalAndSpatial;
+}
+
+const RTXDI_PTInitialSamplingParameters getReSTIRPTInitialSamplingParams()
+{
+    return rtxdi::GetDefaultReSTIRPTInitialSamplingParams();
+}
+
+const RTXDI_PTTemporalResamplingParameters getReSTIRPTTemporalResamplingParams()
+{
+    return rtxdi::GetDefaultReSTIRPTTemporalResamplingParams();
+}
+
+const RTXDI_PTReconnectionParameters getReSTIRPTReconnectionParams()
+{
+    return rtxdi::GetDefaultReSTIRPTReconnectionParameters();
+}
+
+const RTXDI_PTHybridShiftPerFrameParameters getReSTIRPTHybridShiftParams()
+{
+    return rtxdi::GetDefaultReSTIRPTHybridShiftParams();
+}
+
+const RTXDI_BoilingFilterParameters getReSTIRPTBoilingFilterParams()
+{
+    return rtxdi::GetDefaultReSTIRPTBoilingFilterParams();
+}
+
+const RTXDI_PTSpatialResamplingParameters getReSTIRPTSpatialResamplingParams()
+{
+    return rtxdi::GetDefaultReSTIRPTSpatialResamplingParams();
+}

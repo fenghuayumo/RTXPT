@@ -978,6 +978,7 @@ void RegisterCoreBindings(nb::module_& m)
 
         .def_rw("use_restir_di",                 &SampleUIData::UseReSTIRDI)
         .def_rw("use_restir_gi",                 &SampleUIData::UseReSTIRGI)
+        .def_rw("use_restir_pt",                 &SampleUIData::UseReSTIRPT)
 
         .def_rw("camera_aperture",               &SampleUIData::CameraAperture)
         .def_rw("camera_focal_distance",         &SampleUIData::CameraFocalDistance)

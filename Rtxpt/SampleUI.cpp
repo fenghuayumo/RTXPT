@@ -377,6 +377,217 @@ static void ApplyPreset(SampleUIData& ui, const PerformancePreset& p)
     ui.ResetAccumulation = true;
 }
 
+void SampleUIData::ApplyRTXDIRestirPreset()
+{
+    if (RTXDIRestirPreset == RTXDIRestirQualityPreset::Custom)
+        return;
+
+    const bool wasUsingCheckerboard = RTXDI.checkerboardMode != rtxdi::CheckerboardMode::Off;
+    bool enableCheckerboardSampling = wasUsingCheckerboard;
+
+    RTXDI.restirDI.resamplingMode = GetReSTIRDI_ResamplingMode();
+    RTXDI.restirDI.initialSamplingParams = getReSTIRDIInitialSamplingParams();
+    RTXDI.restirDI.temporalResamplingParams = getReSTIRDITemporalResamplingParams();
+    RTXDI.restirDI.spatialResamplingParams = getReSTIRDISpatialResamplingParams();
+    RTXDI.restirDI.shadingParams = getReSTIRDIShadingParams();
+
+    RTXDI.restirGI.resamplingMode = GetReSTIRGI_ResamplingMode();
+    RTXDI.restirGI.temporalResamplingParams = getReSTIRGITemporalResamplingParams();
+    RTXDI.restirGI.spatialResamplingParams = getReSTIRGISpatialResamplingParams();
+    RTXDI.restirGI.finalShadingParams = getReSTIRGIFinalShadingParams();
+
+    switch (RTXDIRestirPreset)
+    {
+    case RTXDIRestirQualityPreset::Fast:
+        enableCheckerboardSampling = true;
+        RTXDI.restirDI.resamplingMode = rtxdi::ReSTIRDI_ResamplingMode::TemporalAndSpatial;
+        RTXDI.restirDI.initialSamplingParams.localLightSamplingMode = ReSTIRDI_LocalLightSamplingMode::Power_RIS;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryLocalLightSamples = 4;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryBrdfSamples = 0;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryInfiniteLightSamples = 1;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryEnvironmentSamples = 1;
+        RTXDI.restirDI.temporalResamplingParams.discardInvisibleSamples = true;
+        RTXDI.restirDI.temporalResamplingParams.enableBoilingFilter = true;
+        RTXDI.restirDI.temporalResamplingParams.boilingFilterStrength = 0.2f;
+        RTXDI.restirDI.temporalResamplingParams.temporalBiasCorrection = ReSTIRDI_TemporalBiasCorrectionMode::Off;
+        RTXDI.restirDI.spatialResamplingParams.spatialBiasCorrection = ReSTIRDI_SpatialBiasCorrectionMode::Off;
+        RTXDI.restirDI.spatialResamplingParams.numSpatialSamples = 1;
+        RTXDI.restirDI.spatialResamplingParams.numDisocclusionBoostSamples = 2;
+        RTXDI.restirDI.shadingParams.reuseFinalVisibility = true;
+
+        RTXDI.restirGI.resamplingMode = rtxdi::ReSTIRGI_ResamplingMode::TemporalAndSpatial;
+        RTXDI.restirGI.temporalResamplingParams.maxHistoryLength = 6;
+        RTXDI.restirGI.temporalResamplingParams.maxReservoirAge = 30;
+        RTXDI.restirGI.temporalResamplingParams.enableBoilingFilter = true;
+        RTXDI.restirGI.temporalResamplingParams.boilingFilterStrength = 0.35f;
+        RTXDI.restirGI.temporalResamplingParams.temporalBiasCorrectionMode = ResTIRGI_TemporalBiasCorrectionMode::Basic;
+        RTXDI.restirGI.spatialResamplingParams.numSpatialSamples = 1;
+        RTXDI.restirGI.spatialResamplingParams.spatialBiasCorrectionMode = ResTIRGI_SpatialBiasCorrectionMode::Basic;
+        break;
+
+    case RTXDIRestirQualityPreset::Medium:
+        enableCheckerboardSampling = false;
+        RTXDI.restirDI.resamplingMode = rtxdi::ReSTIRDI_ResamplingMode::TemporalAndSpatial;
+        RTXDI.restirDI.initialSamplingParams.localLightSamplingMode = ReSTIRDI_LocalLightSamplingMode::ReGIR_RIS;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryLocalLightSamples = 8;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryBrdfSamples = 1;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryInfiniteLightSamples = 1;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryEnvironmentSamples = 1;
+        RTXDI.restirDI.temporalResamplingParams.discardInvisibleSamples = true;
+        RTXDI.restirDI.temporalResamplingParams.enableBoilingFilter = true;
+        RTXDI.restirDI.temporalResamplingParams.boilingFilterStrength = 0.2f;
+        RTXDI.restirDI.temporalResamplingParams.temporalBiasCorrection = ReSTIRDI_TemporalBiasCorrectionMode::Raytraced;
+        RTXDI.restirDI.spatialResamplingParams.spatialBiasCorrection = ReSTIRDI_SpatialBiasCorrectionMode::Basic;
+        RTXDI.restirDI.spatialResamplingParams.numSpatialSamples = 1;
+        RTXDI.restirDI.spatialResamplingParams.numDisocclusionBoostSamples = 8;
+        RTXDI.restirDI.shadingParams.reuseFinalVisibility = true;
+
+        RTXDI.restirGI.resamplingMode = rtxdi::ReSTIRGI_ResamplingMode::TemporalAndSpatial;
+        RTXDI.restirGI.temporalResamplingParams.maxHistoryLength = 10;
+        RTXDI.restirGI.temporalResamplingParams.maxReservoirAge = 50;
+        RTXDI.restirGI.temporalResamplingParams.enableBoilingFilter = true;
+        RTXDI.restirGI.temporalResamplingParams.boilingFilterStrength = 0.35f;
+        RTXDI.restirGI.temporalResamplingParams.temporalBiasCorrectionMode = ResTIRGI_TemporalBiasCorrectionMode::Basic;
+        RTXDI.restirGI.spatialResamplingParams.numSpatialSamples = 2;
+        RTXDI.restirGI.spatialResamplingParams.spatialBiasCorrectionMode = ResTIRGI_SpatialBiasCorrectionMode::Basic;
+        break;
+
+    case RTXDIRestirQualityPreset::Unbiased:
+        enableCheckerboardSampling = false;
+        RTXDI.restirDI.resamplingMode = rtxdi::ReSTIRDI_ResamplingMode::TemporalAndSpatial;
+        RTXDI.restirDI.initialSamplingParams.localLightSamplingMode = ReSTIRDI_LocalLightSamplingMode::Uniform;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryLocalLightSamples = 8;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryBrdfSamples = 1;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryInfiniteLightSamples = 1;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryEnvironmentSamples = 1;
+        RTXDI.restirDI.temporalResamplingParams.discardInvisibleSamples = false;
+        RTXDI.restirDI.temporalResamplingParams.enableBoilingFilter = false;
+        RTXDI.restirDI.temporalResamplingParams.boilingFilterStrength = 0.0f;
+        RTXDI.restirDI.temporalResamplingParams.temporalBiasCorrection = ReSTIRDI_TemporalBiasCorrectionMode::Raytraced;
+        RTXDI.restirDI.spatialResamplingParams.spatialBiasCorrection = ReSTIRDI_SpatialBiasCorrectionMode::Raytraced;
+        RTXDI.restirDI.spatialResamplingParams.numSpatialSamples = 1;
+        RTXDI.restirDI.spatialResamplingParams.numDisocclusionBoostSamples = 8;
+        RTXDI.restirDI.shadingParams.reuseFinalVisibility = false;
+
+        RTXDI.restirGI.resamplingMode = rtxdi::ReSTIRGI_ResamplingMode::TemporalAndSpatial;
+        RTXDI.restirGI.temporalResamplingParams.enableBoilingFilter = false;
+        RTXDI.restirGI.temporalResamplingParams.boilingFilterStrength = 0.0f;
+        RTXDI.restirGI.temporalResamplingParams.temporalBiasCorrectionMode = ResTIRGI_TemporalBiasCorrectionMode::Raytraced;
+        RTXDI.restirGI.spatialResamplingParams.numSpatialSamples = 2;
+        RTXDI.restirGI.spatialResamplingParams.spatialBiasCorrectionMode = ResTIRGI_SpatialBiasCorrectionMode::Raytraced;
+        break;
+
+    case RTXDIRestirQualityPreset::Ultra:
+        enableCheckerboardSampling = false;
+        RTXDI.restirDI.resamplingMode = rtxdi::ReSTIRDI_ResamplingMode::TemporalAndSpatial;
+        RTXDI.restirDI.initialSamplingParams.localLightSamplingMode = ReSTIRDI_LocalLightSamplingMode::ReGIR_RIS;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryLocalLightSamples = 16;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryBrdfSamples = 1;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryInfiniteLightSamples = 1;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryEnvironmentSamples = 1;
+        RTXDI.restirDI.temporalResamplingParams.discardInvisibleSamples = false;
+        RTXDI.restirDI.temporalResamplingParams.enableBoilingFilter = false;
+        RTXDI.restirDI.temporalResamplingParams.boilingFilterStrength = 0.0f;
+        RTXDI.restirDI.temporalResamplingParams.temporalBiasCorrection = ReSTIRDI_TemporalBiasCorrectionMode::Raytraced;
+        RTXDI.restirDI.spatialResamplingParams.spatialBiasCorrection = ReSTIRDI_SpatialBiasCorrectionMode::Raytraced;
+        RTXDI.restirDI.spatialResamplingParams.numSpatialSamples = 4;
+        RTXDI.restirDI.spatialResamplingParams.numDisocclusionBoostSamples = 16;
+        RTXDI.restirDI.shadingParams.reuseFinalVisibility = false;
+
+        RTXDI.restirGI.resamplingMode = rtxdi::ReSTIRGI_ResamplingMode::TemporalAndSpatial;
+        RTXDI.restirGI.temporalResamplingParams.maxHistoryLength = 20;
+        RTXDI.restirGI.temporalResamplingParams.maxReservoirAge = 50;
+        RTXDI.restirGI.temporalResamplingParams.enableBoilingFilter = false;
+        RTXDI.restirGI.temporalResamplingParams.boilingFilterStrength = 0.0f;
+        RTXDI.restirGI.temporalResamplingParams.temporalBiasCorrectionMode = ResTIRGI_TemporalBiasCorrectionMode::Raytraced;
+        RTXDI.restirGI.spatialResamplingParams.numSpatialSamples = 4;
+        RTXDI.restirGI.spatialResamplingParams.spatialBiasCorrectionMode = ResTIRGI_SpatialBiasCorrectionMode::Raytraced;
+        break;
+
+    case RTXDIRestirQualityPreset::Reference:
+        enableCheckerboardSampling = false;
+        RTXDI.restirDI.resamplingMode = rtxdi::ReSTIRDI_ResamplingMode::None;
+        RTXDI.restirDI.initialSamplingParams.localLightSamplingMode = ReSTIRDI_LocalLightSamplingMode::Uniform;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryLocalLightSamples = 16;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryBrdfSamples = 1;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryInfiniteLightSamples = 1;
+        RTXDI.restirDI.initialSamplingParams.numPrimaryEnvironmentSamples = 1;
+        RTXDI.restirDI.temporalResamplingParams.enableBoilingFilter = false;
+        RTXDI.restirDI.temporalResamplingParams.boilingFilterStrength = 0.0f;
+        RTXDI.restirDI.shadingParams.reuseFinalVisibility = false;
+
+        RTXDI.restirGI.resamplingMode = rtxdi::ReSTIRGI_ResamplingMode::None;
+        RTXDI.restirGI.temporalResamplingParams.enableBoilingFilter = false;
+        RTXDI.restirGI.temporalResamplingParams.boilingFilterStrength = 0.0f;
+        RTXDI.restirGI.temporalResamplingParams.temporalBiasCorrectionMode = ResTIRGI_TemporalBiasCorrectionMode::Raytraced;
+        RTXDI.restirGI.spatialResamplingParams.spatialBiasCorrectionMode = ResTIRGI_SpatialBiasCorrectionMode::Raytraced;
+        break;
+
+    case RTXDIRestirQualityPreset::Custom:
+    default:
+        break;
+    }
+
+    RTXDI.checkerboardMode = enableCheckerboardSampling ? rtxdi::CheckerboardMode::Black : rtxdi::CheckerboardMode::Off;
+    ResetAccumulation = true;
+    ResetRealtimeCaches |= wasUsingCheckerboard != enableCheckerboardSampling;
+}
+
+void SampleUIData::ApplyRTXDIRestirPTPreset()
+{
+    if (RTXDIRestirPTPreset == RTXDIRestirPTQualityPreset::Custom)
+        return;
+
+    RTXDI.restirPT.initialSamplingParams = getReSTIRPTInitialSamplingParams();
+    RTXDI.restirPT.temporalResamplingParams = getReSTIRPTTemporalResamplingParams();
+    RTXDI.restirPT.reconnectionParams = getReSTIRPTReconnectionParams();
+    RTXDI.restirPT.hybridShiftParams = getReSTIRPTHybridShiftParams();
+    RTXDI.restirPT.boilingFilterParams = getReSTIRPTBoilingFilterParams();
+    RTXDI.restirPT.spatialResamplingParams = getReSTIRPTSpatialResamplingParams();
+
+    switch (RTXDIRestirPTPreset)
+    {
+    case RTXDIRestirPTQualityPreset::Fast:
+        RTXDI.restirPT.resamplingMode = rtxdi::ReSTIRPT_ResamplingMode::Temporal;
+        RTXDI.restirPT.initialSamplingParams.maxBounceDepth = 3;
+        RTXDI.restirPT.initialSamplingParams.maxRcVertexLength = RTXDI.restirPT.initialSamplingParams.maxBounceDepth + 1;
+        RTXDI.restirPT.initialSamplingParams.numInitialSamples = 1;
+        RTXDI.restirPT.spatialResamplingParams.numDisocclusionBoostSamples = 2;
+        RTXDI.restirPT.spatialResamplingParams.samplingRadius = 32.0f;
+        RTXDI.restirPT.spatialResamplingParams.numSpatialSamples = 1;
+        break;
+
+    case RTXDIRestirPTQualityPreset::Medium:
+        RTXDI.restirPT.resamplingMode = rtxdi::ReSTIRPT_ResamplingMode::TemporalAndSpatial;
+        RTXDI.restirPT.initialSamplingParams.maxBounceDepth = 3;
+        RTXDI.restirPT.initialSamplingParams.maxRcVertexLength = RTXDI.restirPT.initialSamplingParams.maxBounceDepth + 1;
+        RTXDI.restirPT.initialSamplingParams.numInitialSamples = 1;
+        RTXDI.restirPT.spatialResamplingParams.numDisocclusionBoostSamples = 4;
+        RTXDI.restirPT.spatialResamplingParams.samplingRadius = 32.0f;
+        RTXDI.restirPT.spatialResamplingParams.numSpatialSamples = 1;
+        break;
+
+    case RTXDIRestirPTQualityPreset::Ultra:
+        RTXDI.restirPT.resamplingMode = rtxdi::ReSTIRPT_ResamplingMode::TemporalAndSpatial;
+        RTXDI.restirPT.initialSamplingParams.maxBounceDepth = 4;
+        RTXDI.restirPT.initialSamplingParams.maxRcVertexLength = RTXDI.restirPT.initialSamplingParams.maxBounceDepth + 1;
+        RTXDI.restirPT.initialSamplingParams.numInitialSamples = 1;
+        RTXDI.restirPT.spatialResamplingParams.numDisocclusionBoostSamples = 8;
+        RTXDI.restirPT.spatialResamplingParams.samplingRadius = 32.0f;
+        RTXDI.restirPT.spatialResamplingParams.numSpatialSamples = 1;
+        break;
+
+    case RTXDIRestirPTQualityPreset::Custom:
+    default:
+        break;
+    }
+
+    RTXDI.restirPT.hybridShiftParams.maxBounceDepth = RTXDI.restirPT.initialSamplingParams.maxBounceDepth;
+    RTXDI.restirPT.hybridShiftParams.maxRcVertexLength = RTXDI.restirPT.initialSamplingParams.maxRcVertexLength;
+    RTXDI.restirPT.spatialResamplingParams.maxTemporalHistory = RTXDI.restirPT.temporalResamplingParams.maxHistoryLength;
+    ResetAccumulation = true;
+}
+
 void InitializeSampleUIDataFromCommandLine(SampleUIData& ui, const CommandLineOptions& cmdLine)
 {
     ui.RelaxSettings = NrdConfig::getDefaultRELAXSettings();
@@ -392,12 +603,19 @@ void InitializeSampleUIDataFromCommandLine(SampleUIData& ui, const CommandLineOp
     ui.NEEType                    = cmdLine.NEEType;
     ui.UseReSTIRDI                = cmdLine.UseReSTIRDI != 0;
     ui.UseReSTIRGI                = cmdLine.UseReSTIRGI != 0;
+    ui.UseReSTIRPT                = cmdLine.UseReSTIRPT != 0;
+    if (ui.UseReSTIRPT)
+        ui.UseReSTIRGI = false;
     ui.RealtimeSamplesPerPixel    = cmdLine.RealtimeSamplesPerPixel;
     ui.AccumulationTarget         = cmdLine.ReferenceSamplesPerPixel;
     ui.StandaloneDenoiser         = cmdLine.StandaloneDenoiser != 0;
     ui.RealtimeAA                 = cmdLine.RealtimeAA;
 
     ApplyPreset(ui, s_performancePresets[2]);
+    ui.RTXDIRestirPreset = RTXDIRestirQualityPreset::Ultra;
+    ui.ApplyRTXDIRestirPreset();
+    ui.RTXDIRestirPTPreset = RTXDIRestirPTQualityPreset::Ultra;
+    ui.ApplyRTXDIRestirPTPreset();
 
     ui.EnableBloom &= !cmdLine.DisablePostProcessFilters;
 }
@@ -1141,11 +1359,11 @@ void SampleUI::buildUI(void)
                     ImGui::SameLine();
             
                     {
-                        UI_SCOPED_DISABLE( (m_ui.ActualUseReSTIRDI() || m_ui.ActualUseReSTIRGI()) );
+                        UI_SCOPED_DISABLE( (m_ui.ActualUseReSTIRDI() || m_ui.ActualUseReSTIRGI() || m_ui.ActualUseReSTIRPT()) );
                         ImGui::InputInt("Samples per pixel", &m_ui.RealtimeSamplesPerPixel); 
                         m_ui.RealtimeSamplesPerPixel = dm::clamp(m_ui.RealtimeSamplesPerPixel, 1, 64);
                         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) 
-                            ImGui::SetTooltip("How many full paths to trace per pixel from the primary surface\n(camera ray is not re-cast so there is no added AA)\n(currently incompatible with ReSTIR DI & ReSTIR GI)");
+                            ImGui::SetTooltip("How many full paths to trace per pixel from the primary surface\n(camera ray is not re-cast so there is no added AA)\n(currently incompatible with ReSTIR DI, ReSTIR GI & ReSTIR PT)");
                     }
                 }
                 else
@@ -1336,6 +1554,9 @@ void SampleUI::buildUI(void)
 
                 if (m_ui.RealtimeMode)
                 {
+                    if (m_ui.UseReSTIRGI && m_ui.UseReSTIRPT)
+                        m_ui.UseReSTIRGI = false;
+
                     {
                         bool nullCheckbox = false;
                         bool disabled = !m_ui.UseNEE || (m_ui.RealtimeAA==3 && m_ui.DisableReSTIRsWithDLSSRR);
@@ -1350,11 +1571,40 @@ void SampleUI::buildUI(void)
                         bool nullCheckbox = false;
                         bool disabled = m_ui.RealtimeAA==3 && m_ui.DisableReSTIRsWithDLSSRR;
                         UI_SCOPED_DISABLE( disabled );
-                        RESET_ON_CHANGE(ImGui::Checkbox("Use ReSTIR GI (RTXDI)", (disabled)?&nullCheckbox:&m_ui.UseReSTIRGI));
+                        const bool changed = ImGui::Checkbox("Use ReSTIR GI (RTXDI)", (disabled)?&nullCheckbox:&m_ui.UseReSTIRGI);
+                        RESET_ON_CHANGE(changed);
+                        if (changed && !disabled && m_ui.UseReSTIRGI)
+                            m_ui.UseReSTIRPT = false;
                         if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                             m_ui.DisableReSTIRsWithDLSSRR = !m_ui.DisableReSTIRsWithDLSSRR;
                     }
-                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("ReSTIR GI (RTXDI) is currently not tuned to work well with DLSS-RR\nUse middle mouse button to enable anyway");
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("ReSTIR GI and ReSTIR PT are mutually exclusive.\nReSTIR GI is currently not tuned to work well with DLSS-RR\nUse middle mouse button to enable anyway");
+
+                    {
+                        bool nullCheckbox = false;
+                        bool disabled = m_ui.RealtimeAA==3 && m_ui.DisableReSTIRsWithDLSSRR;
+                        UI_SCOPED_DISABLE(disabled);
+                        const bool changed = ImGui::Checkbox("Use ReSTIR PT (RTXDI)", (disabled)?&nullCheckbox:&m_ui.UseReSTIRPT);
+                        RESET_ON_CHANGE(changed);
+                        if (changed && !disabled && m_ui.UseReSTIRPT)
+                            m_ui.UseReSTIRGI = false;
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                            m_ui.DisableReSTIRsWithDLSSRR = !m_ui.DisableReSTIRsWithDLSSRR;
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("ReSTIR PT and ReSTIR GI are mutually exclusive.\nReSTIR PT is currently not tuned to work well with DLSS-RR\nUse middle mouse button to enable anyway");
+
+                    ImGui::PushItemWidth(defItemWidth);
+                    if (ImGui::Combo("ReSTIR DI/GI Preset", (int*)&m_ui.RTXDIRestirPreset,
+                        "(Custom)\0Fast\0Medium\0Unbiased\0Ultra\0Reference\0\0"))
+                    {
+                        m_ui.ApplyRTXDIRestirPreset();
+                    }
+                    if (ImGui::Combo("ReSTIR PT Preset", (int*)&m_ui.RTXDIRestirPTPreset,
+                        "(Custom)\0Fast\0Medium\0Ultra\0\0"))
+                    {
+                        m_ui.ApplyRTXDIRestirPTPreset();
+                    }
+                    ImGui::PopItemWidth();
                 }
 
                 RESET_ON_CHANGE(ImGui::Checkbox("Use Next Event Estimation", &m_ui.UseNEE));
@@ -1587,8 +1837,11 @@ void SampleUI::buildUI(void)
             ImGui::Combo("AA Camera Jitter", (int*)&m_ui.TemporalAntiAliasingJitter, "MSAA\0Halton\0R2\0White Noise\0");
         }
 
-        if ( (m_ui.ActualUseReSTIRDI() || m_ui.ActualUseReSTIRGI()) && ImGui::CollapsingHeader("RTXDI Settings") )
+        if ( (m_ui.ActualUseReSTIRDI() || m_ui.ActualUseReSTIRGI() || m_ui.ActualUseReSTIRPT()) && ImGui::CollapsingHeader("RTXDI Settings") )
         {
+#define RTXDI_RESTIR_RESET_ON_CHANGE(code) do { if (code) { m_ui.ResetAccumulation = true; m_ui.RTXDIRestirPreset = RTXDIRestirQualityPreset::Custom; } } while(false)
+#define RTXDI_RESTIR_PT_RESET_ON_CHANGE(code) do { if (code) { m_ui.ResetAccumulation = true; m_ui.RTXDIRestirPTPreset = RTXDIRestirPTQualityPreset::Custom; } } while(false)
+
             ImGui::TextColored(categoryColor, "ReGIR");
             {
                 RAII_SCOPE(ImGui::Indent(indent);, ImGui::Unindent(indent); );
@@ -1597,10 +1850,10 @@ void SampleUI::buildUI(void)
                 {
 		            ImGui::PushItemWidth(defItemWidth);
        
-		            RESET_ON_CHANGE(ImGui::InputInt("Number of Build Samples", (int*)&m_ui.RTXDI.regir.regirDynamicParameters.regirNumBuildSamples));
+		            RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::InputInt("Number of Build Samples", (int*)&m_ui.RTXDI.regir.regirDynamicParameters.regirNumBuildSamples));
 		            m_ui.RTXDI.regir.regirDynamicParameters.regirNumBuildSamples = dm::clamp(m_ui.RTXDI.regir.regirDynamicParameters.regirNumBuildSamples, 0u, 128u);
-                    RESET_ON_CHANGE(ImGui::SliderFloat("Cell Size", &m_ui.RTXDI.regir.regirDynamicParameters.regirCellSize, 0.1f, 2.f));
-                    RESET_ON_CHANGE(ImGui::SliderFloat("Sampling Jitter", &m_ui.RTXDI.regir.regirDynamicParameters.regirSamplingJitter, 0.f, 1.f));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderFloat("Cell Size", &m_ui.RTXDI.regir.regirDynamicParameters.regirCellSize, 0.1f, 2.f));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderFloat("Sampling Jitter", &m_ui.RTXDI.regir.regirDynamicParameters.regirSamplingJitter, 0.f, 1.f));
 
                     ImGui::PopItemWidth();
                 }
@@ -1615,21 +1868,21 @@ void SampleUI::buildUI(void)
                 {
                     ImGui::PushItemWidth(defItemWidth);
 
-                    RESET_ON_CHANGE(ImGui::Combo("Resampling Mode", (int*)&m_ui.RTXDI.restirDI.resamplingMode,
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::Combo("Resampling Mode", (int*)&m_ui.RTXDI.restirDI.resamplingMode,
                         "Disabled\0Temporal\0Spatial\0Temporal & Spatial\0Fused\0\0"));
        
-                    RESET_ON_CHANGE(ImGui::Combo("Spatial Bias Correction", (int*)&m_ui.RTXDI.restirDI.spatialResamplingParams.spatialBiasCorrection,
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::Combo("Spatial Bias Correction", (int*)&m_ui.RTXDI.restirDI.spatialResamplingParams.spatialBiasCorrection,
                         "Off\0Basic\0Pairwise\0Ray Traced\0\0"));
 		
-                    RESET_ON_CHANGE(ImGui::Combo("Temporal Bias Correction", (int*)&m_ui.RTXDI.restirDI.temporalResamplingParams.temporalBiasCorrection,
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::Combo("Temporal Bias Correction", (int*)&m_ui.RTXDI.restirDI.temporalResamplingParams.temporalBiasCorrection,
                         "Off\0Basic\0Pairwise\0Ray Traced\0\0"));
 		
-		            RESET_ON_CHANGE(ImGui::Combo("Local Light Sampling Mode", (int*)&m_ui.RTXDI.restirDI.initialSamplingParams.localLightSamplingMode,
+		            RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::Combo("Local Light Sampling Mode", (int*)&m_ui.RTXDI.restirDI.initialSamplingParams.localLightSamplingMode,
 			            "Uniform\0Power RIS\0ReGIR RIS\0\0"));
 
                     if (m_ui.RTXDI.restirDI.initialSamplingParams.localLightSamplingMode == ReSTIRDI_LocalLightSamplingMode::ReGIR_RIS)
                     {
-                        RESET_ON_CHANGE(ImGui::Combo("ReGIR Mode", (int*)&m_ui.RTXDI.regir.regirStaticParams.Mode,
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::Combo("ReGIR Mode", (int*)&m_ui.RTXDI.regir.regirStaticParams.Mode,
                             "Disabled\0Grid\0Onion\0\0"));
                     }
         
@@ -1642,40 +1895,40 @@ void SampleUI::buildUI(void)
                     {
                         RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
 
-                        RESET_ON_CHANGE(ImGui::InputInt("ReGir", (int*)&m_ui.RTXDI.regir.regirDynamicParameters.regirNumBuildSamples));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::InputInt("ReGir", (int*)&m_ui.RTXDI.regir.regirDynamicParameters.regirNumBuildSamples));
                         m_ui.RTXDI.regir.regirDynamicParameters.regirNumBuildSamples = dm::clamp(m_ui.RTXDI.regir.regirDynamicParameters.regirNumBuildSamples, 0u, 32u);
-                        RESET_ON_CHANGE(ImGui::InputInt("Local Light", (int*)&m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryLocalLightSamples));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::InputInt("Local Light", (int*)&m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryLocalLightSamples));
 		                m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryLocalLightSamples = dm::clamp(m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryLocalLightSamples, 0u, 32u);
-                        RESET_ON_CHANGE(ImGui::InputInt("BRDF", (int*)&m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryBrdfSamples));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::InputInt("BRDF", (int*)&m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryBrdfSamples));
 		                m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryBrdfSamples = dm::clamp(m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryBrdfSamples, 0u, 32u);
-                        RESET_ON_CHANGE(ImGui::InputInt("Infinite Light", (int*)&m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryInfiniteLightSamples));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::InputInt("Infinite Light", (int*)&m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryInfiniteLightSamples));
 		                m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryInfiniteLightSamples = dm::clamp(m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryInfiniteLightSamples, 0u, 32u);
-                        RESET_ON_CHANGE(ImGui::InputInt("Environment Light", (int*)&m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryEnvironmentSamples));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::InputInt("Environment Light", (int*)&m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryEnvironmentSamples));
 		                m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryEnvironmentSamples = dm::clamp(m_ui.RTXDI.restirDI.initialSamplingParams.numPrimaryEnvironmentSamples, 0u, 32u);
                     }
-                    RESET_ON_CHANGE(imGuiCheckboxUInt32("Initial visibility test", &m_ui.RTXDI.restirDI.initialSamplingParams.enableInitialVisibility));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(imGuiCheckboxUInt32("Initial visibility test", &m_ui.RTXDI.restirDI.initialSamplingParams.enableInitialVisibility));
     
                     if (ImGui::CollapsingHeader("Fine Tuning"))
                     {
                         RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
                         ImGui::PushItemWidth(defItemWidth);
-                        RESET_ON_CHANGE(ImGui::SliderFloat("BRDF Cut-off", &m_ui.RTXDI.restirDI.initialSamplingParams.brdfCutoff, 0.0f, 1.0f));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderFloat("BRDF Cut-off", &m_ui.RTXDI.restirDI.initialSamplingParams.brdfCutoff, 0.0f, 1.0f));
                         ImGui::Separator();
-                        RESET_ON_CHANGE(imGuiCheckboxUInt32("Use Permutation Sampling", &m_ui.RTXDI.restirDI.temporalResamplingParams.enablePermutationSampling));
-                        RESET_ON_CHANGE(ImGui::SliderFloat("Temporal Depth Threshold", &m_ui.RTXDI.restirDI.temporalResamplingParams.temporalDepthThreshold, 0.f, 1.f));
-                        RESET_ON_CHANGE(ImGui::SliderFloat("Temporal Normal Threshold", &m_ui.RTXDI.restirDI.temporalResamplingParams.temporalNormalThreshold, 0.f, 1.f));
-			            RESET_ON_CHANGE(ImGui::SliderFloat("Boiling Filter Strength", &m_ui.RTXDI.restirDI.temporalResamplingParams.boilingFilterStrength, 0.f, 1.f));
-                        RESET_ON_CHANGE(imGuiCheckboxUInt32("Discard Invisible Temporal Samples", &m_ui.RTXDI.restirDI.temporalResamplingParams.discardInvisibleSamples));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(imGuiCheckboxUInt32("Use Permutation Sampling", &m_ui.RTXDI.restirDI.temporalResamplingParams.enablePermutationSampling));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderFloat("Temporal Depth Threshold", &m_ui.RTXDI.restirDI.temporalResamplingParams.temporalDepthThreshold, 0.f, 1.f));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderFloat("Temporal Normal Threshold", &m_ui.RTXDI.restirDI.temporalResamplingParams.temporalNormalThreshold, 0.f, 1.f));
+			            RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderFloat("Boiling Filter Strength", &m_ui.RTXDI.restirDI.temporalResamplingParams.boilingFilterStrength, 0.f, 1.f));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(imGuiCheckboxUInt32("Discard Invisible Temporal Samples", &m_ui.RTXDI.restirDI.temporalResamplingParams.discardInvisibleSamples));
                         ImGui::Separator();
-                        RESET_ON_CHANGE(ImGui::SliderInt("Spatial Samples", (int*)&m_ui.RTXDI.restirDI.spatialResamplingParams.numSpatialSamples, 0, 8));
-			            RESET_ON_CHANGE(ImGui::SliderInt("Disocclusion Samples", (int*)&m_ui.RTXDI.restirDI.spatialResamplingParams.numDisocclusionBoostSamples, 0, 8));
-                        RESET_ON_CHANGE(ImGui::SliderFloat("Spatial Sampling Radius", &m_ui.RTXDI.restirDI.spatialResamplingParams.spatialSamplingRadius, 0.f, 64.f));
-                        RESET_ON_CHANGE(ImGui::SliderFloat("Spatial Depth Threshold", &m_ui.RTXDI.restirDI.spatialResamplingParams.spatialDepthThreshold, 0.f, 1.f));
-                        RESET_ON_CHANGE(ImGui::SliderFloat("Spatial Normal Threshold", &m_ui.RTXDI.restirDI.spatialResamplingParams.spatialNormalThreshold, 0.f, 1.f));
-			            RESET_ON_CHANGE(imGuiCheckboxUInt32("Discount Naive Samples", &m_ui.RTXDI.restirDI.spatialResamplingParams.discountNaiveSamples));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderInt("Spatial Samples", (int*)&m_ui.RTXDI.restirDI.spatialResamplingParams.numSpatialSamples, 0, 8));
+			            RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderInt("Disocclusion Samples", (int*)&m_ui.RTXDI.restirDI.spatialResamplingParams.numDisocclusionBoostSamples, 0, 8));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderFloat("Spatial Sampling Radius", &m_ui.RTXDI.restirDI.spatialResamplingParams.spatialSamplingRadius, 0.f, 64.f));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderFloat("Spatial Depth Threshold", &m_ui.RTXDI.restirDI.spatialResamplingParams.spatialDepthThreshold, 0.f, 1.f));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderFloat("Spatial Normal Threshold", &m_ui.RTXDI.restirDI.spatialResamplingParams.spatialNormalThreshold, 0.f, 1.f));
+			            RTXDI_RESTIR_RESET_ON_CHANGE(imGuiCheckboxUInt32("Discount Naive Samples", &m_ui.RTXDI.restirDI.spatialResamplingParams.discountNaiveSamples));
 			            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Prevents samples which are from the current frame or have no reasonable temporal history merged being spread to neighbors");
                         ImGui::Separator();
-                        RESET_ON_CHANGE(ImGui::DragFloat("Ray Epsilon", &m_ui.RTXDI.rayEpsilon, 0.0001f, 0.0001f, 0.01f, "%.4f"));
+                        RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::DragFloat("Ray Epsilon", &m_ui.RTXDI.rayEpsilon, 0.0001f, 0.0001f, 0.01f, "%.4f"));
                         ImGui::PopItemWidth();
                     }
 
@@ -1692,28 +1945,78 @@ void SampleUI::buildUI(void)
                 {
                     RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
                     ImGui::PushItemWidth(defItemWidth);
-		            RESET_ON_CHANGE(ImGui::Combo("Resampling Mode", (int*)&m_ui.RTXDI.restirGI.resamplingMode,
+		            RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::Combo("Resampling Mode", (int*)&m_ui.RTXDI.restirGI.resamplingMode,
 			            "Disabled\0Temporal\0Spatial\0Temporal & Spatial\0Fused\0\0"));
                     ImGui::TextWrapped("Please note: there's a bug in ReSTIRGIContext::UpdateBufferIndices or similar which breaks 'Disabled' or one or the other sampling modes.");
                     ImGui::Separator();
-                    RESET_ON_CHANGE(ImGui::SliderInt("History Length ##GI", (int*)&m_ui.RTXDI.restirGI.temporalResamplingParams.maxHistoryLength, 0, 64));
-                    RESET_ON_CHANGE(ImGui::SliderInt("Max Reservoir Age ##GI", (int*)&m_ui.RTXDI.restirGI.temporalResamplingParams.maxReservoirAge, 0, 100));
-                    RESET_ON_CHANGE(imGuiCheckboxUInt32("Permutation Sampling ##GI", &m_ui.RTXDI.restirGI.temporalResamplingParams.enablePermutationSampling));
-                    RESET_ON_CHANGE(imGuiCheckboxUInt32("Fallback Sampling ##GI", &m_ui.RTXDI.restirGI.temporalResamplingParams.enableFallbackSampling));
-                    RESET_ON_CHANGE(ImGui::SliderFloat("Boiling Filter Strength##GI", &m_ui.RTXDI.restirGI.temporalResamplingParams.boilingFilterStrength, 0.f, 1.f));
-                    RESET_ON_CHANGE(ImGui::Combo("Temporal Bias Correction ##GI", (int*)&m_ui.RTXDI.restirGI.temporalResamplingParams.temporalBiasCorrectionMode,
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderInt("History Length ##GI", (int*)&m_ui.RTXDI.restirGI.temporalResamplingParams.maxHistoryLength, 0, 64));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderInt("Max Reservoir Age ##GI", (int*)&m_ui.RTXDI.restirGI.temporalResamplingParams.maxReservoirAge, 0, 100));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(imGuiCheckboxUInt32("Permutation Sampling ##GI", &m_ui.RTXDI.restirGI.temporalResamplingParams.enablePermutationSampling));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(imGuiCheckboxUInt32("Fallback Sampling ##GI", &m_ui.RTXDI.restirGI.temporalResamplingParams.enableFallbackSampling));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderFloat("Boiling Filter Strength##GI", &m_ui.RTXDI.restirGI.temporalResamplingParams.boilingFilterStrength, 0.f, 1.f));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::Combo("Temporal Bias Correction ##GI", (int*)&m_ui.RTXDI.restirGI.temporalResamplingParams.temporalBiasCorrectionMode,
                         "Off\0Basic\0Ray Traced\0"));
                     ImGui::Separator();
-                    RESET_ON_CHANGE(ImGui::SliderInt("Spatial Samples ##GI", (int*)&m_ui.RTXDI.restirGI.spatialResamplingParams.numSpatialSamples, 0, 8));
-                    RESET_ON_CHANGE(ImGui::SliderFloat("Spatial Sampling Radius ##GI", &m_ui.RTXDI.restirGI.spatialResamplingParams.spatialSamplingRadius, 1.f, 64.f));
-                    RESET_ON_CHANGE(ImGui::Combo("Spatial Bias Correction ##GI", (int*)&m_ui.RTXDI.restirGI.spatialResamplingParams.spatialBiasCorrectionMode, "Off\0Basic\0Ray Traced\0"));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderInt("Spatial Samples ##GI", (int*)&m_ui.RTXDI.restirGI.spatialResamplingParams.numSpatialSamples, 0, 8));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::SliderFloat("Spatial Sampling Radius ##GI", &m_ui.RTXDI.restirGI.spatialResamplingParams.spatialSamplingRadius, 1.f, 64.f));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::Combo("Spatial Bias Correction ##GI", (int*)&m_ui.RTXDI.restirGI.spatialResamplingParams.spatialBiasCorrectionMode, "Off\0Basic\0Ray Traced\0"));
                     ImGui::Separator();
-                    RESET_ON_CHANGE(imGuiCheckboxUInt32("Final Visibility ##GI", &m_ui.RTXDI.restirGI.finalShadingParams.enableFinalVisibility));
-                    RESET_ON_CHANGE(imGuiCheckboxUInt32("Final MIS ##GI", &m_ui.RTXDI.restirGI.finalShadingParams.enableFinalMIS));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(imGuiCheckboxUInt32("Final Visibility ##GI", &m_ui.RTXDI.restirGI.finalShadingParams.enableFinalVisibility));
+                    RTXDI_RESTIR_RESET_ON_CHANGE(imGuiCheckboxUInt32("Final MIS ##GI", &m_ui.RTXDI.restirGI.finalShadingParams.enableFinalMIS));
 
                     ImGui::PopItemWidth();
                 }
             }
+
+            ImGui::TextColored(categoryColor, "ReSTIR PT");
+            {
+                RAII_SCOPE(ImGui::Indent(indent); , ImGui::Unindent(indent); );
+                if (m_ui.ActualUseReSTIRPT())
+                {
+                    ImGui::PushItemWidth(defItemWidth);
+
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::Combo("Resampling Mode ##PT", (int*)&m_ui.RTXDI.restirPT.resamplingMode,
+                        "Disabled\0Temporal\0Spatial\0Temporal & Spatial\0\0"));
+
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderInt("Initial Samples ##PT", (int*)&m_ui.RTXDI.restirPT.initialSamplingParams.numInitialSamples, 1, 8));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderInt("Max Bounce Depth ##PT", (int*)&m_ui.RTXDI.restirPT.initialSamplingParams.maxBounceDepth, 1, 12));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderInt("Max RC Vertex Length ##PT", (int*)&m_ui.RTXDI.restirPT.initialSamplingParams.maxRcVertexLength, 1, 12));
+
+                    int reconnectionMode = int(m_ui.RTXDI.restirPT.reconnectionParams.reconnectionMode);
+                    bool reconnectionChanged = ImGui::Combo("Reconnection Mode ##PT", &reconnectionMode, "Fixed Threshold\0Footprint\0\0");
+                    if (reconnectionChanged)
+                        m_ui.RTXDI.restirPT.reconnectionParams.reconnectionMode = RTXDI_PTReconnectionMode(reconnectionMode);
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(reconnectionChanged);
+
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderFloat("Min Connection Footprint ##PT", &m_ui.RTXDI.restirPT.reconnectionParams.minConnectionFootprint, 0.0f, 0.1f));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderFloat("Min PDF Roughness ##PT", &m_ui.RTXDI.restirPT.reconnectionParams.minPdfRoughness, 0.0f, 0.5f));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderFloat("Roughness Threshold ##PT", &m_ui.RTXDI.restirPT.reconnectionParams.roughnessThreshold, 0.0f, 0.5f));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderFloat("Distance Threshold ##PT", &m_ui.RTXDI.restirPT.reconnectionParams.distanceThreshold, 0.0f, 10.0f));
+
+                    ImGui::Separator();
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderInt("History Length ##PT", (int*)&m_ui.RTXDI.restirPT.temporalResamplingParams.maxHistoryLength, 0, 64));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderInt("Max Reservoir Age ##PT", (int*)&m_ui.RTXDI.restirPT.temporalResamplingParams.maxReservoirAge, 0, 100));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(imGuiCheckboxUInt32("Fallback Sampling ##PT", &m_ui.RTXDI.restirPT.temporalResamplingParams.enableFallbackSampling));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(imGuiCheckboxUInt32("Permutation Sampling ##PT", &m_ui.RTXDI.restirPT.temporalResamplingParams.enablePermutationSampling));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderFloat("Temporal Depth Threshold ##PT", &m_ui.RTXDI.restirPT.temporalResamplingParams.depthThreshold, 0.0f, 1.0f));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderFloat("Temporal Normal Threshold ##PT", &m_ui.RTXDI.restirPT.temporalResamplingParams.normalThreshold, 0.0f, 1.0f));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(imGuiCheckboxUInt32("Boiling Filter ##PT", &m_ui.RTXDI.restirPT.boilingFilterParams.enableBoilingFilter));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderFloat("Boiling Filter Strength ##PT", &m_ui.RTXDI.restirPT.boilingFilterParams.boilingFilterStrength, 0.0f, 1.0f));
+
+                    ImGui::Separator();
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderInt("Spatial Samples ##PT", (int*)&m_ui.RTXDI.restirPT.spatialResamplingParams.numSpatialSamples, 0, 8));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderInt("Disocclusion Samples ##PT", (int*)&m_ui.RTXDI.restirPT.spatialResamplingParams.numDisocclusionBoostSamples, 0, 16));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderFloat("Spatial Sampling Radius ##PT", &m_ui.RTXDI.restirPT.spatialResamplingParams.samplingRadius, 1.0f, 64.0f));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderFloat("Spatial Depth Threshold ##PT", &m_ui.RTXDI.restirPT.spatialResamplingParams.depthThreshold, 0.0f, 1.0f));
+                    RTXDI_RESTIR_PT_RESET_ON_CHANGE(ImGui::SliderFloat("Spatial Normal Threshold ##PT", &m_ui.RTXDI.restirPT.spatialResamplingParams.normalThreshold, 0.0f, 1.0f));
+
+                    ImGui::PopItemWidth();
+                }
+                else
+                    ImGui::Text("Not used/enabled");
+            }
+#undef RTXDI_RESTIR_PT_RESET_ON_CHANGE
+#undef RTXDI_RESTIR_RESET_ON_CHANGE
         }
 
         if (ImGui::CollapsingHeader("Stable Planes (denoising layers)"))

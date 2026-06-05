@@ -10,6 +10,7 @@
 
 #include "RtxdiPass.h"
 #include <rtxdi/ImportanceSamplingContext.h>
+#include <rtxdi/PT/ReSTIRPT.h>
 
 #include "RtxdiResources.h"
 #include "PrepareLightsPass.h"
@@ -54,6 +55,7 @@ RtxdiPass::RtxdiPass(
 		nvrhi::BindingLayoutItem::StructuredBuffer_UAV(14),		//u_GIReservoirs
 		nvrhi::BindingLayoutItem::TypedBuffer_UAV(15),			//u_RisBuffer
 		nvrhi::BindingLayoutItem::TypedBuffer_UAV(16),			//u_RisLightDataBuffer
+        nvrhi::BindingLayoutItem::StructuredBuffer_UAV(17),		//u_PTReservoirs
 
 		nvrhi::BindingLayoutItem::VolatileConstantBuffer(5),	//g_RtxdiBridgeConst
 
@@ -71,9 +73,17 @@ void RtxdiPass::CheckContextStaticParameters()
 {
 	if (m_ImportanceSamplingContext != nullptr)
 	{
+        auto& reSTIRDIContext = m_ImportanceSamplingContext->GetReSTIRDIContext();
 		auto& reGIRContext = m_ImportanceSamplingContext->GetReGIRContext();
 
 		bool needsReset = false;
+        if (reSTIRDIContext.GetStaticParameters().RenderWidth != m_BridgeParameters.frameDims.x ||
+            reSTIRDIContext.GetStaticParameters().RenderHeight != m_BridgeParameters.frameDims.y)
+            needsReset = true;
+        if (reSTIRDIContext.GetStaticParameters().CheckerboardSamplingMode != m_BridgeParameters.userSettings.checkerboardMode)
+            needsReset = true;
+        if (m_ReSTIRPTContext && m_ReSTIRPTContext->GetStaticParams().CheckerboardSamplingMode != m_BridgeParameters.userSettings.checkerboardMode)
+            needsReset = true;
 		if (reGIRContext.GetReGIRStaticParameters().Mode != m_BridgeParameters.userSettings.regir.regirStaticParams.Mode)
 			needsReset = true;
 		if (reGIRContext.GetReGIRStaticParameters().LightsPerCell != m_BridgeParameters.userSettings.regir.regirStaticParams.LightsPerCell)
@@ -100,6 +110,16 @@ void RtxdiPass::UpdateContextDynamicParameters()
 	m_ImportanceSamplingContext->GetReSTIRGIContext().SetTemporalResamplingParameters(m_BridgeParameters.userSettings.restirGI.temporalResamplingParams);
 	m_ImportanceSamplingContext->GetReSTIRGIContext().SetSpatialResamplingParameters(m_BridgeParameters.userSettings.restirGI.spatialResamplingParams);
 	m_ImportanceSamplingContext->GetReSTIRGIContext().SetFinalShadingParameters(m_BridgeParameters.userSettings.restirGI.finalShadingParams);
+
+    // ReSTIR PT
+    m_ReSTIRPTContext->SetFrameIndex(m_BridgeParameters.frameIndex);
+    m_ReSTIRPTContext->SetResamplingMode(m_BridgeParameters.userSettings.restirPT.resamplingMode);
+    m_ReSTIRPTContext->SetInitialSamplingParameters(m_BridgeParameters.userSettings.restirPT.initialSamplingParams);
+    m_ReSTIRPTContext->SetTemporalResamplingParameters(m_BridgeParameters.userSettings.restirPT.temporalResamplingParams);
+    m_ReSTIRPTContext->SetReconnectionParameters(m_BridgeParameters.userSettings.restirPT.reconnectionParams);
+    m_ReSTIRPTContext->SetHybridShiftParameters(m_BridgeParameters.userSettings.restirPT.hybridShiftParams);
+    m_ReSTIRPTContext->SetBoilingFilterParameters(m_BridgeParameters.userSettings.restirPT.boilingFilterParams);
+    m_ReSTIRPTContext->SetSpatialResamplingParameters(m_BridgeParameters.userSettings.restirPT.spatialResamplingParams);
 
 	// ReGIR
 	auto regirParams = m_BridgeParameters.userSettings.regir.regirDynamicParameters;
@@ -142,6 +162,15 @@ void RtxdiPass::CreatePipelines(nvrhi::BindingLayoutHandle extraBindingLayout /*
 		{}, useRayQuery, RTXDI_SCREEN_SPACE_GROUP_SIZE, m_bindingLayout, extraBindingLayout, m_bindlessLayout);
     m_FusedDIGIFinalShadingPass.Init(m_device, *m_shaderFactory, "app/RTXDI/FusedDIGIFinalShading.hlsl",
         {}, useRayQuery, RTXDI_SCREEN_SPACE_GROUP_SIZE, m_bindingLayout, extraBindingLayout, m_bindlessLayout);
+
+    m_PTGenerateInitialSamplesPass.Init(m_device, *m_shaderFactory, "app/RTXDI/PTGenerateInitialSamples.hlsl",
+        {}, useRayQuery, RTXDI_SCREEN_SPACE_GROUP_SIZE, m_bindingLayout, extraBindingLayout, m_bindlessLayout);
+    m_PTTemporalResamplingPass.Init(m_device, *m_shaderFactory, "app/RTXDI/PTTemporalResampling.hlsl",
+        {}, useRayQuery, RTXDI_SCREEN_SPACE_GROUP_SIZE, m_bindingLayout, extraBindingLayout, m_bindlessLayout);
+    m_PTSpatialResamplingPass.Init(m_device, *m_shaderFactory, "app/RTXDI/PTSpatialResampling.hlsl",
+        {}, useRayQuery, RTXDI_SCREEN_SPACE_GROUP_SIZE, m_bindingLayout, extraBindingLayout, m_bindlessLayout);
+    m_PTFinalShadingPass.Init(m_device, *m_shaderFactory, "app/RTXDI/PTFinalShading.hlsl",
+        {}, useRayQuery, RTXDI_SCREEN_SPACE_GROUP_SIZE, m_bindingLayout, extraBindingLayout, m_bindlessLayout);
 }
 
 void RtxdiPass::CreateBindingSet(const RenderTargets& renderTargets)
@@ -162,6 +191,7 @@ void RtxdiPass::CreateBindingSet(const RenderTargets& renderTargets)
 			nvrhi::BindingSetItem::StructuredBuffer_UAV(14, m_rtxdiResources->GIReservoirBuffer),
 			nvrhi::BindingSetItem::TypedBuffer_UAV(15, m_rtxdiResources->RisBuffer),
 			nvrhi::BindingSetItem::TypedBuffer_UAV(16, m_rtxdiResources->RisLightDataBuffer),
+            nvrhi::BindingSetItem::StructuredBuffer_UAV(17, m_rtxdiResources->PTReservoirBuffer),
 			
 			nvrhi::BindingSetItem::ConstantBuffer(5, m_rtxdiConstantBuffer),
 
@@ -179,9 +209,11 @@ void RtxdiPass::CreateBindingSet(const RenderTargets& renderTargets)
 void RtxdiPass::Reset()
 {
 	m_ImportanceSamplingContext = nullptr;
+    m_ReSTIRPTContext = nullptr;
 	m_rtxdiResources = nullptr;
 	m_LocalLightPdfMipmapPass = nullptr;
 	m_bindingSet = nullptr;
+    m_PrevBindingSet = nullptr;
 }
 
 void RtxdiPass::PrepareResources(
@@ -208,9 +240,16 @@ void RtxdiPass::PrepareResources(
         rtxdi::ImportanceSamplingContext_StaticParameters staticParameters = {};
         staticParameters.renderWidth = m_BridgeParameters.frameDims.x;
         staticParameters.renderHeight = m_BridgeParameters.frameDims.y;
+        staticParameters.CheckerboardSamplingMode = m_BridgeParameters.userSettings.checkerboardMode;
         staticParameters.regirStaticParams = m_BridgeParameters.userSettings.regir.regirStaticParams;
 
         m_ImportanceSamplingContext = std::make_unique<rtxdi::ImportanceSamplingContext>(staticParameters);
+
+        rtxdi::ReSTIRPTStaticParameters ptStaticParameters = {};
+        ptStaticParameters.RenderWidth = m_BridgeParameters.frameDims.x;
+        ptStaticParameters.RenderHeight = m_BridgeParameters.frameDims.y;
+        ptStaticParameters.CheckerboardSamplingMode = m_BridgeParameters.userSettings.checkerboardMode;
+        m_ReSTIRPTContext = std::make_unique<rtxdi::ReSTIRPTContext>(ptStaticParameters);
 
         // RTXDI context settings affect the shader permutations
         CreatePipelines(extraBindingLayout, true);
@@ -259,6 +298,7 @@ void RtxdiPass::PrepareResources(
         m_rtxdiResources = std::make_shared<RtxdiResources>(
             m_device,
             m_ImportanceSamplingContext->GetReSTIRDIContext(),
+            *m_ReSTIRPTContext,
             m_ImportanceSamplingContext->GetRISBufferSegmentAllocator(),
             (numEmissiveMeshes + meshAllocationQuantum - 1) & ~(meshAllocationQuantum - 1),
             (numEmissiveTriangles + triangleAllocationQuantum - 1) & ~(triangleAllocationQuantum - 1),
@@ -424,6 +464,7 @@ void RtxdiPass::FillConstants(nvrhi::CommandListHandle commandList)
 	FillSharedConstants(bridgeConstants);
 	FillDIConstants(bridgeConstants.restirDI);
 	FillGIConstants(bridgeConstants.restirGI);
+    FillPTConstants(bridgeConstants.restirPT);
 	FillReGIRConstant(bridgeConstants.regir);
 	FillReGirIndirectConstants(bridgeConstants.regirIndirect);
 
@@ -469,6 +510,20 @@ void RtxdiPass::FillGIConstants(ReSTIRGI_Parameters& giParams)
 	giParams.temporalResamplingParams = reSTIRGI.GetTemporalResamplingParameters();
 	giParams.spatialResamplingParams = reSTIRGI.GetSpatialResamplingParameters();
 	giParams.finalShadingParams = reSTIRGI.GetFinalShadingParameters();
+}
+
+void RtxdiPass::FillPTConstants(RTXDI_PTParameters& ptParams)
+{
+    const auto& reSTIRPT = *m_ReSTIRPTContext;
+
+    ptParams.reservoirBuffer = reSTIRPT.GetReservoirBufferParameters();
+    ptParams.bufferIndices = reSTIRPT.GetBufferIndices();
+    ptParams.initialSampling = reSTIRPT.GetInitialSamplingParameters();
+    ptParams.reconnection = reSTIRPT.GetReconnectionParameters();
+    ptParams.temporalResampling = reSTIRPT.GetTemporalResamplingParameters();
+    ptParams.hybridShift = reSTIRPT.GetHybridShiftParameters();
+    ptParams.boilingFilter = reSTIRPT.GetBoilingFilterParameters();
+    ptParams.spatialResampling = reSTIRPT.GetSpatialResamplingParameters();
 }
 
 
@@ -554,6 +609,35 @@ void RtxdiPass::ExecuteFusedDIGIFinal(nvrhi::CommandListHandle commandList, nvrh
 	dm::int2 dispatchSize = { (int)reSTIRDI.GetStaticParameters().RenderWidth, (int)reSTIRDI.GetStaticParameters().RenderHeight };
 
     ExecuteRayTracingPass(commandList, m_FusedDIGIFinalShadingPass, "Fused DI GI Final Shading", dispatchSize, extraBindingSet);
+}
+
+void RtxdiPass::ExecutePT(nvrhi::CommandListHandle commandList, nvrhi::BindingSetHandle extraBindingSet)
+{
+    commandList->beginMarker("ReSTIR PT");
+
+    auto& reSTIRPT = *m_ReSTIRPTContext;
+    dm::int2 dispatchSize = { (int)reSTIRPT.GetStaticParams().RenderWidth, (int)reSTIRPT.GetStaticParams().RenderHeight };
+
+    ExecuteRayTracingPass(commandList, m_PTGenerateInitialSamplesPass, "Generate Initial PT Samples", dispatchSize, extraBindingSet);
+
+    if (reSTIRPT.GetResamplingMode() == rtxdi::ReSTIRPT_ResamplingMode::Temporal ||
+        reSTIRPT.GetResamplingMode() == rtxdi::ReSTIRPT_ResamplingMode::TemporalAndSpatial)
+    {
+        nvrhi::utils::BufferUavBarrier(commandList, m_rtxdiResources->PTReservoirBuffer);
+        ExecuteRayTracingPass(commandList, m_PTTemporalResamplingPass, "PT Temporal Resampling", dispatchSize, extraBindingSet);
+    }
+
+    if (reSTIRPT.GetResamplingMode() == rtxdi::ReSTIRPT_ResamplingMode::Spatial ||
+        reSTIRPT.GetResamplingMode() == rtxdi::ReSTIRPT_ResamplingMode::TemporalAndSpatial)
+    {
+        nvrhi::utils::BufferUavBarrier(commandList, m_rtxdiResources->PTReservoirBuffer);
+        ExecuteRayTracingPass(commandList, m_PTSpatialResamplingPass, "PT Spatial Resampling", dispatchSize, extraBindingSet);
+    }
+
+    nvrhi::utils::BufferUavBarrier(commandList, m_rtxdiResources->PTReservoirBuffer);
+    ExecuteRayTracingPass(commandList, m_PTFinalShadingPass, "PT Final Shading", dispatchSize, extraBindingSet);
+
+    commandList->endMarker();
 }
 
 void RtxdiPass::EndFrame(){}

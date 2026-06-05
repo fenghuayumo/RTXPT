@@ -58,6 +58,7 @@ bool CommandLineOptions::InitFromCommandLine(int _argc, char const* const* _argv
             ("NEEType", "Set NEE type: 0 - uniform sampling; 1 - power-based sampling, 2 (default) - NEE-AT", value(NEEType))
             ("useReSTIRDI", "Enable/disable ReSTIR DI", value(UseReSTIRDI))
             ("useReSTIRGI", "Enable/disable ReSTIR GI", value(UseReSTIRGI))
+            ("useReSTIRPT", "Enable/disable ReSTIR PT", value(UseReSTIRPT))
             ("realtimeSamplesPerPixel", "Number of spp in realtime mode",     value(RealtimeSamplesPerPixel))
             ("referenceSamplesPerPixel", "Number of spp in reference mode", value(ReferenceSamplesPerPixel))
             ("standaloneDenoiser", "Enable/disable standalone denoiser active when DLSS-RR not enabled (on by default)", value(StandaloneDenoiser))

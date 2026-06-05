@@ -12,6 +12,7 @@
 
 #include "RtxdiResources.h"
 #include <rtxdi/DI/ReSTIRDI.h>
+#include <rtxdi/PT/ReSTIRPT.h>
 #include <rtxdi/LightSampling/RISBufferSegmentAllocator.h>
 
 #include <donut/core/math/math.h>
@@ -35,6 +36,7 @@ uint32_t getNextPowerOf2(uint32_t a)
 RtxdiResources::RtxdiResources(
     nvrhi::IDevice* device, 
     const rtxdi::ReSTIRDIContext& context,
+    const rtxdi::ReSTIRPTContext& ptContext,
     const rtxdi::RISBufferSegmentAllocator& risBufferSegmentAllocator,
     uint32_t maxEmissiveMeshes,
     uint32_t maxEmissiveTriangles,
@@ -141,6 +143,16 @@ RtxdiResources::RtxdiResources(
     giReservoirBufferDesc.debugName = "GIReservoirBuffer";
     giReservoirBufferDesc.canHaveUAVs = true;
     GIReservoirBuffer = device->createBuffer(giReservoirBufferDesc);
+
+
+    nvrhi::BufferDesc ptReservoirBufferDesc;
+    ptReservoirBufferDesc.byteSize = sizeof(RTXDI_PackedPTReservoir) * ptContext.GetReservoirBufferParameters().reservoirArrayPitch * rtxdi::c_NumReSTIRPTReservoirBuffers;
+    ptReservoirBufferDesc.structStride = sizeof(RTXDI_PackedPTReservoir);
+    ptReservoirBufferDesc.initialState = nvrhi::ResourceStates::UnorderedAccess;
+    ptReservoirBufferDesc.keepInitialState = true;
+    ptReservoirBufferDesc.debugName = "PTReservoirBuffer";
+    ptReservoirBufferDesc.canHaveUAVs = true;
+    PTReservoirBuffer = device->createBuffer(ptReservoirBufferDesc);
 
     nvrhi::TextureDesc localLightPdfDesc;
     rtxdi::ComputePdfTextureSize(maxLocalLights, localLightPdfDesc.width, localLightPdfDesc.height, localLightPdfDesc.mipLevels);

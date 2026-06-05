@@ -35,7 +35,7 @@
 
 
 #if PATH_TRACER_MODE==PATH_TRACER_MODE_BUILD_STABLE_PLANES // build
-#if PT_USE_RESTIR_GI || PT_USE_RESTIR_DI
+#if PT_USE_RESTIR_GI || PT_USE_RESTIR_DI || PT_USE_RESTIR_PT
 #define EXPORT_GBUFFER 1
 #endif
 #endif
@@ -1158,7 +1158,7 @@ void Bridge::ExportSurface(const PathState path, PathTracer::SurfaceData surface
     u_Throughput[pixelPos] = Pack_R11G11B10_FLOAT(saturate(path.GetThp()));
     
 #if EXPORT_GBUFFER
-    if (g_Const.ptConsts.useReSTIRDI || g_Const.ptConsts.useReSTIRGI)
+    if (g_Const.ptConsts.useReSTIRDI || g_Const.ptConsts.useReSTIRGI || g_Const.ptConsts.useReSTIRPT)
     {
         // compute address for current output - it ping pongs based on frameIndex!
         const uint idxPingPong = (g_Const.ptConsts.frameIndex % 2) == (uint)0;
@@ -1183,7 +1183,7 @@ void Bridge::ExportNonSurface(const PathState path, float3 virtualWorldPos, floa
     //DebugPixel( pixelPos.xy, float4( 0, 0, 0.2, 1 ) );
 
 #if EXPORT_GBUFFER
-    if (g_Const.ptConsts.useReSTIRDI || g_Const.ptConsts.useReSTIRGI)
+    if (g_Const.ptConsts.useReSTIRDI || g_Const.ptConsts.useReSTIRGI || g_Const.ptConsts.useReSTIRPT)
     {
         // compute address for current output - it ping pongs based on frameIndex!
         const uint idxPingPong = (g_Const.ptConsts.frameIndex % 2) == (uint)0;

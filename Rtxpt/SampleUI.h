@@ -200,12 +200,31 @@ struct PerformancePreset
 #endif
 };
 
+enum class RTXDIRestirQualityPreset : uint32_t
+{
+    Custom = 0,
+    Fast = 1,
+    Medium = 2,
+    Unbiased = 3,
+    Ultra = 4,
+    Reference = 5
+};
+
+enum class RTXDIRestirPTQualityPreset : uint32_t
+{
+    Custom = 0,
+    Fast = 1,
+    Medium = 2,
+    Ultra = 3
+};
+
 struct SampleUIData
 {
-    bool                                ActualUseRTXDIPasses() const { return (RealtimeMode) && (UseReSTIRDI || UseReSTIRGI); }
+    bool                                ActualUseRTXDIPasses() const { return ActualUseReSTIRDI() || ActualUseReSTIRGI() || ActualUseReSTIRPT(); }
     bool                                ActualUseReSTIRDI() const { return UseNEE && (RealtimeMode) && (UseReSTIRDI) && (RealtimeAA < 3 || !DisableReSTIRsWithDLSSRR); }
-    bool                                ActualUseReSTIRGI() const { return (RealtimeMode) && (UseReSTIRGI) && (RealtimeAA < 3 || !DisableReSTIRsWithDLSSRR); }
-    uint                                ActualSamplesPerPixel() const { return (RealtimeMode && !(ActualUseReSTIRDI() || ActualUseReSTIRGI())) ? RealtimeSamplesPerPixel : 1u; }
+    bool                                ActualUseReSTIRGI() const { return (RealtimeMode) && (UseReSTIRGI) && (!UseReSTIRPT) && (RealtimeAA < 3 || !DisableReSTIRsWithDLSSRR); }
+    bool                                ActualUseReSTIRPT() const { return (RealtimeMode) && (UseReSTIRPT) && (RealtimeAA < 3 || !DisableReSTIRsWithDLSSRR); }
+    uint                                ActualSamplesPerPixel() const { return (RealtimeMode && !(ActualUseReSTIRDI() || ActualUseReSTIRGI() || ActualUseReSTIRPT())) ? RealtimeSamplesPerPixel : 1u; }
     bool                                ActualUseStandaloneDenoiser() const { return (RealtimeMode && RealtimeAA < 3) ? StandaloneDenoiser : false; }
     float                               ActualNEEAT_LocalToGlobalSampleRatio() const { return (NEEType == 2) ? (NEEAT_LocalToGlobalSampleRatio) : (0); }    // make sure we use no local samples when NEE-AT disabled!
     bool                                ActualFireflyFilterEnabled() const { return (RealtimeMode)?RealtimeFireflyFilterEnabled:ReferenceFireflyFilterEnabled; }
@@ -262,6 +281,9 @@ struct SampleUIData
     //int                                 NEEBoostSamplingOnDominantPlane = 0;    // Boost light sampling only on the dominant denoising surface
     bool                                UseReSTIRDI /*Defaults in CommandLine >*/;
     bool                                UseReSTIRGI /*Defaults in CommandLine >*/;
+    bool                                UseReSTIRPT /*Defaults in CommandLine >*/;
+    RTXDIRestirQualityPreset            RTXDIRestirPreset = RTXDIRestirQualityPreset::Ultra;
+    RTXDIRestirPTQualityPreset          RTXDIRestirPTPreset = RTXDIRestirPTQualityPreset::Ultra;
     bool                                RealtimeMode = true;
     int                                 RealtimeSamplesPerPixel /*Defaults in CommandLine >*/;        // equivalent to m_ui.AccumulationTarget in reference mode (except looping x times within frame)
     bool                                StandaloneDenoiser /*Defaults in CommandLine >*/;
@@ -330,6 +352,9 @@ struct SampleUIData
     AccelerationStructureUIData         AS;
 
     RtxdiUserSettings                   RTXDI;
+
+    void                                ApplyRTXDIRestirPreset();
+    void                                ApplyRTXDIRestirPTPreset();
     
     bool                                ShowDeltaTree = false;
     bool                                ShowMaterialEditor = true;  // this makes material editor default right click option

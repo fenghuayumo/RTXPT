@@ -72,6 +72,7 @@ void LocalConfig::PostAppInit(SampleUIData& sampleUI)
         sampleUI.RealtimeMode = true;
         sampleUI.UseReSTIRDI = false;           // avoid any temporal issues from DI
         sampleUI.UseReSTIRGI = false;           // avoid any temporal issues from GI
+        sampleUI.UseReSTIRPT = false;           // avoid any temporal issues from PT
         sampleUI.ToneMappingParams.autoExposure = false;    // for stable before/after image comparisons
         sampleUI.StablePlanesActiveCount = 1;   // disable SPs - we want as good raw denoising as possible without SPs hiding any issues
         sampleUI.RealtimeSamplesPerPixel = 2;   // boost global samples
@@ -83,6 +84,7 @@ void LocalConfig::PostAppInit(SampleUIData& sampleUI)
     {
         sampleUI.UseReSTIRDI = false;
         sampleUI.UseReSTIRGI = false;
+        sampleUI.UseReSTIRPT = false;
         sampleUI.ToneMappingParams.autoExposure = false;
         sampleUI.RealtimeAA = 0;
         sampleUI.StandaloneDenoiser = false;
@@ -107,6 +109,7 @@ void LocalConfig::PostAppInit(SampleUIData& sampleUI)
         sampleUI.RealtimeMode = false;
         sampleUI.UseReSTIRDI = false;
         sampleUI.UseReSTIRGI = false;
+        sampleUI.UseReSTIRPT = false;
         sampleUI.ToneMappingParams.autoExposure = false;
         sampleUI.StablePlanesActiveCount = 1;
         sampleUI.ReferenceFireflyFilterEnabled = false;
@@ -114,6 +117,7 @@ void LocalConfig::PostAppInit(SampleUIData& sampleUI)
 #else
         sampleUI.UseReSTIRDI = false;
         sampleUI.UseReSTIRGI = false;
+        sampleUI.UseReSTIRPT = false;
         sampleUI.ToneMappingParams.autoExposure = false;
         sampleUI.RealtimeAA = 0;
         sampleUI.StandaloneDenoiser = false;

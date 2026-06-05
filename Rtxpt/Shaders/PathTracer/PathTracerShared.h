@@ -62,11 +62,11 @@ struct PathTracerConstants
     uint    frameIndex;                     // sampleIndex != frameIndex since we can have multiple samples per frame
     uint    useReSTIRDI;
     uint    useReSTIRGI;
-    uint    environmentMapVisibleToCamera;
+    uint    useReSTIRPT;
 
+    uint    environmentMapVisibleToCamera;
     float   stablePlanesSplitStopThreshold;
     float   _padding3;
-    uint    _padding4;
     float   stablePlanesSuppressPrimaryIndirectSpecularK;
 
     float   denoiserRadianceClampK;

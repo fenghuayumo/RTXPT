@@ -69,6 +69,7 @@ StructuredBuffer<uint> t_GeometryInstanceToLight            : register(t26 VK_DE
 // Screen-sized UAVs
 RWStructuredBuffer<RTXDI_PackedDIReservoir> u_LightReservoirs : register(u13 VK_DESCRIPTOR_SET(2));
 RWStructuredBuffer<RTXDI_PackedGIReservoir> u_GIReservoirs  : register(u14 VK_DESCRIPTOR_SET(2));
+RWStructuredBuffer<RTXDI_PackedPTReservoir> u_PTReservoirs  : register(u17 VK_DESCRIPTOR_SET(2));
 
 // RTXDI UAVs
 RWBuffer<uint2> u_RisBuffer                                 : register(u15 VK_DESCRIPTOR_SET(2));
@@ -83,14 +84,18 @@ SamplerState s_EnvironmentSampler                           : register(s4 VK_DES
 #define RTXDI_LIGHT_RESERVOIR_BUFFER u_LightReservoirs
 #define RTXDI_NEIGHBOR_OFFSETS_BUFFER t_NeighborOffsets
 #define RTXDI_GI_RESERVOIR_BUFFER u_GIReservoirs
+#define RTXDI_PT_RESERVOIR_BUFFER u_PTReservoirs
 
 #define IES_SAMPLER s_EnvironmentMapSampler
 
 #define RTXDI_ENVIRONMENT_MAP t_EnvironmentMap
+#define RAB_DISTANT_LIGHT_DISTANCE DISTANT_LIGHT_DISTANCE
 
 #if !defined(RTXPT_RTXDI_RESOURCES_ONLY)
 
 #include "PolymorphicLightRTXDI.hlsli"
+#include <Rtxdi/Utils/BrdfRaySample.hlsli>
+#include <Rtxdi/Utils/RandomSamplerState.hlsli>
 
 static const bool kSpecularOnly = false;
 static const float kMinRoughness = 0.05f;
@@ -128,6 +133,17 @@ struct RayHitInfo
     uint instanceID;
     uint geometryIndex;
     uint primitiveIndex;
+    float2 barycentrics;
+};
+
+struct RAB_RayPayload
+{
+    float committedRayT;
+    uint instanceID;
+    uint instanceIndex;
+    uint geometryIndex;
+    uint primitiveIndex;
+    bool frontFace;
     float2 barycentrics;
 };
 
@@ -275,6 +291,23 @@ typedef PolymorphicLightInfoFull RAB_LightInfo;
 // Using the RTXPT Sample Generator
 typedef SampleGenerator RAB_RandomSamplerState;
 
+struct RAB_PathTracerUserData
+{
+    RTXDI_PTPathTraceInvocationType pathType;
+};
+
+RAB_PathTracerUserData RAB_EmptyPathTracerUserData()
+{
+    RAB_PathTracerUserData userData = (RAB_PathTracerUserData)0;
+    userData.pathType = RTXDI_PTPathTraceInvocationType_Initial;
+    return userData;
+}
+
+void RAB_PathTracerUserDataSetPathType(inout RAB_PathTracerUserData userData, RTXDI_PTPathTraceInvocationType type)
+{
+    userData.pathType = type;
+}
+
 
 // Initialized the random sampler for a given pixel or tile index.
 // The pass parameter is provided to help generate different RNG sequences
@@ -354,6 +387,41 @@ float3 RAB_GetSurfaceNormal(RAB_Surface surface)
 float RAB_GetSurfaceLinearDepth(RAB_Surface surface)
 {
     return surface.GetViewDepth();
+}
+
+float3 RAB_GetSurfaceViewDir(RAB_Surface surface)
+{
+    return surface.GetView();
+}
+
+float3 RAB_GetSurfaceGeoNormal(RAB_Surface surface)
+{
+    return surface.GetFaceNCorrected();
+}
+
+float RAB_GetSurfaceRoughness(RAB_Surface surface)
+{
+    return surface.GetRoughness();
+}
+
+float RAB_GetRoughness(RAB_Surface surface)
+{
+    return surface.GetRoughness();
+}
+
+void RAB_SetSurfaceWorldPos(inout RAB_Surface surface, float3 worldPos)
+{
+    surface._posW = worldPos;
+}
+
+void RAB_SetSurfaceNormal(inout RAB_Surface surface, float3 normal)
+{
+    surface._N = normalize(normal);
+}
+
+float3 RAB_GetEmissiveColor(RAB_Surface surface)
+{
+    return 0.0.xxx;
 }
 
 
@@ -436,9 +504,28 @@ float RAB_LightSampleSolidAnglePdf(RAB_LightSample lightSample)
     return lightSample.solidAnglePdf;
 }
 
+float3 RAB_LightSamplePosition(RAB_LightSample lightSample)
+{
+    return lightSample.position;
+}
+
+float3 RAB_LightSampleRadiance(RAB_LightSample lightSample)
+{
+    return lightSample.radiance;
+}
+
 float2 RAB_GetEnvironmentMapRandXYFromDir(float3 worldDir)
 {
     return Encode_Oct(worldDir);
+}
+
+float3 RAB_GetEnvironmentRadiance(float3 worldDir)
+{
+    if (g_Const.envMapSceneParams.Enabled == 0.0f)
+        return 0.0.xxx;
+
+    EnvMap envMap = Bridge::CreateEnvMap();
+    return envMap.Eval(worldDir);
 }
 
 // Computes the probability of a particular direction being sampled from the environment map
@@ -536,6 +623,84 @@ float RAB_GetSurfaceBrdfPdf(RAB_Surface surface, float3 dir)
     return surface.EvalPdf(dir, true);
 }
 
+float3 RAB_SurfaceEvaluateBsdfTimesNoL(RAB_Surface surface, float3 dir, bool isDelta)
+{
+    return max(surface.Eval(dir).rgb, 0.0.xxx);
+}
+
+float RAB_SurfaceEvaluateBrdfPdf(RAB_Surface surface, float3 dir)
+{
+    return surface.EvalPdf(dir, true);
+}
+
+float RAB_SurfaceEvaluateBsdfPdf(RAB_Surface surface, float3 dir, RTXDI_BrdfRaySampleProperties brdfSampleProperties)
+{
+    if (brdfSampleProperties.IsDelta())
+        return 1.0f;
+
+    return surface.EvalPdf(dir, true);
+}
+
+bool RAB_SurfaceImportanceSampleBsdf(RAB_Surface surface, inout RTXDI_RandomSamplerState rng, out float3 dir, out RTXDI_BrdfRaySampleProperties brdfSampleProperties)
+{
+    brdfSampleProperties = RTXDI_DefaultBrdfRaySampleProperties();
+    dir = 0.0.xxx;
+
+    float3 wiLocal = surface._ToLocal(surface.GetView());
+    float3 woLocal = 0.0.xxx;
+    float pdf = 0.0f;
+    float3 weight = 0.0.xxx;
+    uint lobe = 0;
+    float lobeP = 0.0f;
+
+    FalcorBSDF bsdf = FalcorBSDF::make(surface._mtl, surface.GetNormal(), surface.GetView(), surface._data);
+
+#if RecycleSelectSamples
+    const float3 u = float3(RTXDI_GetNextRandom(rng), RTXDI_GetNextRandom(rng), RTXDI_GetNextRandom(rng));
+    bool valid = bsdf.sample(wiLocal, woLocal, pdf, weight, lobe, lobeP, u);
+#else
+    const float4 u = float4(
+        RTXDI_GetNextRandom(rng),
+        RTXDI_GetNextRandom(rng),
+        RTXDI_GetNextRandom(rng),
+        RTXDI_GetNextRandom(rng));
+    bool valid = bsdf.sample(wiLocal, woLocal, pdf, weight, lobe, lobeP, u);
+#endif
+
+    if (!valid || pdf <= 0.0f)
+        return false;
+
+    dir = normalize(surface._FromLocal(woLocal));
+
+    if ((lobe & (uint)LobeType::Delta) != 0)
+        brdfSampleProperties.SetDelta();
+    else
+        brdfSampleProperties.SetContinuous();
+
+    if ((lobe & (uint)LobeType::Diffuse) != 0)
+        brdfSampleProperties.SetDiffuse();
+    else
+        brdfSampleProperties.SetSpecular();
+
+    if ((lobe & (uint)LobeType::Transmission) != 0)
+        brdfSampleProperties.SetTransmission();
+    else
+        brdfSampleProperties.SetReflection();
+
+    return true;
+}
+
+float3 RAB_GetReflectedBsdfRadianceForSurface(float3 incomingRadianceLocation, float3 incomingRadiance, RAB_Surface surface)
+{
+    float3 L = normalize(incomingRadianceLocation - surface.GetPosW());
+    return incomingRadiance * RAB_SurfaceEvaluateBsdfTimesNoL(surface, L, false);
+}
+
+float3 RAB_GetPTSampleTargetPdfForSurface(float3 samplePosition, float3 sampleRadiance, RAB_Surface surface)
+{
+    return max(RAB_GetReflectedBsdfRadianceForSurface(samplePosition, sampleRadiance, surface), 0.0.xxx);
+}
+
 
 // Samples a polymorphic light relative to the given receiver surface.
 // For most light types, the "uv" parameter is just a pair of uniform random numbers, originally
@@ -624,6 +789,79 @@ bool GetFinalVisibility(RaytracingAccelerationStructure accelStruct, RayDesc ray
     const bool visible = res.hitType == RayHitType::NoHit;
 
     return visible;
+}
+
+bool RAB_IsValidHit(RAB_RayPayload payload)
+{
+    return payload.instanceIndex != ~0u;
+}
+
+float RAB_RayPayloadGetCommittedHitT(RAB_RayPayload payload)
+{
+    return payload.committedRayT;
+}
+
+bool RAB_RayPayloadIsFrontFace(RAB_RayPayload payload)
+{
+    return payload.frontFace;
+}
+
+RAB_RayPayload RAB_TraceNextBounce(RayDesc ray)
+{
+    RAB_RayPayload payload = (RAB_RayPayload)0;
+    payload.instanceID = ~0u;
+    payload.instanceIndex = ~0u;
+
+#if USE_RAY_QUERY
+    RTXPT_RayQuery(RAY_FLAG_NONE, RTXPT_FLAG_ALLOW_OPACITY_MICROMAPS) rayQuery;
+    rayQuery.TraceRayInline(SceneBVH, RAY_FLAG_NONE, INSTANCE_MASK_ALL, ray);
+
+    while (rayQuery.Proceed())
+    {
+        if (rayQuery.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+        {
+            [branch]
+            if (Bridge::AlphaTest(
+                rayQuery.CandidateInstanceID(),
+                rayQuery.CandidateInstanceIndex(),
+                rayQuery.CandidateGeometryIndex(),
+                rayQuery.CandidatePrimitiveIndex(),
+                rayQuery.CandidateTriangleBarycentrics()))
+            {
+                rayQuery.CommitNonOpaqueTriangleHit();
+            }
+        }
+    }
+
+    if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+    {
+        payload.instanceID = rayQuery.CommittedInstanceID();
+        payload.instanceIndex = rayQuery.CommittedInstanceIndex();
+        payload.geometryIndex = rayQuery.CommittedGeometryIndex();
+        payload.primitiveIndex = rayQuery.CommittedPrimitiveIndex();
+        payload.barycentrics = rayQuery.CommittedTriangleBarycentrics();
+        payload.committedRayT = rayQuery.CommittedRayT();
+        payload.frontFace = rayQuery.CommittedTriangleFrontFace();
+    }
+#else
+    RayPayload tracePayload = (RayPayload)0;
+    tracePayload.instanceIndex = ~0u;
+    tracePayload.throughput = 1.0;
+    TraceRay(SceneBVH, RAY_FLAG_NONE, INSTANCE_MASK_ALL, 0, 0, 0, ray, tracePayload);
+
+    if (tracePayload.instanceIndex != ~0u)
+    {
+        payload.instanceID = tracePayload.instanceIndex;
+        payload.instanceIndex = tracePayload.instanceIndex;
+        payload.geometryIndex = tracePayload.geometryIndex;
+        payload.primitiveIndex = tracePayload.primitiveIndex;
+        payload.barycentrics = tracePayload.barycentrics;
+        payload.committedRayT = tracePayload.committedRayT;
+        payload.frontFace = tracePayload.frontFace;
+    }
+#endif
+
+    return payload;
 }
 
 // Return true if anything was hit. If false, RTXDI will do environment map sampling
@@ -722,6 +960,25 @@ bool RAB_GetTemporalConservativeVisibility(RAB_Surface currentSurface, RAB_Surfa
         return GetConservativeVisibility(PrevSceneBVH, previousSurface, lightSample);
     else*/
     return GetConservativeVisibility(SceneBVH, ray);
+}
+
+uint RAB_GetDuplicationMapCount(int2 previousPixelPosition)
+{
+    return 0;
+}
+
+float RAB_GetMISWeightForNEE(
+    uint lightIndex,
+    RAB_LightSample lightSample,
+    float3 lightDirection,
+    float lightSolidAnglePdf,
+    float scatterPdf)
+{
+    return 1.0f;
+}
+
+void RAB_LastBounceDenoiserCallback(float3 lightPosition, RAB_Surface surface, inout RAB_PathTracerUserData userData)
+{
 }
 
 // Forward declare the SDK function that's used in RAB_AreMaterialsSimilar
