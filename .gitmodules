@@ -19,7 +19,7 @@
 	shallow = false
 [submodule "External/rtxdi-runtime"]
 	path = External/Rtxdi
-	url = https://github.com/NVIDIA-RTX/RTXDI-Library.git
+	url = https://github.com/fenghuayumo/RTXDI-Library.git
 	shallow = false
 [submodule "External/donut"]
 	path = External/Donut
