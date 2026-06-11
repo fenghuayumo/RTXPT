@@ -134,6 +134,12 @@ python Support/python/build_wheel.py
 python -m pip install dist/rtxpt-*.whl
 ```
 
+Installed wheels are intended to be self-contained: the package loads runtime
+libraries from `site-packages/rtxpt/` and resolves shaders/assets relative to
+that package directory, so end users do not need a separate local RTXPT source
+tree or `bin/` folder. DLSS-capable wheels still require a compatible NVIDIA
+GPU, driver stack, and graphics API runtime on the destination machine.
+
 
 ## Building Vulkan
 

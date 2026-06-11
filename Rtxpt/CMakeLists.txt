@@ -288,6 +288,17 @@ if (RTXPT_WITH_OIDN)
     endif()
 endif()
 
+function(rtxpt_apply_origin_rpath TARGET_NAME)
+    if (UNIX AND NOT APPLE)
+        set_target_properties(${TARGET_NAME} PROPERTIES
+            BUILD_RPATH "\$ORIGIN"
+            INSTALL_RPATH "\$ORIGIN"
+            SKIP_BUILD_RPATH OFF
+            BUILD_WITH_INSTALL_RPATH OFF
+        )
+    endif()
+endfunction()
+
 # Macro to create sample executables with common settings
 macro(add_rtxpt_sample TARGET_NAME MAIN_SOURCE)
     set(_extra_sources "")
@@ -316,6 +327,7 @@ macro(add_rtxpt_sample TARGET_NAME MAIN_SOURCE)
         OUTPUT_NAME_DEBUG "${TARGET_NAME}D"
         OUTPUT_NAME_RELEASE "${TARGET_NAME}"
     )
+    rtxpt_apply_origin_rpath(${TARGET_NAME})
 
     if (RTXPT_WITH_OIDN)
         add_custom_command(
@@ -374,6 +386,7 @@ if (RTXPT_WITH_PYTHON AND TARGET nanobind-static)
         RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
         RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL     "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
     )
+    rtxpt_apply_origin_rpath(rtxpt_py)
 
     target_link_libraries(rtxpt_py PRIVATE RtxptCore)
     target_compile_definitions(rtxpt_py PRIVATE RTXPT_BUILDING_EXTENSION=1)
