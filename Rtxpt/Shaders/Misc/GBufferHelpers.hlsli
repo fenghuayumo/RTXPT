@@ -37,6 +37,16 @@ struct PathTracerCollectedSurfaceData
 		return _data.Diffuse();
 	}
 
+	bool IsUnlitReceiveShadows()
+	{
+		return _mtl.isUnlitReceiveShadows();
+	}
+
+	float GetUnlitShadowStrength()
+	{
+		return _mtl.getUnlitShadowStrength();
+	}
+
 	float3 GetSpecular()
 	{
 		return _data.Specular();

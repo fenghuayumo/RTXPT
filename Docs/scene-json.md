@@ -528,6 +528,8 @@ Assets/Materials/default/antman_merged.antman_merged_0.material.json
   "MetalnessInRedChannel": false,
   "ThinSurface": true,
   "ExcludeFromNEE": false,
+  "UnlitReceiveShadows": false,
+  "UnlitShadowStrength": 1.0,
   "PSDExclude": false,
   "PSDDominantDeltaLobe": -1,
   "NestedPriority": 0,
@@ -573,6 +575,8 @@ Assets/Materials/default/antman_merged.antman_merged_0.material.json
 | `MetalnessInRedChannel` | bool | 金属度是否存储在红色通道。 |
 | `ThinSurface` | bool | 是否作为 thin surface 处理。 |
 | `ExcludeFromNEE` | bool | 是否从 NEE 中排除。 |
+| `UnlitReceiveShadows` | bool | 不计算 BRDF、直接光强度或间接光，仅以采样光源的阴影可见性调制 base color。 |
+| `UnlitShadowStrength` | number | `UnlitReceiveShadows` 的阴影强度，范围 0–1；0 保留原始重建纹理，1 应用完整阴影。 |
 | `PSDExclude` | bool | 是否从 path space decomposition 中排除。 |
 | `PSDDominantDeltaLobe` | integer | PSD dominant delta lobe，`-1` 表示无 dominant。 |
 | `PSDBlockMotionVectorsAtSurfaceType` | integer | 曲面/复杂表面的 motion vector 阻断模式。 |

@@ -196,6 +196,10 @@ struct PTMaterial : public PTMaterialBase
     // The mesh will not be part of NEE.
     bool                    ExcludeFromNEE                      = false;
 
+    // Display the sampled base color without BRDF/lighting, but modulate it by light visibility.
+    bool                    UnlitReceiveShadows                 = false;
+    float                   UnlitShadowStrength                 = 1.0f;
+
     // will not propagate dominant stable plane when doing path space decomposition
     bool                    PSDExclude                          = true;
     // for path space decomposition: -1 means no dominant; 0 usually means transmission, 1 usually means reflection, 2 usually means clearcoat reflection - must match corresponding BSDFSample::getDeltaLobeIndex()!

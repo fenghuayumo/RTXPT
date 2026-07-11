@@ -38,6 +38,7 @@ struct MaterialProperties
 #endif
     lpfloat ior;
     lpfloat shadowNoLFadeout;
+    lpfloat unlitShadowStrength;
     uint flags;
 
     static MaterialProperties make()
@@ -64,6 +65,7 @@ struct MaterialProperties
         result.diffuseTransmission = 0;
 #endif
         result.ior = 1.5;
+        result.unlitShadowStrength = 1;
         result.flags = 0;
         return result;
     }

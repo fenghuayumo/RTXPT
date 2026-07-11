@@ -388,6 +388,7 @@ MaterialProperties EvaluateSceneMaterialRTXPT(float3 normal, float4 tangent, PTM
     result.ior = lpfloat( material.IoR );
     
     result.shadowNoLFadeout = lpfloat( material.ShadowNoLFadeout );
+    result.unlitShadowStrength = lpfloat(saturate(material.UnlitShadowStrength));
     
     #if defined(RTXPT_MATERIAL_USE_NORMAL_TEXTURE)
         #if RTXPT_MATERIAL_USE_NORMAL_TEXTURE
@@ -719,6 +720,11 @@ static PathTracer::SurfaceData Bridge::loadSurface( const uint instanceIndex, co
     ptShadingData.mtl.setThinSurface( donutMaterialThinSurface );
     ptShadingData.mtl.setPSDExclude( (donutMaterial.flags & PTMaterialFlags_PSDExclude) != 0 );
     ptShadingData.mtl.setPSDDominantDeltaLobeP1( (donutMaterial.flags & PTMaterialFlags_PSDDominantDeltaLobeP1Mask) >> PTMaterialFlags_PSDDominantDeltaLobeP1Shift );
+    const bool unlitReceiveShadows = (donutMaterial.flags & PTMaterialFlags_UnlitReceiveShadows) != 0;
+    ptShadingData.mtl.setUnlitReceiveShadows(unlitReceiveShadows);
+    ptShadingData.mtl.setUnlitShadowStrength(donutMaterial.unlitShadowStrength);
+    ptShadingData.unlitColor = donutMaterial.baseColor;
+    ptShadingData.unlitShadowStrength = donutMaterial.unlitShadowStrength;
 
 
     // stopping motion vectors from being calculated behind/beyond this surface
@@ -800,6 +806,15 @@ static PathTracer::SurfaceData Bridge::loadSurface( const uint instanceIndex, co
     bsdfDataRoughness = donutMaterial.roughness;
     bsdfDataMetallic = donutMaterial.metalness;
 
+    if (unlitReceiveShadows)
+    {
+        // Preserve the texture-modulated base color in exported surface data. The
+        // ReSTIR DI final pass uses this as an artistic, lighting-independent color.
+        bsdfDataDiffuse = donutMaterial.baseColor;
+        bsdfDataSpecular = 0;
+        bsdfDataMetallic = 0;
+    }
+
     // Assume the default IoR for vacuum on the front-facing side.
     // The renderer may override this for nested dielectrics (see 'handleNestedDielectrics' calling Bridge::updateOutsideIoR)
     ptShadingData.IoR = 1.f;
@@ -815,7 +830,7 @@ static PathTracer::SurfaceData Bridge::loadSurface( const uint instanceIndex, co
     uint neeAnalyticLightIndex = RTXPT_INVALID_LIGHT_INDEX;
 
 #if !defined(RTXPT_MATERIAL_IS_EMISSIVE) || RTXPT_MATERIAL_IS_EMISSIVE
-    if (ptShadingData.frontFacing && any(donutMaterial.emissiveColor>0))
+    if (!unlitReceiveShadows && ptShadingData.frontFacing && any(donutMaterial.emissiveColor>0))
     {
         ptShadingData.emission = donutMaterial.emissiveColor;
 

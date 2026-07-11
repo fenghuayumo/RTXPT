@@ -762,6 +762,12 @@ void RegisterCoreBindings(nb::module_& m)
         .def_prop_rw("exclude_from_nee",
             [](PTMaterial& self) { return self.ExcludeFromNEE; },
             [](PTMaterial& self, bool v) { self.ExcludeFromNEE = v; self.GPUDataDirty = true; })
+        .def_prop_rw("unlit_receive_shadows",
+            [](PTMaterial& self) { return self.UnlitReceiveShadows; },
+            [](PTMaterial& self, bool v) { self.UnlitReceiveShadows = v; self.GPUDataDirty = true; })
+        .def_prop_rw("unlit_shadow_strength",
+            [](PTMaterial& self) { return self.UnlitShadowStrength; },
+            [](PTMaterial& self, float v) { self.UnlitShadowStrength = std::clamp(v, 0.0f, 1.0f); self.GPUDataDirty = true; })
         .def_prop_rw("enable_as_analytic_light_proxy",
             [](PTMaterial& self) { return self.EnableAsAnalyticLightProxy; },
             [](PTMaterial& self, bool v) { self.EnableAsAnalyticLightProxy = v; self.GPUDataDirty = true; })

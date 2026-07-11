@@ -204,6 +204,8 @@ void PTMaterial::Write(Json::Value& output)
     STORE_FIELD(MetalnessInRedChannel);
     STORE_FIELD(ThinSurface);
     STORE_FIELD(ExcludeFromNEE);
+    STORE_FIELD(UnlitReceiveShadows);
+    STORE_FIELD(UnlitShadowStrength);
     STORE_FIELD(PSDExclude);
     STORE_FIELD(PSDDominantDeltaLobe);
     STORE_FIELD(PSDBlockMotionVectorsAtSurfaceType);
@@ -332,6 +334,8 @@ bool PTMaterial::Read(
     LOAD_FIELD(MetalnessInRedChannel);
     LOAD_FIELD(ThinSurface);
     LOAD_FIELD(ExcludeFromNEE);
+    LOAD_FIELD(UnlitReceiveShadows);
+    LOAD_FIELD(UnlitShadowStrength);
     LOAD_FIELD(PSDExclude);
     LOAD_FIELD(PSDBlockMotionVectorsAtSurfaceType);
 
@@ -519,6 +523,17 @@ bool PTMaterial::EditorGUI(MaterialsBaker & baker)
 
         update |= ImGui::Checkbox("Ignore by NEE shadow ray (bias!)", &ExcludeFromNEE);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Ignored for shadow rays during Next Event Estimation\nNote: this isn't physically correct - it adds bias!");
+
+        update |= ImGui::Checkbox("Unlit, receive shadows", &UnlitReceiveShadows);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(
+            "Displays base color without BRDF, direct-light intensity, or indirect lighting,\n"
+            "while retaining shadows from sampled scene lights.");
+
+        {
+            UI_SCOPED_DISABLE(!UnlitReceiveShadows);
+            update |= ImGui::SliderFloat("Unlit shadow strength", &UnlitShadowStrength, 0.0f, 1.0f);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("0 keeps the reconstructed texture unchanged; 1 applies the full sampled shadow.");
 
         update |= ImGui::SliderFloat("Shadow NoL Fadeout", &ShadowNoLFadeout, 0.0f, 0.2f);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip(
@@ -796,6 +811,8 @@ static void GetBindlessTextureIndex(const std::shared_ptr<LoadedTexture>& textur
 
 bool PTMaterial::IsEmissive() const
 {
+    if (UnlitReceiveShadows)
+        return false;
     return (EmissiveIntensity > 0) && (donut::math::any(EmissiveColor>0.0f)) || UseDonutEmissiveIntensity;  // UseDonutEmissiveIntensity can animate on/off so just assume we're emissive and pay the cost
 }
 
@@ -847,6 +864,9 @@ void PTMaterial::FillData(PTMaterialData & data)
     if (IsOpenPBRMaterialModel(MaterialModel))
         data.Flags |= PTMaterialFlags_UseOpenPBRMaterialModel;
 
+    if (UnlitReceiveShadows)
+        data.Flags |= PTMaterialFlags_UnlitReceiveShadows;
+
     // free parameters
 
     data.BaseOrDiffuseColor = BaseOrDiffuseColor;
@@ -863,6 +883,7 @@ void PTMaterial::FillData(PTMaterialData & data)
     data.NormalTextureScale = NormalTextureScale;
     data.TransmissionFactor = (EnableTransmission)?(TransmissionFactor):(0);
     data.DiffuseTransmissionFactor = (EnableTransmission)?(DiffuseTransmissionFactor):(0);
+    data.UnlitShadowStrength = std::clamp(UnlitShadowStrength, 0.0f, 1.0f);
     data.Opacity = Opacity;
     data.AlphaCutoff = AlphaCutoff;
     data.IoR = IoR;
@@ -882,7 +903,7 @@ void PTMaterial::FillData(PTMaterialData & data)
 
     data.ShadowNoLFadeout = std::clamp(ShadowNoLFadeout, 0.0f, 0.25f);
 
-    data._padding0 = data._padding1 = 42;
+    data._padding0 = 42;
 }
 
 std::filesystem::path MaterialsBaker::GetMaterialStoragePath(PTMaterialBase& material)

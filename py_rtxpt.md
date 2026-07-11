@@ -835,6 +835,8 @@ Editable properties automatically mark GPU data dirty:
 | `thin_surface` | `bool` |
 | `geometry_thin_walled` | `bool` |
 | `exclude_from_nee` | `bool` |
+| `unlit_receive_shadows` | `bool` |
+| `unlit_shadow_strength` | `float` (0–1) |
 | `enable_as_analytic_light_proxy` | `bool` |
 | `skip_render` | `bool` |
 | `metalness_in_red_channel` | `bool` |
@@ -883,7 +885,7 @@ Editable properties automatically mark GPU data dirty:
 - Setting `transmission_weight` or `transmission_diffuse_weight` from Python automatically updates `enable_transmission` from the two OpenPBR transmission weights.
 - `opacity` is multiplied by the base texture alpha when `enable_base_texture=True`.
 - Use `set_base_texture`, `set_orm_texture`, `set_normal_texture`, `set_emissive_texture`, or `set_transmission_texture` to replace an imported texture at runtime. Relative paths are resolved the same way as material JSON paths: runtime `Assets/` first, then the current scene directory. For `.png` inputs, an existing sibling `.dds` is preferred, matching material JSON loading.
-- Pure parameter edits such as color, roughness, metalness, opacity, texture toggles, emissive intensity, normal scale, and IOR are next-frame updates. Bigger classification edits such as `use_specular_gloss`, `enable_alpha_testing`, `alpha_cutoff`, `enable_transmission`, `exclude_from_nee`, or `skip_render` can change shader hit groups, alpha handling, lighting participation, or acceleration-structure metadata; after those edits, request a shader/acceleration refresh.
+- Pure parameter edits such as color, roughness, metalness, opacity, texture toggles, emissive intensity, normal scale, and IOR are next-frame updates. Bigger classification edits such as `use_specular_gloss`, `enable_alpha_testing`, `alpha_cutoff`, `enable_transmission`, `exclude_from_nee`, `unlit_receive_shadows`, or `skip_render` can change shader hit groups, alpha handling, lighting participation, or acceleration-structure metadata; after those edits, request a shader/acceleration refresh.
 
 Typical runtime material override:
 

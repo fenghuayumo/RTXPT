@@ -591,6 +591,9 @@ float RAB_GetLightSampleTargetPdfForSurface(RAB_LightSample lightSample, RAB_Sur
         return 0;
 #endif
 
+    if (surface.IsUnlitReceiveShadows())
+        return Luminance(lightSample.radiance) / lightSample.solidAnglePdf;
+
     float3 fullBRDF = surface.Eval(toLight).rgb;
     return Luminance(fullBRDF * lightSample.radiance) / lightSample.solidAnglePdf;
 
