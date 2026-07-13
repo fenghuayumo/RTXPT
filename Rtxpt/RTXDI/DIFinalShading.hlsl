@@ -44,8 +44,14 @@ bool getFinalSample(const uint2 reservoirPos, const RAB_Surface surface, out flo
     RAB_LightInfo lightInfo = RAB_LoadLightInfo(lightIdx, false);
     lightSample = RAB_SamplePolymorphicLight(lightInfo, surface, lightUV);
 
+    float3 toLight;
+    float lightDistance;
+    RAB_GetLightDirDistance(surface, lightSample, toLight, lightDistance);
+    const bool unlitBackSideLight = surface.IsUnlitReceiveShadows()
+        && dot(toLight, surface.GetFaceNCorrected()) <= 0.0;
+
     // Check the light is visible to the surface 
-    if (g_RtxdiBridgeConst.restirDI.shadingParams.enableFinalVisibility)
+    if (g_RtxdiBridgeConst.restirDI.shadingParams.enableFinalVisibility && !unlitBackSideLight)
     {
         const RayDesc ray = setupVisibilityRay(surface, lightSample, g_RtxdiBridgeConst.rayEpsilon);
 

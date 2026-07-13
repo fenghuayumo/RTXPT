@@ -41,7 +41,12 @@ namespace PathTracer
     inline float EvalSampleWeight( const LightSample lightSample, const ShadingData shadingData, const ActiveBSDF bsdf )
     {
         if (shadingData.mtl.isUnlitReceiveShadows())
-            return max3(lightSample.Li);
+        {
+            // A shadow can only be projected onto the outward side of this
+            // surface. Back-side lights must not turn an unlit surface black.
+            const bool lightOnReceiverSide = dot(shadingData.faceNCorrected, lightSample.Direction) > 0.0;
+            return lightOnReceiverSide ? max3(lightSample.Li) : 0.0;
+        }
 
     #if 0 // more costly version, does full BSDF - not really worth it unless special case colourful materials with colourful lights
         float3 bsdfThp = bsdf.eval(shadingData, lightSample.Direction, bsdfThpDiff, bsdfThpSpec);
@@ -147,6 +152,9 @@ namespace PathTracer
 
         LightSample pickedSample = wrs.Candidate;
 
+        if (wrs.WeightSum <= 0.0 || !pickedSample.Valid())
+            return pickedSample;
+
 #define LATE_WRS_MIS 1  // functionally identical, just faster if done after shadow test
 #if !LATE_WRS_MIS
         float thisPdf, otherPdf;
@@ -171,7 +179,9 @@ namespace PathTracer
         float3 surfaceShadingNormal = shadingData.N;
 
         // We must use **shading** normal to correctly figure out whether we're solving for BRDF or BTDF lobe (whether we want to cast the ray above or under the triangle).
-        float faceSide = dot(surfaceShadingNormal, lightSample.Direction) >= 0 ? 1 : -1;
+        float faceSide = shadingData.mtl.isUnlitReceiveShadows()
+            ? 1.0
+            : (dot(surfaceShadingNormal, lightSample.Direction) >= 0 ? 1.0 : -1.0);
 
         float3 surfaceFaceNormal = shadingData.faceNCorrected * faceSide;
         float3 surfaceWorldPos = ComputeRayOrigin(shadingData.posW, surfaceFaceNormal);
@@ -193,8 +203,17 @@ namespace PathTracer
 
         /*[branch]*/ if (lightSample.Valid())   // if sample's bad, skip; we tried casting the ray anyway but ignoring the results - didn't yield better perf
         {
-            RayDesc ray = ComputeVisibilityRay(lightSample, shadingData);
-            visibility = Bridge::traceVisibilityRay(ray, preScatterPath.rayCone, preScatterPath.getVertexIndex(), workingContext.Debug);
+            const bool unlitBackSideLight = shadingData.mtl.isUnlitReceiveShadows()
+                && dot(shadingData.faceNCorrected, lightSample.Direction) <= 0.0;
+            if (unlitBackSideLight)
+            {
+                visibility = 1.0;
+            }
+            else
+            {
+                RayDesc ray = ComputeVisibilityRay(lightSample, shadingData);
+                visibility = Bridge::traceVisibilityRay(ray, preScatterPath.rayCone, preScatterPath.getVertexIndex(), workingContext.Debug);
+            }
         }
         bool visible = any(visibility > 0.0);
 
