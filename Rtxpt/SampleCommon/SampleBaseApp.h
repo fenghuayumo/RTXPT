@@ -44,7 +44,8 @@ public:
 		Success,
 		FailProcessingCommandLine,
 		FailToCreateDevice,
-		FailDeviceFeatureSupport
+		FailDeviceFeatureSupport,
+		ExitAfterListingAdapters	// --listAdapters ran; not an error, callers should exit with 0
 	};
 
 	InitReturnCodes Init(int argc, const char* const* argv);
@@ -64,7 +65,8 @@ private:
 	donut::app::DeviceCreationParameters GetDefaultDeviceParams() const;
 	bool ProcessCommandLine(int argc, char const* const* argv,
 		donut::app::DeviceCreationParameters& deviceParams, std::string& preferredScene);
-	bool InitDeviceAndWindow(const donut::app::DeviceCreationParameters& deviceParams);
+	bool InitDeviceAndWindow(donut::app::DeviceCreationParameters& deviceParams);
+	void ListAdapters(donut::app::DeviceCreationParameters deviceParams);
 	bool CheckDeviceFeatureSupport(const donut::app::DeviceCreationParameters& deviceParams);
 	void CreateShaderFactory();
 

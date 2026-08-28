@@ -37,7 +37,7 @@ struct ToneMappingConstants
 	float autoExposureLumValueMax;
     float3x4 colorTransform;
     uint enabled;
-    uint _padding0;
+    uint toneMapBypassEnabled;      // when 0 the bypass mask is ignored entirely
     uint _padding1;
     uint _padding2;
 };

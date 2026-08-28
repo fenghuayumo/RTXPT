@@ -374,6 +374,7 @@ void Sample::Init(const std::string& preferredScene,
         nvrhi::BindingLayoutItem::Texture_UAV(6),           // u_Depth
         nvrhi::BindingLayoutItem::Texture_UAV(7),           // u_SpecularHitT
         nvrhi::BindingLayoutItem::Texture_UAV(8),           // u_ScratchFloat1
+        nvrhi::BindingLayoutItem::Texture_UAV(9),           // u_ToneMapBypass
         // denoising slots go from 30-39
         //nvrhi::BindingLayoutItem::StructuredBuffer_UAV(30), // denoiser 'control buffer' (might be removed, might be reused)
         nvrhi::BindingLayoutItem::Texture_UAV(31),          // RWTexture2D<float>  u_DenoiserViewspaceZ
@@ -3223,7 +3224,7 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
     PostProcessPreToneMapping(m_commandList, fullscreenView);   // writing to m_renderTargets->ProcessedOutputColor
 
     //Tone Mapping; it will read from m_renderTargets->ProcessedOutputColor and write into m_renderTargets->LdrColor; in case tonemapping is disabled, it's just a passthrough
-    if (m_toneMappingPass->Render(m_commandList, fullscreenView, m_renderTargets->ProcessedOutputColor, m_ui.EnableToneMapping))
+    if (m_toneMappingPass->Render(m_commandList, fullscreenView, m_renderTargets->ProcessedOutputColor, m_ui.EnableToneMapping, m_renderTargets->ToneMapBypass))
     {
         // first run tonemapper can close & re-open command list - when that happens, we have to re-upload volatile constants
         m_commandList->writeBuffer(m_constantBuffer, &constants, sizeof(constants));
@@ -3398,7 +3399,8 @@ void Sample::RecreateBindingSet()
         nvrhi::BindingSetItem::Texture_UAV(5, m_renderTargets->ScreenMotionVectors),
         nvrhi::BindingSetItem::Texture_UAV(6, m_renderTargets->Depth),
         nvrhi::BindingSetItem::Texture_UAV(7, m_renderTargets->SpecularHitT), 
-        nvrhi::BindingSetItem::Texture_UAV(8, m_renderTargets->ScratchFloat1), 
+        nvrhi::BindingSetItem::Texture_UAV(8, m_renderTargets->ScratchFloat1),
+        nvrhi::BindingSetItem::Texture_UAV(9, m_renderTargets->ToneMapBypass), 
         nvrhi::BindingSetItem::Texture_UAV(31, m_renderTargets->DenoiserViewspaceZ),
         nvrhi::BindingSetItem::Texture_UAV(32, m_renderTargets->DenoiserMotionVectors),
         nvrhi::BindingSetItem::Texture_UAV(33, m_renderTargets->DenoiserNormalRoughness),

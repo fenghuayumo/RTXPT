@@ -23,6 +23,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/vector.h>
 
 #include "../Sample.h"
 #include "../SampleUI.h"
@@ -89,7 +90,7 @@ class PyRenderer
 public:
     PyRenderer(int width, int height, bool headless, bool useVulkan,
                int adapterIndex, bool debug, const std::string& scene,
-               bool realtimeMode, int accumulationTarget)
+               bool realtimeMode, int accumulationTarget, const std::string& adapter)
     {
         RenderSession::Config cfg;
         cfg.width              = width;
@@ -97,6 +98,7 @@ public:
         cfg.headless           = headless;
         cfg.useVulkan          = useVulkan;
         cfg.adapterIndex       = adapterIndex;
+        cfg.adapter            = adapter;
         cfg.debug              = debug;
         cfg.nonInteractive     = true;
         cfg.scene              = scene;
@@ -174,6 +176,10 @@ public:
         return m_session ? m_session->GetSample() : nullptr;
     }
 
+    rtxpt::AdapterDesc GetAdapter() const {
+        return m_session ? m_session->GetAdapter() : rtxpt::AdapterDesc();
+    }
+
     bool IsValid() const { return m_session && m_session->GetSample() != nullptr; }
 
 private:
@@ -187,10 +193,35 @@ NB_MODULE(rtxpt, m)
 
     rtxpt_py::RegisterCoreBindings(m);
 
+    nb::class_<rtxpt::AdapterDesc>(m, "AdapterInfo",
+        "A GPU that RTXPT can render on, as reported by the graphics backend.")
+        .def_ro("index", &rtxpt::AdapterDesc::Index,
+                "Index to pass as Renderer(adapter_index=...).  -1 when unresolved.")
+        .def_ro("name", &rtxpt::AdapterDesc::Name)
+        .def_ro("vendor_id", &rtxpt::AdapterDesc::VendorID)
+        .def_ro("device_id", &rtxpt::AdapterDesc::DeviceID)
+        .def_ro("video_memory", &rtxpt::AdapterDesc::DedicatedVideoMemory,
+                "Dedicated video memory in bytes.")
+        .def_prop_ro("vendor",
+                [](const rtxpt::AdapterDesc& self) { return std::string(rtxpt::VendorName(self.VendorID)); },
+                "'NVIDIA', 'AMD', 'Intel', 'Microsoft', or 'unknown'.")
+        .def_prop_ro("kind",
+                [](const rtxpt::AdapterDesc& self) { return std::string(rtxpt::AdapterKindName(self)); },
+                "'discrete', 'integrated', or 'software'.  On Vulkan an integrated GPU may be\n"
+                "reported as discrete, because the backend exposes the whole device local heap.")
+        .def("__repr__", [](const rtxpt::AdapterDesc& self) {
+                return "<rtxpt.AdapterInfo " + std::to_string(self.Index) + ": '" + self.Name + "' "
+                     + rtxpt::VendorName(self.VendorID) + ", " + rtxpt::AdapterKindName(self) + ", "
+                     + std::to_string(self.DedicatedVideoMemory >> 20) + " MB>";
+        });
+
     nb::class_<PyRenderer>(m, "Renderer",
         "Standalone path-tracer renderer.  Each instance owns its own GPU\n"
         "device (DX12 / Vulkan), shaders, scene, and back buffer.  In headless\n"
         "mode rendering uses offscreen back buffers without creating an OS window.\n\n"
+        "By default the GPU with the best expected compute performance is used.  Pass\n"
+        "`adapter` with part of a GPU name (e.g. adapter='RTX 4090') or `adapter_index`\n"
+        "with an explicit index to override that choice.\n\n"
         "Example:\n"
         "    import rtxpt\n"
         "    r = rtxpt.Renderer(width=1280, height=720, headless=True,\n"
@@ -199,7 +230,7 @@ NB_MODULE(rtxpt, m)
         "    r.step_until_accumulated()\n"
         "    r.save_screenshot('frame.png')\n"
         "    r.close()")
-        .def(nb::init<int, int, bool, bool, int, bool, const std::string&, bool, int>(),
+        .def(nb::init<int, int, bool, bool, int, bool, const std::string&, bool, int, const std::string&>(),
              nb::arg("width") = 1920,
              nb::arg("height") = 1080,
              nb::arg("headless") = true,
@@ -208,7 +239,11 @@ NB_MODULE(rtxpt, m)
              nb::arg("debug") = false,
              nb::arg("scene") = std::string(),
              nb::arg("realtime") = false,
-             nb::arg("accumulation_target") = 64)
+             nb::arg("accumulation_target") = 64,
+             nb::arg("adapter") = std::string())
+
+        .def_prop_ro("adapter", &PyRenderer::GetAdapter,
+             "The AdapterInfo of the GPU this renderer actually runs on.")
 
         .def("close", &PyRenderer::Close,
              "Tear down the GPU device, scene and back buffer.  Called automatically\n"
@@ -312,6 +347,30 @@ NB_MODULE(rtxpt, m)
              self.Close();
              return false;
         }, nb::arg().none(), nb::arg().none(), nb::arg().none());
+
+    m.def("list_adapters",
+          [](bool vulkan) {
+              std::vector<rtxpt::AdapterDesc> adapters;
+              int bestIndex = -1;
+              rtxpt_py::ListAdapters(vulkan, adapters, bestIndex);
+              return adapters;
+          },
+          nb::arg("vulkan") = false,
+          "Return the GPUs available to the given backend, ordered by adapter index.\n"
+          "Can be called before creating a Renderer; use the `index` of an entry as\n"
+          "Renderer(adapter_index=...), or match on `name` and pass Renderer(adapter=...).\n"
+          "Returns an empty list when the backend cannot enumerate adapters.");
+
+    m.def("best_adapter",
+          [](bool vulkan) -> nb::object {
+              std::vector<rtxpt::AdapterDesc> adapters;
+              int bestIndex = -1;
+              if (!rtxpt_py::ListAdapters(vulkan, adapters, bestIndex) || bestIndex < 0)
+                  return nb::none();
+              return nb::cast(adapters[bestIndex]);
+          },
+          nb::arg("vulkan") = false,
+          "The AdapterInfo that a Renderer would pick by default, or None if unavailable.");
 
     m.def("app", []() -> Sample* { return &RequireCurrentSample(); },
           nb::rv_policy::reference,

@@ -36,6 +36,7 @@
 #include <donut/core/math/math.h>
 #include <donut/app/DeviceManager.h>
 
+#include "../SampleCommon/AdapterSelection.h"
 #include "../SampleCommon/CommandLine.h"
 
 #if DONUT_WITH_DX12 && defined(RTXPT_D3D_AGILITY_SDK_VERSION)
@@ -51,6 +52,12 @@ namespace rtxpt_py
     // Returns a minimal scene JSON string that references an RTXPT builtin
     // primitive model ("plane", "cube", "sphere", or "plane_cube").
     std::string BuiltinSceneJson(const std::string& builtinModel = "plane_cube");
+
+    // Enumerates the GPUs the given backend can render on, without creating a device. `outBestIndex`
+    // receives the index that automatic selection would pick, or -1 when nothing was enumerated.
+    // Safe to call while a RenderSession is alive: an existing session's instance is reused, because
+    // tearing a second one down would take the process wide Streamline/GLFW state with it.
+    bool ListAdapters(bool useVulkan, std::vector<rtxpt::AdapterDesc>& outAdapters, int& outBestIndex);
 }
 
 class RenderSession
@@ -66,7 +73,8 @@ public:
 #else
         bool        useVulkan         = true;     // Vulkan is the only backend on Linux/WSL
 #endif
-        int         adapterIndex      = -1;       // -1 => default
+        int         adapterIndex      = -1;       // -1 => pick the adapter with the best expected compute performance
+        std::string adapter;                      // case-insensitive part of the adapter name, or an index; wins only when adapterIndex < 0
         bool        debug             = false;
         bool        nonInteractive    = true;     // do not popup blocking dialogs
         std::string scene;                        // optional initial scene
@@ -118,6 +126,10 @@ public:
     donut::app::DeviceManager* GetDeviceManager() { return m_deviceManager.get(); }
     const Config&              GetConfig() const  { return m_config; }
 
+    // The GPU this session renders on. Index stays -1 if adapters could not be enumerated and the
+    // backend picked one on its own.
+    const rtxpt::AdapterDesc&  GetAdapter() const { return m_adapter; }
+
 private:
     bool InitDevice();
     bool InitRenderer();
@@ -126,6 +138,7 @@ private:
     Config                                          m_config;
     CommandLineOptions                              m_cmdLine;
     std::unique_ptr<donut::app::DeviceManager>      m_deviceManager;
+    rtxpt::AdapterDesc                              m_adapter;
     std::shared_ptr<donut::engine::ShaderFactory>   m_shaderFactory;
     std::unique_ptr<AdvancedPathTracer>             m_renderer;
 #if DONUT_WITH_DX12 && defined(RTXPT_D3D_AGILITY_SDK_VERSION)

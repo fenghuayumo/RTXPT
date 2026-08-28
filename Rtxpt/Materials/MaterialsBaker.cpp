@@ -206,6 +206,7 @@ void PTMaterial::Write(Json::Value& output)
     STORE_FIELD(ExcludeFromNEE);
     STORE_FIELD(UnlitReceiveShadows);
     STORE_FIELD(UnlitShadowStrength);
+    STORE_FIELD(SkipToneMapping);
     STORE_FIELD(PSDExclude);
     STORE_FIELD(PSDDominantDeltaLobe);
     STORE_FIELD(PSDBlockMotionVectorsAtSurfaceType);
@@ -336,6 +337,7 @@ bool PTMaterial::Read(
     LOAD_FIELD(ExcludeFromNEE);
     LOAD_FIELD(UnlitReceiveShadows);
     LOAD_FIELD(UnlitShadowStrength);
+    LOAD_FIELD(SkipToneMapping);
     LOAD_FIELD(PSDExclude);
     LOAD_FIELD(PSDBlockMotionVectorsAtSurfaceType);
 
@@ -534,6 +536,13 @@ bool PTMaterial::EditorGUI(MaterialsBaker & baker)
             update |= ImGui::SliderFloat("Unlit shadow strength", &UnlitShadowStrength, 0.0f, 1.0f);
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("0 keeps the reconstructed texture unchanged; 1 applies the full sampled shadow.");
+
+        update |= ImGui::Checkbox("Skip tone mapping", &SkipToneMapping);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(
+            "Pixels whose primary hit is this material bypass auto-exposure and the tone mapping curve.\n"
+            "Combined with 'Unlit, receive shadows' this puts the base color texture on screen unaltered,\n"
+            "so background geometry matches a photographed or scanned plate.\n"
+            "Note: only the primary (camera) hit is considered - reflections of this material are still tone mapped.");
 
         update |= ImGui::SliderFloat("Shadow NoL Fadeout", &ShadowNoLFadeout, 0.0f, 0.2f);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip(
@@ -866,6 +875,9 @@ void PTMaterial::FillData(PTMaterialData & data)
 
     if (UnlitReceiveShadows)
         data.Flags |= PTMaterialFlags_UnlitReceiveShadows;
+
+    if (SkipToneMapping)
+        data.Flags |= PTMaterialFlags_SkipToneMapping;
 
     // free parameters
 

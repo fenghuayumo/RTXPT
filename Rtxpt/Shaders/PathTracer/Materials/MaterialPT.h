@@ -38,6 +38,7 @@ static const int PTMaterialFlags_PSDBlockMVsAtSurfaceTypeB0     = (1 << 13);
 static const int PTMaterialFlags_PSDBlockMVsAtSurfaceTypeB1     = (1 << 14);
 static const int PTMaterialFlags_UseOpenPBRMaterialModel        = (1 << 15);
 static const int PTMaterialFlags_UnlitReceiveShadows            = (1 << 16);
+static const int PTMaterialFlags_SkipToneMapping                = (1 << 17);
 static const int PTMaterialFlags_NestedPriorityMask             = 0xF0000000;
 static const int PTMaterialFlags_NestedPriorityShift            = 28;
 static const int PTMaterialFlags_PSDDominantDeltaLobeP1Mask     = 0x0F000000;

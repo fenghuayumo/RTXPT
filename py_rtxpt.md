@@ -500,6 +500,7 @@ rtxpt.Renderer(
     scene="",
     realtime=False,
     accumulation_target=64,
+    adapter="",
 )
 ```
 
@@ -508,7 +509,8 @@ rtxpt.Renderer(
 | `width`, `height` | Initial backbuffer/window size. |
 | `headless` | `True`: offscreen backbuffers, no OS window. `False`: create a window and swap chain. |
 | `vulkan` | `False` uses DX12. `True` requests Vulkan when available. |
-| `adapter_index` | GPU index, `-1` means default adapter. |
+| `adapter_index` | Explicit GPU index. `-1` (the default) picks the GPU with the best expected compute performance. |
+| `adapter` | GPU selected by a case-insensitive part of its name, e.g. `"RTX 4090"`; a plain number is treated as an index. Used only when `adapter_index` is negative. |
 | `debug` | Enable graphics debug settings. |
 | `scene` | Scene file path/name, `builtin:*` primitive reference, or inline scene JSON string. Relative file paths are resolved from `Assets/`. |
 | `realtime` | Start in realtime mode if `True`, reference mode if `False`. |
@@ -535,6 +537,49 @@ rtxpt.Renderer(
 | `set_camera_intrinsics(fx, fy, cx, cy, width, height)` | `None` | Set an off-center pinhole projection from pixel-space intrinsics. This overrides the symmetric FOV projection until `set_camera_fov(...)` is called. |
 | `app` | `Sample` | Underlying renderer instance. |
 | `settings` | `Settings` | Live UI/settings state. |
+| `adapter` | `AdapterInfo` | The GPU this renderer actually runs on. |
+
+### Choosing a GPU
+
+Without either adapter argument, RTXPT ranks the GPUs present in the system and takes the one
+with the best expected compute performance: hardware over software, discrete over integrated,
+then vendor, then video memory size. This avoids landing on an integrated GPU on machines that
+have both. Override it when a specific GPU is wanted:
+
+```python
+# by name
+r = rtxpt.Renderer(headless=True, adapter="RTX 4090")
+
+# by explicit index, matching the order printed by `Rtxpt.exe --listAdapters`
+r = rtxpt.Renderer(headless=True, adapter_index=1)
+```
+
+The GPU that ends up being used is written to the log at info level, and is also available as
+`r.adapter`.
+
+To discover the indices and names before creating a renderer, enumerate the GPUs. Both functions
+work without a `Renderer` and are the Python equivalent of `Rtxpt.exe --listAdapters`:
+
+| API | Return | Notes |
+| --- | --- | --- |
+| `rtxpt.list_adapters(vulkan=False)` | `list[AdapterInfo]` | GPUs available to the backend, ordered by adapter index. Empty when the backend cannot enumerate them. |
+| `rtxpt.best_adapter(vulkan=False)` | `AdapterInfo` or `None` | The GPU a `Renderer` would pick by default. |
+
+An `AdapterInfo` carries `index`, `name`, `vendor` (`"NVIDIA"`, `"AMD"`, `"Intel"`, `"Microsoft"`,
+`"unknown"`), `kind` (`"discrete"`, `"integrated"`, `"software"`), `video_memory` in bytes, and the
+raw `vendor_id` / `device_id`. Note that on Vulkan an integrated GPU can be reported as `discrete`,
+because the backend exposes the whole device-local heap rather than dedicated VRAM.
+
+```python
+import rtxpt
+
+for a in rtxpt.list_adapters():
+    print(a.index, a.name, a.kind, a.video_memory // (1 << 20), "MB")
+
+gpus = [a for a in rtxpt.list_adapters() if a.vendor == "NVIDIA"]
+r = rtxpt.Renderer(headless=True, adapter_index=gpus[-1].index)
+print("rendering on", r.adapter.name)
+```
 
 `Renderer` supports context manager syntax:
 
@@ -837,6 +882,7 @@ Editable properties automatically mark GPU data dirty:
 | `exclude_from_nee` | `bool` |
 | `unlit_receive_shadows` | `bool` |
 | `unlit_shadow_strength` | `float` (0–1) |
+| `skip_tone_mapping` | `bool` |
 | `enable_as_analytic_light_proxy` | `bool` |
 | `skip_render` | `bool` |
 | `metalness_in_red_channel` | `bool` |
@@ -884,6 +930,7 @@ Editable properties automatically mark GPU data dirty:
 - Set `material_model = "OpenPBR"` to use OpenPBR-lite naming. Python exposes the same OpenPBR-lite aliases as the material UI, including `base_metalness`, `specular_roughness`, `specular_roughness_anisotropy`, `specular_ior`, `transmission_weight`, `transmission_diffuse_weight`, `geometry_opacity`, `geometry_thin_walled`, `emission_color`, `emission_luminance`, and `fuzz_*`. Legacy aliases such as `metalness`, `roughness`, `opacity`, and `transmission_factor` remain valid.
 - Setting `transmission_weight` or `transmission_diffuse_weight` from Python automatically updates `enable_transmission` from the two OpenPBR transmission weights.
 - `opacity` is multiplied by the base texture alpha when `enable_base_texture=True`.
+- `skip_tone_mapping=True` makes pixels whose primary (camera) hit is this material bypass auto-exposure and the tone curve, so the linear shading result reaches the sRGB backbuffer unaltered. Combined with `unlit_receive_shadows=True` this puts the base color texture on screen as-is, which is how background geometry is matched to a photographed or scanned plate. Reflections of the material are still tone mapped, since only the primary hit is considered.
 - Use `set_base_texture`, `set_orm_texture`, `set_normal_texture`, `set_emissive_texture`, or `set_transmission_texture` to replace an imported texture at runtime. Relative paths are resolved the same way as material JSON paths: runtime `Assets/` first, then the current scene directory. For `.png` inputs, an existing sibling `.dds` is preferred, matching material JSON loading.
 - Pure parameter edits such as color, roughness, metalness, opacity, texture toggles, emissive intensity, normal scale, and IOR are next-frame updates. Bigger classification edits such as `use_specular_gloss`, `enable_alpha_testing`, `alpha_cutoff`, `enable_transmission`, `exclude_from_nee`, `unlit_receive_shadows`, or `skip_render` can change shader hit groups, alpha handling, lighting participation, or acceleration-structure metadata; after those edits, request a shader/acceleration refresh.
 

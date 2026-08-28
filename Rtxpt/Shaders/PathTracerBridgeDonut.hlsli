@@ -723,6 +723,7 @@ static PathTracer::SurfaceData Bridge::loadSurface( const uint instanceIndex, co
     const bool unlitReceiveShadows = (donutMaterial.flags & PTMaterialFlags_UnlitReceiveShadows) != 0;
     ptShadingData.mtl.setUnlitReceiveShadows(unlitReceiveShadows);
     ptShadingData.mtl.setUnlitShadowStrength(donutMaterial.unlitShadowStrength);
+    ptShadingData.mtl.setSkipToneMapping( (donutMaterial.flags & PTMaterialFlags_SkipToneMapping) != 0 );
     ptShadingData.unlitColor = donutMaterial.baseColor;
     ptShadingData.unlitShadowStrength = donutMaterial.unlitShadowStrength;
 
@@ -1269,6 +1270,7 @@ void Bridge::ExportSurfaceInit(uint2 pixelPos)
 {
     u_Depth[pixelPos] = 0;                  // this is a signal that data is invalid - there's (rare) cases where neither ExportSurface or ExportNonSurface get called
     u_SpecularHitT[pixelPos] = 0;           // it is common for this to be missing
+    u_ToneMapBypass[pixelPos] = 0;          // only the primary surface can opt out of tone mapping
     
     // u_MotionVectors[pixelPos] = float4( 0, 0, 0, 0 );   // this should not be strictly necessary as we already know from u_Depth[] that the signal is invalid
     // DebugPixel( pixelPos.xy, float4( 0.0.xxx, 1 ) ); 
@@ -1286,7 +1288,8 @@ void Bridge::ExportSurface(const PathState path, PathTracer::SurfaceData surface
     float4 clipPos = mul(float4(/*bridgedData.shadingData.posW*/virtualWorldPos, 1), g_Const.view.matWorldToClip);
     u_Depth[pixelPos] = clipPos.z / clipPos.w;
     u_Throughput[pixelPos] = Pack_R11G11B10_FLOAT(saturate(path.GetThp()));
-    
+    u_ToneMapBypass[pixelPos] = surfaceData.shadingData.mtl.isSkipToneMapping() ? 1.0 : 0.0;
+
 #if EXPORT_GBUFFER
     if (g_Const.ptConsts.useReSTIRDI || g_Const.ptConsts.useReSTIRGI || g_Const.ptConsts.useReSTIRPT)
     {
@@ -1309,6 +1312,7 @@ void Bridge::ExportNonSurface(const PathState path, float3 virtualWorldPos, floa
     float4 clipPos = mul(float4( /*bridgedData.shadingData.posW*/virtualWorldPos, 1), g_Const.view.matWorldToClip);
     u_Depth[pixelPos] = clipPos.z / clipPos.w;
     u_Throughput[pixelPos] = 0;
+    u_ToneMapBypass[pixelPos] = 0;
 
     //DebugPixel( pixelPos.xy, float4( 0, 0, 0.2, 1 ) );
 

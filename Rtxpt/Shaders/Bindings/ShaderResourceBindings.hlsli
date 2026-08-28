@@ -30,6 +30,7 @@ RWTexture2D<float4>                     u_MotionVectors                 : regist
 RWTexture2D<float>                      u_Depth                         : register(u6); // used by RTXDI, DLSS/TAA, etc.
 RWTexture2D<float>                      u_SpecularHitT                  : register(u7); // used by denoisers
 RWTexture2D<float>                      u_ScratchFloat1                 : register(u8); // used by post-processing
+RWTexture2D<float>                      u_ToneMapBypass                 : register(u9); // 1 where the primary hit material opts out of tone mapping - RenderTargets::ToneMapBypass
 
 RWTexture2DArray<uint>                  u_StablePlanesHeader            : register(u40);
 RWStructuredBuffer<StablePlane>         u_StablePlanesBuffer            : register(u42);

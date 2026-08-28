@@ -180,6 +180,10 @@ void RenderTargets::Init(
     DenoiserDisocclusionThresholdMix = device->createTexture(desc);
     desc.debugName = "CombinedHistoryClampRelax";
     CombinedHistoryClampRelax = device->createTexture(desc);
+    // Written by the path tracer at render resolution and sampled by the tone mapper at display
+    // resolution using normalized UVs, so it survives DLSS/TAA upscaling without an explicit resolve.
+    desc.debugName = "ToneMapBypass";
+    ToneMapBypass = device->createTexture(desc);
 
     // these are used for DLSS-RR - we could overlap with other buffers to save on RAM but we leave as separate for simplicity
     // see https://github.com/NVIDIAGameWorks/Streamline/blob/main/docs/ProgrammingGuideDLSS_RR.md
@@ -381,6 +385,9 @@ void RenderTargets::Clear(nvrhi::ICommandList* commandList)
     commandList->clearTextureFloat(Depth, nvrhi::AllSubresources, nvrhi::Color(depthClearValue));
 
     commandList->clearTextureFloat(CombinedHistoryClampRelax, nvrhi::AllSubresources, nvrhi::Color(0));
+
+    // renderers that don't go through Bridge::ExportSurface (intro sample, raster) never write this
+    commandList->clearTextureFloat(ToneMapBypass, nvrhi::AllSubresources, nvrhi::Color(0));
 }
 
 uint32_t RenderTargets::GetNumMipLevels(uint32_t width, uint32_t height)

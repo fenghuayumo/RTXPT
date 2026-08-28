@@ -14,6 +14,7 @@
 
 #include "../AdvancedSample.h"
 #include "../Sample.h"
+#include "../SampleCommon/AdapterSelection.h"
 #include "../SampleCommon/LocalConfig.h"
 #include "../SampleCommon/SampleCommon.h"
 
@@ -378,11 +379,57 @@ namespace
     }
 }
 
+namespace
+{
+    // Sessions that own a live graphics instance. ListAdapters borrows one instead of standing up a
+    // second instance, because DeviceManager::Shutdown() tears down the process wide Streamline and
+    // GLFW state and would break the session that is still running.
+    std::vector<RenderSession*> g_liveSessions;
+}
+
 namespace rtxpt_py
 {
     std::string BuiltinSceneJson(const std::string& builtinModel)
     {
         return BuildBuiltinDefaultSceneJson(builtinModel);
+    }
+
+    bool ListAdapters(bool useVulkan, std::vector<rtxpt::AdapterDesc>& outAdapters, int& outBestIndex)
+    {
+        outAdapters.clear();
+        outBestIndex = -1;
+
+        RenderSession::Config cfg;
+        cfg.useVulkan = useVulkan;
+        cfg.headless  = true;
+        const nvrhi::GraphicsAPI api = ResolveGraphicsAPI(cfg);
+
+        for (RenderSession* session : g_liveSessions)
+        {
+            donut::app::DeviceManager* manager = session->GetDeviceManager();
+            if (manager != nullptr && manager->GetGraphicsAPI() == api)
+                return rtxpt::EnumerateAdapters(*manager, outAdapters, outBestIndex);
+        }
+
+        std::unique_ptr<donut::app::DeviceManager> manager(donut::app::DeviceManager::Create(api));
+        if (!manager)
+        {
+            log::error("rtxpt: DeviceManager::Create returned null, cannot list adapters");
+            return false;
+        }
+
+        donut::app::DeviceCreationParameters deviceParams = MakeDeviceParams(cfg);
+        if (!manager->CreateInstance(deviceParams))
+        {
+            log::error("rtxpt: failed to initialize the graphics instance, cannot list adapters");
+            return false;
+        }
+
+        const bool result = rtxpt::EnumerateAdapters(*manager, outAdapters, outBestIndex);
+
+        // Deliberately not calling Shutdown(): releasing the manager frees the instance objects, while
+        // leaving the Streamline pre-device init in place for a Renderer created later on.
+        return result;
     }
 }
 
@@ -398,6 +445,7 @@ RenderSession::RenderSession(const Config& cfg)
     m_cmdLine.noWindow          = cfg.headless;
     m_cmdLine.useVulkan         = cfg.useVulkan;
     m_cmdLine.adapterIndex      = cfg.adapterIndex;
+    m_cmdLine.adapter           = cfg.adapter;
     m_cmdLine.debug             = cfg.debug;
     m_cmdLine.nonInteractive    = cfg.nonInteractive;
     m_cmdLine.scene             = m_config.scene;
@@ -418,6 +466,8 @@ RenderSession::RenderSession(const Config& cfg)
         log::error("RenderSession: failed to initialize the graphics device");
         return;
     }
+
+    g_liveSessions.push_back(this);
 
     if (!InitRenderer())
     {
@@ -460,6 +510,28 @@ bool RenderSession::InitDevice()
     if (api == nvrhi::GraphicsAPI::D3D12 && m_d3d12DeviceFactory)
         deviceParams.d3d12DeviceFactory = m_d3d12DeviceFactory.Get();
 #endif
+
+    // CreateInstance is idempotent and runs internally as part of device creation below; calling it
+    // here is what lets us enumerate adapters while the choice of adapter can still be changed.
+    if (!m_deviceManager->CreateInstance(deviceParams))
+    {
+        log::error("RenderSession: failed to initialize the graphics instance");
+        return false;
+    }
+
+    const rtxpt::AdapterSelection selection = rtxpt::SelectAdapter(*m_deviceManager,
+        rtxpt::AdapterRequest{ m_config.adapterIndex, m_config.adapter });
+    deviceParams.adapterIndex = selection.Index;
+
+    {
+        std::vector<rtxpt::AdapterDesc> adapters;
+        int bestIndex = -1;
+        if (rtxpt::EnumerateAdapters(*m_deviceManager, adapters, bestIndex)
+            && selection.Index >= 0 && selection.Index < int(adapters.size()))
+        {
+            m_adapter = adapters[selection.Index];
+        }
+    }
 
     if (m_config.headless)
     {
@@ -541,6 +613,8 @@ bool RenderSession::InitRenderer()
 
 void RenderSession::Shutdown()
 {
+    g_liveSessions.erase(std::remove(g_liveSessions.begin(), g_liveSessions.end(), this), g_liveSessions.end());
+
     if (m_deviceManager && m_renderer)
         m_deviceManager->RemoveRenderPass(m_renderer.get());
 

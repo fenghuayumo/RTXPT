@@ -27,6 +27,7 @@ struct CommandLineOptions
 	std::string adapter;
     std::string graphicsBackend;
     int adapterIndex = -1;
+    bool listAdapters = false;
 	bool useVulkan = false;
     bool stopAnimations = false;
 	bool disableSER = false;

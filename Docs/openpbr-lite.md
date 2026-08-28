@@ -66,6 +66,7 @@ Render/control fields:
 | `ExcludeFromNEE` | Exclude from next-event-estimation shadow rays. |
 | `UnlitReceiveShadows` | Display base color without lighting or GI, modulated only by sampled-light shadow visibility. |
 | `UnlitShadowStrength` | Shadow opacity for `UnlitReceiveShadows`; 0 preserves the texture, 1 applies the full shadow. |
+| `SkipToneMapping` | Primary-hit pixels bypass auto-exposure and the tone curve, so the linear result reaches the sRGB backbuffer unaltered. Pairs with `UnlitReceiveShadows` to match photographic plates. |
 | `PSDExclude`, `PSDDominantDeltaLobe` | Path-space decomposition controls. |
 | `NestedPriority` | Nested dielectric priority. |
 | `ShadowNoLFadeout` | Bias to hide low-tessellation shadow seams. |

@@ -200,6 +200,11 @@ struct PTMaterial : public PTMaterialBase
     bool                    UnlitReceiveShadows                 = false;
     float                   UnlitShadowStrength                 = 1.0f;
 
+    // Pixels whose primary hit is this material bypass auto-exposure and the tone mapping curve,
+    // so the linear shading result reaches the sRGB backbuffer unaltered. Intended for background
+    // geometry that must match photographic/scanned plates pixel for pixel.
+    bool                    SkipToneMapping                     = false;
+
     // will not propagate dominant stable plane when doing path space decomposition
     bool                    PSDExclude                          = true;
     // for path space decomposition: -1 means no dominant; 0 usually means transmission, 1 usually means reflection, 2 usually means clearcoat reflection - must match corresponding BSDFSample::getDeltaLobeIndex()!

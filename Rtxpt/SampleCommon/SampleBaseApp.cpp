@@ -15,6 +15,7 @@
 #include <string>
 #include "../Misc/Korgi.h"
 #include "../SampleUI.h"
+#include "AdapterSelection.h"
 #include "LocalConfig.h"
 
 #include <donut/app/ApplicationBase.h>
@@ -194,6 +195,12 @@ SampleBaseApp::InitReturnCodes SampleBaseApp::Init(int argc, const char* const* 
     if (!ProcessCommandLine(argc, argv, deviceParams, preferredScene))
     {
         return InitReturnCodes::FailProcessingCommandLine;
+    }
+
+    if (m_CmdLine.listAdapters)
+    {
+        ListAdapters(deviceParams);
+        return InitReturnCodes::ExitAfterListingAdapters;
     }
 
     if (!InitDeviceAndWindow(deviceParams))
@@ -478,13 +485,46 @@ bool SampleBaseApp::ProcessCommandLine(int argc, char const* const* argv,
     deviceParams.backBufferWidth = m_CmdLine.width;
     deviceParams.backBufferHeight = m_CmdLine.height;
     deviceParams.startFullscreen = m_CmdLine.fullscreen;
+    // the adapter is resolved in InitDeviceAndWindow, once the instance exists and adapters can be enumerated
     deviceParams.adapterIndex = m_CmdLine.adapterIndex;
+    // must be known before CreateInstance so that a headless run never initializes GLFW
+    deviceParams.headlessDevice = m_CmdLine.noWindow;
 
     return true;
 }
 
-bool SampleBaseApp::InitDeviceAndWindow(const donut::app::DeviceCreationParameters& deviceParams)
+void SampleBaseApp::ListAdapters(donut::app::DeviceCreationParameters deviceParams)
 {
+    donut::log::ConsoleApplicationMode();
+
+    deviceParams.headlessDevice = true;     // enumerating adapters must not open a window
+
+    if (!m_DeviceManager->CreateInstance(deviceParams))
+    {
+        donut::log::error("Cannot initialize the graphics instance, no adapters can be listed");
+        return;
+    }
+
+    const rtxpt::AdapterSelection selection = rtxpt::SelectAdapter(*m_DeviceManager,
+        rtxpt::AdapterRequest{ m_CmdLine.adapterIndex, m_CmdLine.adapter });
+
+    rtxpt::LogAdapters(*m_DeviceManager, selection.Index);
+}
+
+bool SampleBaseApp::InitDeviceAndWindow(donut::app::DeviceCreationParameters& deviceParams)
+{
+    // CreateInstance is idempotent and is what the device creation calls below run internally; doing it
+    // here is what lets us enumerate adapters while the choice of adapter can still be changed.
+    if (!m_DeviceManager->CreateInstance(deviceParams))
+    {
+        donut::log::fatal("Cannot initialize the graphics instance with the requested parameters");
+        return false;
+    }
+
+    const rtxpt::AdapterSelection selection = rtxpt::SelectAdapter(*m_DeviceManager,
+        rtxpt::AdapterRequest{ m_CmdLine.adapterIndex, m_CmdLine.adapter });
+    deviceParams.adapterIndex = selection.Index;
+
     if (m_CmdLine.noWindow)
     {
         if (!m_DeviceManager->CreateHeadlessDevice(deviceParams))

@@ -38,8 +38,9 @@ struct MaterialHeader
     static const uint kUnlitReceiveShadowsFlagOffset = kPSDDominantDeltaLobeP1Offset + kPSDDominantDeltaLobeP1Bits;
     static const uint kUnlitShadowStrengthBits = 8;
     static const uint kUnlitShadowStrengthOffset = kUnlitReceiveShadowsFlagOffset + 1;
+    static const uint kSkipToneMappingFlagOffset = kUnlitShadowStrengthOffset + kUnlitShadowStrengthBits;
 
-    static const uint kTotalHeaderBitsX = kUnlitShadowStrengthOffset + kUnlitShadowStrengthBits;
+    static const uint kTotalHeaderBitsX = kSkipToneMappingFlagOffset + 1;
 
     /** Set the nested priority used for nested dielectrics.
     */
@@ -90,6 +91,9 @@ struct MaterialHeader
 
     void setUnlitShadowStrength(float strength) { packedData.x = PACK_BITS(kUnlitShadowStrengthBits, kUnlitShadowStrengthOffset, packedData.x, (uint)(saturate(strength) * 255.0 + 0.5)); }
     float getUnlitShadowStrength() { return EXTRACT_BITS(kUnlitShadowStrengthBits, kUnlitShadowStrengthOffset, packedData.x) / 255.0; }
+
+    void setSkipToneMapping(bool enabled) { packedData.x = PACK_BITS(1, kSkipToneMappingFlagOffset, packedData.x, enabled ? 1 : 0); }
+    bool isSkipToneMapping() { return packedData.x & (1u << kSkipToneMappingFlagOffset); }
 
     static MaterialHeader make( ) { MaterialHeader header; header.packedData = 0; return header; }
 };

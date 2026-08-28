@@ -768,6 +768,10 @@ void RegisterCoreBindings(nb::module_& m)
         .def_prop_rw("unlit_shadow_strength",
             [](PTMaterial& self) { return self.UnlitShadowStrength; },
             [](PTMaterial& self, float v) { self.UnlitShadowStrength = std::clamp(v, 0.0f, 1.0f); self.GPUDataDirty = true; })
+        .def_prop_rw("skip_tone_mapping",
+            [](PTMaterial& self) { return self.SkipToneMapping; },
+            [](PTMaterial& self, bool v) { self.SkipToneMapping = v; self.GPUDataDirty = true; },
+            "Pixels whose primary hit is this material bypass auto-exposure and the tone curve.")
         .def_prop_rw("enable_as_analytic_light_proxy",
             [](PTMaterial& self) { return self.EnableAsAnalyticLightProxy; },
             [](PTMaterial& self, bool v) { self.EnableAsAnalyticLightProxy = v; self.GPUDataDirty = true; })

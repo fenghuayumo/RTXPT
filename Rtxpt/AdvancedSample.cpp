@@ -61,6 +61,10 @@ int main(int __argc, const char** __argv)
 
         example.End();
     }
-    
+    else if (status == SampleBaseApp::InitReturnCodes::ExitAfterListingAdapters)
+    {
+        return 0;
+    }
+
     return static_cast<int>(status);
 }

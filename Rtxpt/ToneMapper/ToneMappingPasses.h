@@ -83,6 +83,7 @@ private:
         nvrhi::BindingSetHandle luminanceBindingSet;
         nvrhi::BindingSetHandle colorBindingSet;
         nvrhi::TextureHandle sourceTexture;
+        nvrhi::TextureHandle bypassTexture;
 
 #if TONEMAPPING_AUTOEXPOSURE_CPU
         // used for readback
@@ -100,6 +101,7 @@ private:
 
     nvrhi::SamplerHandle m_linearSampler;
     nvrhi::SamplerHandle m_pointSampler;
+    nvrhi::SamplerHandle m_linearClampSampler;
 
     float m_FrameTime = 0.f;
 
@@ -168,7 +170,8 @@ public:
     void PreRender(const ToneMappingParameters& params);
 
     // note - if enable == false, it still does autoexposure (if enabled) and everything else, but the output is just passthrough
-    bool Render( nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView, nvrhi::ITexture* sourceTexture, bool enabled );
+    // bypassTexture is an optional render-resolution mask; where it is 1 the pixel skips auto-exposure and the tone curve
+    bool Render( nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView, nvrhi::ITexture* sourceTexture, bool enabled, nvrhi::ITexture* bypassTexture = nullptr );
 
 #if TONEMAPPING_AUTOEXPOSURE_CPU
     float3 GetPreExposedGray( uint viewIndex );
