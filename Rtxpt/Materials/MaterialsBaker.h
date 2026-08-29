@@ -285,6 +285,13 @@ public:
 
     nvrhi::BufferHandle             GetMaterialDataBuffer() const           { return m_materialData; }
     uint                            GetMaterialDataCount() const            { return m_materialsGPU.size(); }
+    bool                            HasSkipToneMappingMaterials() const
+    {
+        for (const auto& material : m_materials)
+            if (material != nullptr && material->SkipToneMapping)
+                return true;
+        return false;
+    }
 
     const std::unordered_map<std::string, PTTexture> &
                                     GetUsedTextures() const                 { return m_textures; }

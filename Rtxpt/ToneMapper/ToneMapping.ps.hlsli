@@ -15,11 +15,10 @@
 
 SamplerState gLuminanceTexSampler : register(s0);
 SamplerState gColorSampler : register(s1);
-SamplerState gToneMapBypassSampler : register(s2);
 
 Texture2D gColorTex : register(t0);
 Texture2D gLuminanceTex : register(t1);
-Texture2D<float> gToneMapBypassTex : register(t2);
+Texture2D gBackgroundTex : register(t2);
 
 //static const uint kOperator = _TONE_MAPPER_OPERATOR;
 static const float kExposureKey = TONEMAPPING_EXPOSURE_KEY;
@@ -137,14 +136,9 @@ float4 applyToneMapping(float2 texC)
     float4 color = gColorTex.Sample(gColorSampler, texC);
     float3 finalColor = color.rgb;
 
-    // Surfaces flagged 'skip tone mapping' must reach the sRGB backbuffer with their linear shading
-    // result intact, so remember it before exposure and the tone curve touch it. The mask lives at
-    // render resolution; sampling it bilinearly with the same normalized UV both handles DLSS/TAA
-    // upscaling and cross-fades the edge pixels those passes already blended.
-    const float bypassWeight = (gParams.toneMapBypassEnabled != 0)
-        ? saturate(gToneMapBypassTex.SampleLevel(gToneMapBypassSampler, texC, 0))
-        : 0.0;
-    const float3 bypassColor = finalColor;
+    const float3 backgroundColor = (gParams.backgroundEnabled != 0)
+        ? gBackgroundTex.SampleLevel(gColorSampler, texC, 0).rgb
+        : 0.0.xxx;
 /*
 #ifdef _TONE_MAPPER_AUTO_EXPOSURE
     // apply auto exposure
@@ -181,7 +175,9 @@ float4 applyToneMapping(float2 texC)
             finalColor = saturate(finalColor);
     }
 
-    finalColor = lerp(finalColor, bypassColor, bypassWeight);
+    // The two layers were resolved independently. Adding them here avoids a post-AA
+    // classification mask and keeps foreground/background temporal history separate.
+    finalColor += backgroundColor;
 
     return float4(finalColor, color.a);
 }

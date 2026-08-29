@@ -67,12 +67,6 @@ ToneMappingPass::ToneMappingPass(
     samplerDesc.setAllFilters(false);
 	m_pointSampler = m_device->createSampler(samplerDesc);
 
-    // the bypass mask is filtered across screen edges, so it must not wrap around to the opposite side
-    samplerDesc.setAllFilters(true);
-    samplerDesc.setAllAddressModes(nvrhi::SamplerAddressMode::ClampToEdge);
-    m_linearClampSampler = m_device->createSampler(samplerDesc);
-
-
     m_PerView.resize(compositeView.GetNumChildViews(ViewType::PLANAR));
     {
         for (uint viewIndex = 0; viewIndex < compositeView.GetNumChildViews(ViewType::PLANAR); viewIndex++)
@@ -171,8 +165,7 @@ ToneMappingPass::ToneMappingPass(
             nvrhi::BindingLayoutItem::Texture_SRV(1),
             nvrhi::BindingLayoutItem::Texture_SRV(2),
             nvrhi::BindingLayoutItem::Sampler(0),
-            nvrhi::BindingLayoutItem::Sampler(1),
-            nvrhi::BindingLayoutItem::Sampler(2)
+            nvrhi::BindingLayoutItem::Sampler(1)
         };
         m_ToneMapBindingLayout = m_device->createBindingLayout(layoutDesc);
 
@@ -202,15 +195,15 @@ void ToneMappingPass::PreRender(const ToneMappingParameters& params)
 bool ToneMappingPass::Render(
     nvrhi::ICommandList* commandList, 
     const donut::engine::ICompositeView& compositeView,
-    nvrhi::ITexture* sourceTexture, bool enabled, nvrhi::ITexture* bypassTexture)
+    nvrhi::ITexture* sourceTexture, bool enabled, nvrhi::ITexture* backgroundTexture)
 {
     assert( m_FrameParamsSet ); // forgot to call PreRender before this?
     m_FrameParamsSet = false;
 
     bool commandListWasClosed = false; // to track the need to re-create volatile constant buffers
 
-    // a black mask means 'nothing bypasses tone mapping', which is the correct fallback
-    nvrhi::ITexture* resolvedBypassTexture = (bypassTexture != nullptr) ? bypassTexture : m_commonPasses->m_BlackTexture.Get();
+    // A black background is the correct fallback for renderers that do not produce a split layer.
+    nvrhi::ITexture* resolvedBackgroundTexture = (backgroundTexture != nullptr) ? backgroundTexture : m_commonPasses->m_BlackTexture.Get();
 
     for (uint viewIndex = 0; viewIndex < compositeView.GetNumChildViews(ViewType::PLANAR); viewIndex++)
     {
@@ -224,10 +217,10 @@ bool ToneMappingPass::Render(
             viewData.sourceTexture = sourceTexture;
         }
 
-        if (viewData.bypassTexture != resolvedBypassTexture)
+        if (viewData.backgroundTexture != resolvedBackgroundTexture)
         {
             viewData.colorBindingSet = nullptr;
-            viewData.bypassTexture = resolvedBypassTexture;
+            viewData.backgroundTexture = resolvedBackgroundTexture;
         }
     }
 
@@ -316,13 +309,12 @@ bool ToneMappingPass::Render(
 		{
 			nvrhi::BindingSetDesc bindingSetDesc;
 			bindingSetDesc.bindings = {
-				nvrhi::BindingSetItem::ConstantBuffer(0, m_ToneMappingCB),
-				nvrhi::BindingSetItem::Texture_SRV(0, sourceTexture),                       //Color texture
-				nvrhi::BindingSetItem::Texture_SRV(1, m_PerView[viewIndex].luminanceTexture),                    //Luminance Texture
-				nvrhi::BindingSetItem::Texture_SRV(2, resolvedBypassTexture),                //Tone map bypass mask
-				nvrhi::BindingSetItem::Sampler(0, m_linearSampler),    //Luminance sampler
-				nvrhi::BindingSetItem::Sampler(1, m_pointSampler),     //Color sampler
-				nvrhi::BindingSetItem::Sampler(2, m_linearClampSampler) //Bypass mask sampler
+                nvrhi::BindingSetItem::ConstantBuffer(0, m_ToneMappingCB),
+                nvrhi::BindingSetItem::Texture_SRV(0, sourceTexture),                       //Color texture
+                nvrhi::BindingSetItem::Texture_SRV(1, m_PerView[viewIndex].luminanceTexture),                    //Luminance Texture
+                nvrhi::BindingSetItem::Texture_SRV(2, resolvedBackgroundTexture),            //Independently resolved background layer
+                nvrhi::BindingSetItem::Sampler(0, m_linearSampler),    //Luminance sampler
+                nvrhi::BindingSetItem::Sampler(1, m_pointSampler)      //Color sampler
 			};
 			bindingSet = m_device->createBindingSet(bindingSetDesc, m_ToneMapBindingLayout);
 		}
@@ -364,7 +356,7 @@ bool ToneMappingPass::Render(
 		toneMappingConsts.colorTransform[1] = float4(m_ColorTransform.col(1), 0);
 		toneMappingConsts.colorTransform[2] = float4(m_ColorTransform.col(2), 0);
         toneMappingConsts.enabled = enabled;
-        toneMappingConsts.toneMapBypassEnabled = (bypassTexture != nullptr);
+        toneMappingConsts.backgroundEnabled = (backgroundTexture != nullptr);
         commandList->writeBuffer(m_ToneMappingCB, &toneMappingConsts, sizeof(ToneMappingConstants));
 
         commandList->setGraphicsState(state);

@@ -369,12 +369,12 @@ void Sample::Init(const std::string& preferredScene,
         nvrhi::BindingLayoutItem::Texture_UAV(0),           // u_OutputColor
         nvrhi::BindingLayoutItem::Texture_UAV(1),           // u_ProcessedOutputColor
         nvrhi::BindingLayoutItem::Texture_UAV(2),           // u_PostTonemapOutputColor
+        nvrhi::BindingLayoutItem::Texture_UAV(3),           // u_BackgroundOutputColor
         nvrhi::BindingLayoutItem::Texture_UAV(4),           // u_Throughput
         nvrhi::BindingLayoutItem::Texture_UAV(5),           // u_MotionVectors
         nvrhi::BindingLayoutItem::Texture_UAV(6),           // u_Depth
         nvrhi::BindingLayoutItem::Texture_UAV(7),           // u_SpecularHitT
         nvrhi::BindingLayoutItem::Texture_UAV(8),           // u_ScratchFloat1
-        nvrhi::BindingLayoutItem::Texture_UAV(9),           // u_ToneMapBypass
         // denoising slots go from 30-39
         //nvrhi::BindingLayoutItem::StructuredBuffer_UAV(30), // denoiser 'control buffer' (might be removed, might be reused)
         nvrhi::BindingLayoutItem::Texture_UAV(31),          // RWTexture2D<float>  u_DenoiserViewspaceZ
@@ -999,6 +999,8 @@ void Sample::UpdateViews( nvrhi::IFramebuffer* framebuffer )
     // we currently use TAA for jitter even when it's not used itself
     if (m_temporalAntiAliasingPass)
         m_temporalAntiAliasingPass->SetJitter(m_ui.TemporalAntiAliasingJitter);
+    if (m_backgroundTemporalAntiAliasingPass)
+        m_backgroundTemporalAntiAliasingPass->SetJitter(m_ui.TemporalAntiAliasingJitter);
 
     nvrhi::Viewport windowViewport(float(m_renderSize.x), float(m_renderSize.y));
     m_view->SetViewport(windowViewport);
@@ -2041,6 +2043,10 @@ void Sample::CreateRenderPasses( bool& exposureResetRequired, nvrhi::CommandList
     m_accumulationPass->CreatePipeline();
     m_accumulationPass->CreateBindingSet(m_renderTargets->OutputColor, m_renderTargets->AccumulatedRadiance, m_renderTargets->ProcessedOutputColor);
 
+    m_backgroundAccumulationPass = std::make_unique<AccumulationPass>(GetDevice(), m_shaderFactory);
+    m_backgroundAccumulationPass->CreatePipeline();
+    m_backgroundAccumulationPass->CreateBindingSet(m_renderTargets->BackgroundOutputColor, m_renderTargets->BackgroundAccumulatedRadiance, m_renderTargets->BackgroundProcessedOutputColor);
+
     {
         nvrhi::TextureDesc gaussianCurrentDesc = m_renderTargets->ProcessedOutputColor->getDesc();
         gaussianCurrentDesc.debugName = "GaussianSplatTemporalCurrentColor";
@@ -2070,6 +2076,7 @@ void Sample::CreateRenderPasses( bool& exposureResetRequired, nvrhi::CommandList
     // these get re-created every time intentionally, to pick up changes after at-runtime shader recompile
     m_toneMappingPass = std::make_unique<ToneMappingPass>(GetDevice(), m_shaderFactory, m_CommonPasses, m_renderTargets->LdrFramebuffer, *m_view, m_renderTargets->OutputColor);
     m_bloomPass = std::make_unique<BloomPass>(GetDevice(), m_shaderFactory, m_CommonPasses, m_renderTargets->ProcessedOutputFramebuffer, *m_view);
+    m_backgroundBloomPass = std::make_unique<BloomPass>(GetDevice(), m_shaderFactory, m_CommonPasses, m_renderTargets->BackgroundProcessedOutputFramebuffer, *m_view);
     m_postProcess = std::make_shared<PostProcess>(GetDevice(), m_shaderFactory, m_CommonPasses, m_shaderDebug);
 
     {
@@ -2085,6 +2092,12 @@ void Sample::CreateRenderPasses( bool& exposureResetRequired, nvrhi::CommandList
         taaParams.useCatmullRomFilter = true;
 
         m_temporalAntiAliasingPass = std::make_unique<TemporalAntiAliasingPass>(GetDevice(), m_shaderFactory, m_CommonPasses, *m_view, taaParams);
+
+        taaParams.unresolvedColor = m_renderTargets->BackgroundOutputColor;
+        taaParams.resolvedColor = m_renderTargets->BackgroundProcessedOutputColor;
+        taaParams.feedback1 = m_renderTargets->BackgroundTemporalFeedback1;
+        taaParams.feedback2 = m_renderTargets->BackgroundTemporalFeedback2;
+        m_backgroundTemporalAntiAliasingPass = std::make_unique<TemporalAntiAliasingPass>(GetDevice(), m_shaderFactory, m_CommonPasses, *m_view, taaParams);
     }
 
     if (!CreatePTPipeline(*m_shaderFactory))
@@ -2710,6 +2723,8 @@ void Sample::PostProcessPreToneMapping(nvrhi::ICommandList* commandList, const d
     if (m_ui.EnableBloom && m_ui.BloomIntensity > 0.f && m_ui.BloomRadius > 0.f)
     {
         m_bloomPass->Render(m_commandList, m_renderTargets->ProcessedOutputFramebuffer, fullscreenView, m_renderTargets->ProcessedOutputColor, m_ui.BloomRadius, m_ui.BloomIntensity);
+        if (m_materialsBaker != nullptr && m_materialsBaker->HasSkipToneMappingMaterials())
+            m_backgroundBloomPass->Render(m_commandList, m_renderTargets->BackgroundProcessedOutputFramebuffer, fullscreenView, m_renderTargets->BackgroundProcessedOutputColor, m_ui.BloomRadius, m_ui.BloomIntensity);
     }
 
     if (m_ui.PostProcessTestPassHDR)
@@ -3224,7 +3239,7 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
     PostProcessPreToneMapping(m_commandList, fullscreenView);   // writing to m_renderTargets->ProcessedOutputColor
 
     //Tone Mapping; it will read from m_renderTargets->ProcessedOutputColor and write into m_renderTargets->LdrColor; in case tonemapping is disabled, it's just a passthrough
-    if (m_toneMappingPass->Render(m_commandList, fullscreenView, m_renderTargets->ProcessedOutputColor, m_ui.EnableToneMapping, m_renderTargets->ToneMapBypass))
+    if (m_toneMappingPass->Render(m_commandList, fullscreenView, m_renderTargets->ProcessedOutputColor, m_ui.EnableToneMapping, m_renderTargets->BackgroundProcessedOutputColor))
     {
         // first run tonemapper can close & re-open command list - when that happens, we have to re-upload volatile constants
         m_commandList->writeBuffer(m_constantBuffer, &constants, sizeof(constants));
@@ -3342,6 +3357,8 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
 
     if (m_temporalAntiAliasingPass != nullptr)
         m_temporalAntiAliasingPass->AdvanceFrame();
+    if (m_backgroundTemporalAntiAliasingPass != nullptr)
+        m_backgroundTemporalAntiAliasingPass->AdvanceFrame();
 
 	std::swap(m_view, m_viewPrevious);
 	GetDeviceManager()->SetVsyncEnabled(m_ui.ActualEnableVsync());
@@ -3394,13 +3411,13 @@ void Sample::RecreateBindingSet()
         nvrhi::BindingSetItem::Sampler(2, m_envMapBaker->GetImportanceSampling()->GetImportanceMapSampler()),
         nvrhi::BindingSetItem::Texture_UAV(0, m_renderTargets->OutputColor),
         nvrhi::BindingSetItem::Texture_UAV(1, m_renderTargets->ProcessedOutputColor),
+        nvrhi::BindingSetItem::Texture_UAV(3, m_renderTargets->BackgroundOutputColor),
         nvrhi::BindingSetItem::Texture_UAV(2, m_renderTargets->LdrColor, nvrhi::Format::RGBA8_UNORM),
         nvrhi::BindingSetItem::Texture_UAV(4, m_renderTargets->Throughput),
         nvrhi::BindingSetItem::Texture_UAV(5, m_renderTargets->ScreenMotionVectors),
         nvrhi::BindingSetItem::Texture_UAV(6, m_renderTargets->Depth),
         nvrhi::BindingSetItem::Texture_UAV(7, m_renderTargets->SpecularHitT), 
         nvrhi::BindingSetItem::Texture_UAV(8, m_renderTargets->ScratchFloat1),
-        nvrhi::BindingSetItem::Texture_UAV(9, m_renderTargets->ToneMapBypass), 
         nvrhi::BindingSetItem::Texture_UAV(31, m_renderTargets->DenoiserViewspaceZ),
         nvrhi::BindingSetItem::Texture_UAV(32, m_renderTargets->DenoiserMotionVectors),
         nvrhi::BindingSetItem::Texture_UAV(33, m_renderTargets->DenoiserNormalRoughness),
@@ -5573,6 +5590,10 @@ bool Sample::EvaluateNativeDLSS(bool reset)
         return false;
 
     const bool useRayReconstruction = m_ui.RealtimeAA == 3;
+    if (useRayReconstruction && !m_ui.IsDLSSRRSupported)
+        return false;
+    if (!useRayReconstruction && !m_ui.IsDLSSSuported)
+        return false;
     if (useRayReconstruction && !m_nativeDLSS->IsRayReconstructionSupported())
         return false;
     if (!useRayReconstruction && !m_nativeDLSS->IsDlssSupported())
@@ -5583,6 +5604,7 @@ bool Sample::EvaluateNativeDLSS(bool reset)
         RAII_SCOPE(m_commandList->beginMarker("DLSSRR_PrepareInputs");, m_commandList->endMarker(););
 
         SampleMiniConstants miniConstants = { uint4(0, 0, 0, 0) };
+        miniConstants.params.z = 1;
         nvrhi::TextureDesc tdesc = m_renderTargets->OutputColor->getDesc();
         m_postProcess->Apply(m_commandList, PostProcess::ComputePassType::DLSSRRDenoiserPrepareInputs,
             m_constantBuffer, miniConstants, m_bindingSet, m_bindingLayout, tdesc.width, tdesc.height);
@@ -5638,14 +5660,123 @@ bool Sample::EvaluateNativeDLSS(bool reset)
 }
 #endif
 
+void Sample::UpscaleForegroundLayer()
+{
+    if (m_renderTargets == nullptr || m_renderTargets->OutputColor == nullptr || m_renderTargets->ProcessedOutputColor == nullptr)
+        return;
+
+    PlanarView fullscreenView = *m_view;
+    fullscreenView.SetViewport(nvrhi::Viewport(float(m_displaySize.x), float(m_displaySize.y)));
+    fullscreenView.UpdateCache();
+
+    m_commandList->beginMarker("ForegroundLayerUpscale");
+    m_commandList->setTextureState(m_renderTargets->OutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);
+    m_commandList->setTextureState(m_renderTargets->ProcessedOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::RenderTarget);
+    m_commandList->commitBarriers();
+    m_CommonPasses->BlitTexture(
+        m_commandList,
+        m_renderTargets->ProcessedOutputFramebuffer->GetFramebuffer(fullscreenView),
+        m_renderTargets->OutputColor,
+        m_bindingCache.get());
+    m_commandList->setTextureState(m_renderTargets->ProcessedOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);
+    m_commandList->commitBarriers();
+    m_commandList->endMarker();
+}
+
+bool Sample::ResolveBackgroundLayerTemporal(bool reset)
+{
+    if (m_backgroundTemporalAntiAliasingPass == nullptr || m_view == nullptr)
+        return false;
+
+    PlanarView outputView = *m_view;
+    outputView.SetViewport(nvrhi::Viewport(float(m_displaySize.x), float(m_displaySize.y)));
+    outputView.SetPixelOffset(dm::float2::zero());
+    outputView.UpdateCache();
+
+    const bool previousViewValid = !reset && (GetFrameIndex() != 0);
+    m_commandList->beginMarker("BackgroundLayerTemporalResolve");
+    m_backgroundTemporalAntiAliasingPass->TemporalResolve(
+        m_commandList,
+        m_ui.TemporalAntiAliasingParams,
+        previousViewValid,
+        *m_view,
+        outputView);
+    m_commandList->endMarker();
+    return true;
+}
+
+bool Sample::ResolveForegroundLayerTemporal(bool reset)
+{
+    if (m_temporalAntiAliasingPass == nullptr || m_view == nullptr)
+        return false;
+
+    PlanarView outputView = *m_view;
+    outputView.SetViewport(nvrhi::Viewport(float(m_displaySize.x), float(m_displaySize.y)));
+    outputView.SetPixelOffset(dm::float2::zero());
+    outputView.UpdateCache();
+
+    const bool previousViewValid = !reset && (GetFrameIndex() != 0);
+    m_commandList->beginMarker("ForegroundLayerTemporalResolve");
+    m_temporalAntiAliasingPass->TemporalResolve(
+        m_commandList,
+        m_ui.TemporalAntiAliasingParams,
+        previousViewValid,
+        *m_view,
+        outputView);
+    m_commandList->endMarker();
+    return true;
+}
+
+void Sample::UpscaleBackgroundLayer()
+{
+    if (m_renderTargets == nullptr || m_renderTargets->BackgroundOutputColor == nullptr || m_renderTargets->BackgroundProcessedOutputColor == nullptr)
+        return;
+
+    PlanarView fullscreenView = *m_view;
+    fullscreenView.SetViewport(nvrhi::Viewport(float(m_displaySize.x), float(m_displaySize.y)));
+    fullscreenView.UpdateCache();
+
+    m_commandList->beginMarker("BackgroundLayerUpscale");
+    m_commandList->setTextureState(m_renderTargets->BackgroundOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);
+    m_commandList->setTextureState(m_renderTargets->BackgroundProcessedOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::RenderTarget);
+    m_commandList->commitBarriers();
+    m_CommonPasses->BlitTexture(
+        m_commandList,
+        m_renderTargets->BackgroundProcessedOutputFramebuffer->GetFramebuffer(fullscreenView),
+        m_renderTargets->BackgroundOutputColor,
+        m_bindingCache.get());
+    m_commandList->setTextureState(m_renderTargets->BackgroundProcessedOutputColor, nvrhi::AllSubresources, nvrhi::ResourceStates::ShaderResource);
+    m_commandList->commitBarriers();
+    m_commandList->endMarker();
+}
+
 void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
 {
     if (m_ui.RealtimeMode)
     {
+        bool foregroundLayerReadyForDisplay = false;
+        bool backgroundLayerReadyForDisplay = false;
+        const bool hasSkipToneMappingMaterials = m_materialsBaker != nullptr && m_materialsBaker->HasSkipToneMappingMaterials();
+
+        // Stable-plane rendering does not write the final HDR color directly when
+        // standalone denoising is disabled. Build the two HDR layers before any
+        // temporal/upscaling pass so both layers get the same frame history.
+        if (!m_ui.ActualUseStandaloneDenoiser())
+        {
+            SampleMiniConstants miniConstants = { uint4(0, 0, 0, 0) };
+            nvrhi::TextureDesc tdesc = m_renderTargets->OutputColor->getDesc();
+            m_commandList->beginMarker("NoDenoiserFinalMerge");
+            m_postProcess->Apply(m_commandList, PostProcess::ComputePassType::NoDenoiserFinalMerge, m_constantBuffer, miniConstants, m_bindingSet, m_bindingLayout, tdesc.width, tdesc.height);
+            m_commandList->endMarker();
+        }
+
         if (m_ui.RealtimeAA == 0)
         {
             // TODO: Remove Redundant copy for non AA case
             m_commandList->copyTexture(m_renderTargets->ProcessedOutputColor, nvrhi::TextureSlice(), m_renderTargets->OutputColor, nvrhi::TextureSlice());
+            m_commandList->copyTexture(m_renderTargets->BackgroundProcessedOutputColor, nvrhi::TextureSlice(), m_renderTargets->BackgroundOutputColor, nvrhi::TextureSlice());
+            foregroundLayerReadyForDisplay = true;
+            backgroundLayerReadyForDisplay = true;
         }
         else if (m_ui.RealtimeAA == 1 && m_temporalAntiAliasingPass != nullptr )
         {
@@ -5666,6 +5797,12 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
             m_commandList->beginMarker("TAA");
 
             m_temporalAntiAliasingPass->TemporalResolve(m_commandList, taaParams, previousViewValid, *m_view, *m_view);
+            foregroundLayerReadyForDisplay = true;
+            if (hasSkipToneMappingMaterials)
+            {
+                m_backgroundTemporalAntiAliasingPass->TemporalResolve(m_commandList, m_ui.TemporalAntiAliasingParams, previousViewValid, *m_view, *m_view);
+                backgroundLayerReadyForDisplay = true;
+            }
 
             m_commandList->endMarker();
 
@@ -5675,7 +5812,20 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
                 m_gaussianSplatTemporalReset = false;
             }
         }
+        else if (m_ui.RealtimeAA >= 2)
+        {
+            if (hasSkipToneMappingMaterials)
+            {
+                backgroundLayerReadyForDisplay = ResolveBackgroundLayerTemporal(reset);
+                foregroundLayerReadyForDisplay = ResolveForegroundLayerTemporal(reset);
+            }
+        }
 
+        // DLSS has no layer/coverage input. Feeding it a foreground-only image
+        // makes small objects lose the surrounding context and can produce dark
+        // holes. When the feature is active, resolve both layers with TAA instead.
+        if (!hasSkipToneMappingMaterials)
+        {
 #if DONUT_WITH_STREAMLINE
         const bool useStreamlineThisFrame = !GetDeviceManager()->GetDeviceParams().headlessDevice;
         if (useStreamlineThisFrame)
@@ -5746,6 +5896,9 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
 
             GetDeviceManager()->GetStreamline().EvaluateDLSS(m_commandList);
             m_commandList->clearState();
+            foregroundLayerReadyForDisplay = true;
+            if (!backgroundLayerReadyForDisplay)
+                UpscaleBackgroundLayer();
         }
         }
         if (useStreamlineThisFrame && m_ui.RealtimeAA == 3)
@@ -5753,7 +5906,7 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
             RAII_SCOPE(m_commandList->beginMarker("DLSS-RR");, m_commandList->endMarker(); );
 
             // Direct inputs to denoiser are reused between passes; there's redundant copies but it makes interfacing simpler
-            SampleMiniConstants miniConstants = { uint4(0, 0, 0, 0) };
+            SampleMiniConstants miniConstants = { uint4(0, 0, 1, 0) };
             nvrhi::TextureDesc tdesc = m_renderTargets->OutputColor->getDesc();
             m_commandList->beginMarker("DLSSRR_PrepareInputs");
             m_postProcess->Apply(m_commandList, PostProcess::ComputePassType::DLSSRRDenoiserPrepareInputs, m_constantBuffer, miniConstants, m_bindingSet, m_bindingLayout, tdesc.width, tdesc.height);
@@ -5797,15 +5950,9 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
 
             GetDeviceManager()->GetStreamline().EvaluateDLSSRR(m_commandList);
             m_commandList->clearState();
-        }
-        else if ( !m_ui.ActualUseStandaloneDenoiser() )
-        {
-            // If all denoisers disabled, this is a pass-through that just merges and outputs noisy data
-            SampleMiniConstants miniConstants = { uint4(0, 0, 0, 0) };
-            nvrhi::TextureDesc tdesc = m_renderTargets->OutputColor->getDesc();
-            m_commandList->beginMarker("NoDenoiserFinalMerge");
-            m_postProcess->Apply(m_commandList, PostProcess::ComputePassType::NoDenoiserFinalMerge, m_constantBuffer, miniConstants, m_bindingSet, m_bindingLayout, tdesc.width, tdesc.height);
-            m_commandList->endMarker();
+            foregroundLayerReadyForDisplay = true;
+            if (!backgroundLayerReadyForDisplay)
+                UpscaleBackgroundLayer();
         }
 #endif
 
@@ -5813,23 +5960,19 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
         bool nativeDLSSEvaluated = false;
         if (m_ui.RealtimeAA == 2 || m_ui.RealtimeAA == 3)
             nativeDLSSEvaluated = EvaluateNativeDLSS(reset);
-
-        if (!nativeDLSSEvaluated && (m_ui.RealtimeAA == 2 || m_ui.RealtimeAA == 3))
-        {
-            if (m_ui.ActualUseStandaloneDenoiser())
-            {
-                m_commandList->copyTexture(m_renderTargets->ProcessedOutputColor, nvrhi::TextureSlice(), m_renderTargets->OutputColor, nvrhi::TextureSlice());
-            }
-            else
-            {
-                SampleMiniConstants miniConstants = { uint4(0, 0, 0, 0) };
-                nvrhi::TextureDesc tdesc = m_renderTargets->OutputColor->getDesc();
-                m_commandList->beginMarker("NoDenoiserFinalMerge");
-                m_postProcess->Apply(m_commandList, PostProcess::ComputePassType::NoDenoiserFinalMerge, m_constantBuffer, miniConstants, m_bindingSet, m_bindingLayout, tdesc.width, tdesc.height);
-                m_commandList->endMarker();
-            }
-        }
+        foregroundLayerReadyForDisplay |= nativeDLSSEvaluated;
 #endif
+
+        // If no DLSS backend evaluated this frame (for example in headless
+        // builds), keep the requested mode displayable with a spatial copy.
+        if ((m_ui.RealtimeAA == 2 || m_ui.RealtimeAA == 3) && !foregroundLayerReadyForDisplay)
+        {
+            UpscaleForegroundLayer();
+            foregroundLayerReadyForDisplay = true;
+        }
+        if (m_ui.RealtimeAA >= 1 && !backgroundLayerReadyForDisplay)
+            UpscaleBackgroundLayer();
+        }
     }
     else
     {
@@ -5839,6 +5982,7 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
         const float accumulationWeight = (m_accumulationSampleIndex < m_ui.AccumulationTarget)?(1.f / float(max(0, m_accumulationSampleIndex) + 1)):(0.0f);
 
         m_accumulationPass->Render(m_commandList, *m_view, *m_view, accumulationWeight);
+        m_backgroundAccumulationPass->Render(m_commandList, *m_view, *m_view, accumulationWeight);
     }
 
 }

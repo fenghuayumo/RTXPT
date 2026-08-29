@@ -165,7 +165,17 @@ namespace PathTracer
     inline void CommitPixel( const PathState path, const WorkingContext workingContext )
     {
 #if PATH_TRACER_MODE==PATH_TRACER_MODE_REFERENCE
-        workingContext.OutputColor[path.GetPixelPos()].rgba = float4( path.GetL().rgb, 1 );
+        const float4 output = float4(path.GetL().rgb, 1);
+        if (path.isPrimarySkipToneMapping())
+        {
+            workingContext.OutputColor[path.GetPixelPos()] = float4(0, 0, 0, 1);
+            workingContext.BackgroundOutputColor[path.GetPixelPos()] = output;
+        }
+        else
+        {
+            workingContext.OutputColor[path.GetPixelPos()] = output;
+            workingContext.BackgroundOutputColor[path.GetPixelPos()] = float4(0, 0, 0, 1);
+        }
 #elif PATH_TRACER_MODE==PATH_TRACER_MODE_BUILD_STABLE_PLANES
 #elif PATH_TRACER_MODE==PATH_TRACER_MODE_FILL_STABLE_PLANES
     workingContext.StablePlanes.CommitDenoiserRadiance(path);
@@ -571,6 +581,9 @@ namespace PathTracer
             return;
         }
 
+        if (path.getVertexIndex() == 1)
+            path.setPrimarySkipToneMapping(surfaceData.shadingData.mtl.isSkipToneMapping());
+
         // These will not change anymore, so make const shortcuts
         const ShadingData shadingData    = surfaceData.shadingData;
         const ActiveBSDF bsdf   = surfaceData.bsdf;
@@ -761,7 +774,7 @@ namespace PathTracer
             path.terminate();
             return;
         }
-        
+
         if (!scatterValid)
         {   // this is very suboptimal from performance perspective, and should only happen very, very rarely (as in, almost never)
             path.terminate();

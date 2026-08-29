@@ -37,7 +37,7 @@ struct ToneMappingConstants
 	float autoExposureLumValueMax;
     float3x4 colorTransform;
     uint enabled;
-    uint toneMapBypassEnabled;      // when 0 the bypass mask is ignored entirely
+    uint backgroundEnabled;         // when 1, add the independently resolved background layer after tone mapping
     uint _padding1;
     uint _padding2;
 };

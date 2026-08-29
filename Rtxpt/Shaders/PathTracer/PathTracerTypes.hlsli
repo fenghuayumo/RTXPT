@@ -43,6 +43,7 @@ namespace PathTracer
     struct WorkingContext
     {
         RWTexture2D<float4>     OutputColor;
+        RWTexture2D<float4>     BackgroundOutputColor;
         PathTracerConstants     PtConsts;
         DebugContext            Debug;
         StablePlanesContext     StablePlanes;

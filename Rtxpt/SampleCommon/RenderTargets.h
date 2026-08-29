@@ -35,9 +35,14 @@ public:
     nvrhi::TextureHandle LdrColor;              // final, post-tonemapped color
     nvrhi::TextureHandle LdrColorScratch;       // used for ping-ponging post-process stuff vs LdrColor
     nvrhi::TextureHandle OutputColor;           // raw path tracing output goes here (in both realtime and non-realtime modes); this can be input to TAA/DLSS
+    nvrhi::TextureHandle BackgroundOutputColor; // raw output for primary materials that skip tone mapping
     nvrhi::TextureHandle ProcessedOutputColor;  // for when post-processing OutputColor (i.e. TAA) (previously ResolvedColor); this is the output of TAA/DLSS in full res, but before tonemapping and without ImGUI
+    nvrhi::TextureHandle BackgroundProcessedOutputColor; // resolved/upscaled background layer, still in linear space
     nvrhi::TextureHandle TemporalFeedback1;     // used by TAA
     nvrhi::TextureHandle TemporalFeedback2;     // used by TAA
+    nvrhi::TextureHandle BackgroundTemporalFeedback1; // used by background TAA
+    nvrhi::TextureHandle BackgroundTemporalFeedback2; // used by background TAA
+    nvrhi::TextureHandle BackgroundAccumulatedRadiance; // used only in non-realtime mode
     nvrhi::TextureHandle PreUIColor;            // used DLSS-G
 
     // note: DLSS-RR also uses ProcessedOutputColor as sl::kBufferTypeScalingOutputColor (-RR output) and OutputColor as sl::kBufferTypeScalingInputColor (-RR input)
@@ -68,8 +73,6 @@ public:
     nvrhi::TextureHandle DenoiserDisocclusionThresholdMix;  // input to denoiser (see IN_DISOCCLUSION_THRESHOLD_MIX)
     
     nvrhi::TextureHandle CombinedHistoryClampRelax;         // all DenoiserDisocclusionThresholdMix combined together - used to tell TAA where to relax disocclusion test to minimize aliasing
-
-    nvrhi::TextureHandle ToneMapBypass;                     // render res, 1 where the primary hit uses a 'skip tone mapping' material; sampled by the tone mapper
 
     nvrhi::TextureHandle DenoiserOutDiffRadianceHitDist[cStablePlaneCount]; // output from denoiser, texture per denoiser instance - search for OUT_DIFF_RADIANCE_HITDIST in NRDDescs.h for more info
     nvrhi::TextureHandle DenoiserOutSpecRadianceHitDist[cStablePlaneCount]; // output from denoiser, texture per denoiser instance - search for OUT_SPEC_RADIANCE_HITDIST in NRDDescs.h for more info
@@ -103,6 +106,7 @@ public:
     // Framebuffers are used by the bloom and tone mapping passes
     std::shared_ptr<donut::engine::FramebufferFactory> OutputFramebuffer;
     std::shared_ptr<donut::engine::FramebufferFactory> ProcessedOutputFramebuffer;
+    std::shared_ptr<donut::engine::FramebufferFactory> BackgroundProcessedOutputFramebuffer;
     std::shared_ptr<donut::engine::FramebufferFactory> LdrFramebuffer;
 
     void Init(nvrhi::IDevice* device, donut::math::uint2 renderSize, donut::math::uint2 displaySize, bool enableMotionVectors, bool useReverseProjection, int backbufferCount, bool introSample);// override;
