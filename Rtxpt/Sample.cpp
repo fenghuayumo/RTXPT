@@ -299,7 +299,7 @@ void Sample::Init(const std::string& preferredScene,
     m_bindingCache = std::make_unique<engine::BindingCache>(GetDevice());
 
 #if RTXPT_WITH_NATIVE_DLSS
-    m_nativeDLSS = donut::render::DLSS::Create(GetDevice(), *m_shaderFactory, donut::app::GetDirectoryWithExecutable().string());
+    m_nativeDLSS = donut::render::DLSS::Create(GetDevice(), *m_shaderFactory, GetRuntimeDirectory().string());
     if (m_nativeDLSS)
     {
         m_ui.IsDLSSSuported = m_nativeDLSS->IsDlssSupported();

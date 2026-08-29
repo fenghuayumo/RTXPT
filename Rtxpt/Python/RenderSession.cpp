@@ -461,6 +461,16 @@ RenderSession::RenderSession(const Config& cfg)
         HelpersSetNonInteractive();
     }
 
+    // NGX DLSS on Linux Vulkan resolves bundled libnvidia-ngx-*.so relative to cwd
+    // as well as the runtime directory passed to NVSDK_NGX_VULKAN_Init.
+    try
+    {
+        std::filesystem::current_path(ResolveRuntimeDirectory());
+    }
+    catch (const std::exception& ex)
+    {
+        log::warning("RenderSession: failed to chdir to runtime directory: %s", ex.what());
+    }
     if (!InitDevice())
     {
         log::error("RenderSession: failed to initialize the graphics device");
