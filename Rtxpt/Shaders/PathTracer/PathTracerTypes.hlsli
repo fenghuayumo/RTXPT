@@ -44,6 +44,7 @@ namespace PathTracer
     {
         RWTexture2D<float4>     OutputColor;
         RWTexture2D<float4>     BackgroundOutputColor;
+        RWTexture2D<float4>     LayerCoverage;
         PathTracerConstants     PtConsts;
         DebugContext            Debug;
         StablePlanesContext     StablePlanes;

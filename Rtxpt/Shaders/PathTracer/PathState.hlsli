@@ -63,7 +63,7 @@ enum class PathFlags
     stablePlaneBaseScatterDiff      = (1<<18),  ///< When stepping off the last stable plane & branch, we had a diffuse scatter event (this determines if the radiance is diffuse or specular for denoising purposes)
     exportSpecHitTQueued            = (1<<19),  ///< Export specular hitT distance on first next non-specular scatter (or sky) and clear the flag.
     stablePlaneOnDominantBranch     = (1<<20),  ///< Are we on the dominant stable plane or one of its branches (landing on a new stable branch will re-set this flag accordingly)
-    primarySkipToneMapping          = (1<<21),  ///< The primary camera hit belongs to the background layer.
+    primarySkipToneMapping          = (1<<21),  ///< The primary camera hit is a skip-tone-mapping plate (debug/restart metadata).
 
     // Bits to kPathFlagsBitCount are still unused.
     // consider moving vertexIndex counter to PackedCounters if more flags are needed

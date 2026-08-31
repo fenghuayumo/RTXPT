@@ -356,17 +356,20 @@ void main( uint3 dispatchThreadID : SV_DispatchThreadID )
 
     // we feed this as the main input into denoiser
 
+    // Only a direct camera hit on a plate bypasses tone mapping. Secondary
+    // plate hits (reflection/refraction) stay in combinedRadiance and therefore
+    // retain the glass throughput, denoising and normal HDR tone mapping.
     const bool splitLayers = g_MiniConst.params.z != 0;
     const bool primarySkipsToneMapping = stablePlanes.LoadStablePlane(pixelPos, dominantStablePlaneIndex).IsSkipToneMapping();
     if (splitLayers)
     {
-        u_OutputColor[pixelPos] = primarySkipsToneMapping ? float4(0, 0, 0, 1) : float4(combinedRadiance, 1.0);
-        u_BackgroundOutputColor[pixelPos] = primarySkipsToneMapping ? float4(combinedRadiance, 1.0) : float4(0, 0, 0, 1);
+        u_OutputColor[pixelPos] = primarySkipsToneMapping ? float4(0, 0, 0, 0) : float4(combinedRadiance, 1.0);
+        u_BackgroundOutputColor[pixelPos] = primarySkipsToneMapping ? float4(combinedRadiance, 1.0) : float4(0, 0, 0, 0);
     }
     else
     {
-        // This pass is also used to prepare OIDN guides in reference mode, where
-        // stable-plane metadata is not available and the split output is unused.
+        // This pass also prepares OIDN guides in reference mode, where stable
+        // plane metadata is unavailable and split output is not requested.
         u_OutputColor[pixelPos] = float4(combinedRadiance, 1.0);
     }
 
@@ -472,8 +475,8 @@ void main( uint3 dispatchThreadID : SV_DispatchThreadID )
         const uint dominantStablePlaneIndex = stablePlanes.LoadDominantIndex(pixelPos);
         const bool primarySkipsToneMapping = stablePlanes.LoadStablePlane(pixelPos, dominantStablePlaneIndex).IsSkipToneMapping();
         const float4 stableRadiance = float4(stablePlanes.LoadStableRadiance(pixelPos), 1);
-        u_OutputColor[pixelPos] = primarySkipsToneMapping ? float4(0, 0, 0, 1) : stableRadiance;
-        u_BackgroundOutputColor[pixelPos] = primarySkipsToneMapping ? stableRadiance : float4(0, 0, 0, 1);
+        u_OutputColor[pixelPos] = primarySkipsToneMapping ? float4(0, 0, 0, 0) : stableRadiance;
+        u_BackgroundOutputColor[pixelPos] = primarySkipsToneMapping ? stableRadiance : float4(0, 0, 0, 0);
     }
 
     bool hasSurface = false;
@@ -737,8 +740,8 @@ void main( uint3 dispatchThreadID : SV_DispatchThreadID )
     const uint dominantStablePlaneIndex = stablePlanes.LoadDominantIndex(pixelPos);
     const bool primarySkipsToneMapping = stablePlanes.LoadStablePlane(pixelPos, dominantStablePlaneIndex).IsSkipToneMapping();
     const float4 combinedRadiance = float4(stablePlanes.GetAllRadiance(pixelPos), 1.0);
-    u_OutputColor[pixelPos] = primarySkipsToneMapping ? float4(0, 0, 0, 1) : combinedRadiance;
-    u_BackgroundOutputColor[pixelPos] = primarySkipsToneMapping ? combinedRadiance : float4(0, 0, 0, 1);
+    u_OutputColor[pixelPos] = primarySkipsToneMapping ? float4(0, 0, 0, 0) : combinedRadiance;
+    u_BackgroundOutputColor[pixelPos] = primarySkipsToneMapping ? combinedRadiance : float4(0, 0, 0, 0);
 }
 #endif // NO_DENOISER_FINAL_MERGE
 

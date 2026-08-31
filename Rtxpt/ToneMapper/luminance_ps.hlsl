@@ -12,6 +12,7 @@
 SamplerState gColorSampler : register(s1);
 
 Texture2D gColorTex : register(t0);
+Texture2D gBackgroundTex : register(t1);
 
 float luminance(float3 color)
 {
@@ -24,7 +25,8 @@ void main(
 	in float2 uv : UV,
 	out float4 o_rgba : SV_Target)
 {
-    float4 color = gColorTex.Sample(gColorSampler, uv);
-    float logLuminance = log2(max(0.0001, luminance(color.xyz)));
+    float3 color = gColorTex.Sample(gColorSampler, uv).xyz;
+    color += gBackgroundTex.Sample(gColorSampler, uv).xyz;
+    float logLuminance = log2(max(0.0001, luminance(color)));
     o_rgba = float4(logLuminance, 0, 0, 1);
 }

@@ -539,10 +539,10 @@ bool PTMaterial::EditorGUI(MaterialsBaker & baker)
 
         update |= ImGui::Checkbox("Skip tone mapping", &SkipToneMapping);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip(
-            "Pixels whose primary hit is this material bypass auto-exposure and the tone mapping curve.\n"
-            "Combined with 'Unlit, receive shadows' this puts the base color texture on screen unaltered,\n"
-            "so background geometry matches a photographed or scanned plate.\n"
-            "Note: only the primary (camera) hit is considered - reflections of this material are still tone mapped.");
+            "Pixels whose primary camera hit is this material use the background layer and bypass\n"
+            "auto-exposure and the tone curve. Combined with 'Unlit, receive shadows' this puts the\n"
+            "base color texture on screen unaltered, matching a photographed plate. Ignored on\n"
+            "transmissive materials; reflected/refracted plate hits remain in the HDR path.");
 
         update |= ImGui::SliderFloat("Shadow NoL Fadeout", &ShadowNoLFadeout, 0.0f, 0.2f);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip(

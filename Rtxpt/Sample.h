@@ -183,6 +183,7 @@ public:
     void                                    UpscaleBackgroundLayer();
     bool                                    ResolveForegroundLayerTemporal(bool reset);
     bool                                    ResolveBackgroundLayerTemporal(bool reset);
+    bool                                    ResolveLayerCoverageTemporal(bool reset);
 
     void                                    PreUpdateLighting(nvrhi::CommandListHandle commandList, bool& needNewBindings);     // this can (re)allocate buffers depending on scene changes
     void                                    UpdateLighting(nvrhi::CommandListHandle commandList);                               // this will process and fill up all lighting buffers
@@ -326,6 +327,7 @@ private:
 
     std::unique_ptr<donut::render::TemporalAntiAliasingPass> m_temporalAntiAliasingPass;
     std::unique_ptr<donut::render::TemporalAntiAliasingPass> m_backgroundTemporalAntiAliasingPass;
+    std::unique_ptr<donut::render::TemporalAntiAliasingPass> m_layerCoverageTemporalAntiAliasingPass;
 
     // rendering
     std::vector <std::shared_ptr<donut::engine::Light>> m_lights;
@@ -428,6 +430,7 @@ private:
     std::unique_ptr<NrdIntegration>             m_nrd[cStablePlaneCount];       // reminder: when switching between ReLAX/ReBLUR, change settings, reset these to 0 and they'll get re-created in CreateRenderPasses!
     std::unique_ptr<AccumulationPass>           m_accumulationPass;
     std::unique_ptr<AccumulationPass>           m_backgroundAccumulationPass;
+    std::unique_ptr<AccumulationPass>           m_layerCoverageAccumulationPass;
     std::unique_ptr<OidnDenoiser>               m_oidnDenoiser;
     nvrhi::TextureHandle                        m_oidnDenoisedOutput;
     bool                                        m_oidnDenoisedOutputValid = false;

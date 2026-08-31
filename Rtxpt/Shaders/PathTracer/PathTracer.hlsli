@@ -168,13 +168,13 @@ namespace PathTracer
         const float4 output = float4(path.GetL().rgb, 1);
         if (path.isPrimarySkipToneMapping())
         {
-            workingContext.OutputColor[path.GetPixelPos()] = float4(0, 0, 0, 1);
+            workingContext.OutputColor[path.GetPixelPos()] = float4(0, 0, 0, 0);
             workingContext.BackgroundOutputColor[path.GetPixelPos()] = output;
         }
         else
         {
             workingContext.OutputColor[path.GetPixelPos()] = output;
-            workingContext.BackgroundOutputColor[path.GetPixelPos()] = float4(0, 0, 0, 1);
+            workingContext.BackgroundOutputColor[path.GetPixelPos()] = float4(0, 0, 0, 0);
         }
 #elif PATH_TRACER_MODE==PATH_TRACER_MODE_BUILD_STABLE_PLANES
 #elif PATH_TRACER_MODE==PATH_TRACER_MODE_FILL_STABLE_PLANES
@@ -582,7 +582,11 @@ namespace PathTracer
         }
 
         if (path.getVertexIndex() == 1)
-            path.setPrimarySkipToneMapping(surfaceData.shadingData.mtl.isSkipToneMapping());
+        {
+            const bool skipPlate = surfaceData.shadingData.mtl.isSkipToneMapping();
+            path.setPrimarySkipToneMapping(skipPlate);
+            workingContext.LayerCoverage[path.GetPixelPos()] = skipPlate ? 1.0.xxxx : 0.0.xxxx;
+        }
 
         // These will not change anymore, so make const shortcuts
         const ShadingData shadingData    = surfaceData.shadingData;

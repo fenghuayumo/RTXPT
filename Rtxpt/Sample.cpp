@@ -375,6 +375,7 @@ void Sample::Init(const std::string& preferredScene,
         nvrhi::BindingLayoutItem::Texture_UAV(6),           // u_Depth
         nvrhi::BindingLayoutItem::Texture_UAV(7),           // u_SpecularHitT
         nvrhi::BindingLayoutItem::Texture_UAV(8),           // u_ScratchFloat1
+        nvrhi::BindingLayoutItem::Texture_UAV(9),           // u_LayerCoverage
         // denoising slots go from 30-39
         //nvrhi::BindingLayoutItem::StructuredBuffer_UAV(30), // denoiser 'control buffer' (might be removed, might be reused)
         nvrhi::BindingLayoutItem::Texture_UAV(31),          // RWTexture2D<float>  u_DenoiserViewspaceZ
@@ -1001,6 +1002,8 @@ void Sample::UpdateViews( nvrhi::IFramebuffer* framebuffer )
         m_temporalAntiAliasingPass->SetJitter(m_ui.TemporalAntiAliasingJitter);
     if (m_backgroundTemporalAntiAliasingPass)
         m_backgroundTemporalAntiAliasingPass->SetJitter(m_ui.TemporalAntiAliasingJitter);
+    if (m_layerCoverageTemporalAntiAliasingPass)
+        m_layerCoverageTemporalAntiAliasingPass->SetJitter(m_ui.TemporalAntiAliasingJitter);
 
     nvrhi::Viewport windowViewport(float(m_renderSize.x), float(m_renderSize.y));
     m_view->SetViewport(windowViewport);
@@ -2047,6 +2050,10 @@ void Sample::CreateRenderPasses( bool& exposureResetRequired, nvrhi::CommandList
     m_backgroundAccumulationPass->CreatePipeline();
     m_backgroundAccumulationPass->CreateBindingSet(m_renderTargets->BackgroundOutputColor, m_renderTargets->BackgroundAccumulatedRadiance, m_renderTargets->BackgroundProcessedOutputColor);
 
+    m_layerCoverageAccumulationPass = std::make_unique<AccumulationPass>(GetDevice(), m_shaderFactory);
+    m_layerCoverageAccumulationPass->CreatePipeline();
+    m_layerCoverageAccumulationPass->CreateBindingSet(m_renderTargets->LayerCoverage, m_renderTargets->LayerCoverageAccumulated, m_renderTargets->LayerCoverageProcessed);
+
     {
         nvrhi::TextureDesc gaussianCurrentDesc = m_renderTargets->ProcessedOutputColor->getDesc();
         gaussianCurrentDesc.debugName = "GaussianSplatTemporalCurrentColor";
@@ -2098,6 +2105,12 @@ void Sample::CreateRenderPasses( bool& exposureResetRequired, nvrhi::CommandList
         taaParams.feedback1 = m_renderTargets->BackgroundTemporalFeedback1;
         taaParams.feedback2 = m_renderTargets->BackgroundTemporalFeedback2;
         m_backgroundTemporalAntiAliasingPass = std::make_unique<TemporalAntiAliasingPass>(GetDevice(), m_shaderFactory, m_CommonPasses, *m_view, taaParams);
+
+        taaParams.unresolvedColor = m_renderTargets->LayerCoverage;
+        taaParams.resolvedColor = m_renderTargets->LayerCoverageProcessed;
+        taaParams.feedback1 = m_renderTargets->LayerCoverageTemporalFeedback1;
+        taaParams.feedback2 = m_renderTargets->LayerCoverageTemporalFeedback2;
+        m_layerCoverageTemporalAntiAliasingPass = std::make_unique<TemporalAntiAliasingPass>(GetDevice(), m_shaderFactory, m_CommonPasses, *m_view, taaParams);
     }
 
     if (!CreatePTPipeline(*m_shaderFactory))
@@ -3239,7 +3252,7 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
     PostProcessPreToneMapping(m_commandList, fullscreenView);   // writing to m_renderTargets->ProcessedOutputColor
 
     //Tone Mapping; it will read from m_renderTargets->ProcessedOutputColor and write into m_renderTargets->LdrColor; in case tonemapping is disabled, it's just a passthrough
-    if (m_toneMappingPass->Render(m_commandList, fullscreenView, m_renderTargets->ProcessedOutputColor, m_ui.EnableToneMapping, m_renderTargets->BackgroundProcessedOutputColor))
+    if (m_toneMappingPass->Render(m_commandList, fullscreenView, m_renderTargets->ProcessedOutputColor, m_ui.EnableToneMapping, m_renderTargets->BackgroundProcessedOutputColor, m_renderTargets->LayerCoverageProcessed))
     {
         // first run tonemapper can close & re-open command list - when that happens, we have to re-upload volatile constants
         m_commandList->writeBuffer(m_constantBuffer, &constants, sizeof(constants));
@@ -3359,6 +3372,8 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
         m_temporalAntiAliasingPass->AdvanceFrame();
     if (m_backgroundTemporalAntiAliasingPass != nullptr)
         m_backgroundTemporalAntiAliasingPass->AdvanceFrame();
+    if (m_layerCoverageTemporalAntiAliasingPass != nullptr)
+        m_layerCoverageTemporalAntiAliasingPass->AdvanceFrame();
 
 	std::swap(m_view, m_viewPrevious);
 	GetDeviceManager()->SetVsyncEnabled(m_ui.ActualEnableVsync());
@@ -3418,6 +3433,7 @@ void Sample::RecreateBindingSet()
         nvrhi::BindingSetItem::Texture_UAV(6, m_renderTargets->Depth),
         nvrhi::BindingSetItem::Texture_UAV(7, m_renderTargets->SpecularHitT), 
         nvrhi::BindingSetItem::Texture_UAV(8, m_renderTargets->ScratchFloat1),
+        nvrhi::BindingSetItem::Texture_UAV(9, m_renderTargets->LayerCoverage),
         nvrhi::BindingSetItem::Texture_UAV(31, m_renderTargets->DenoiserViewspaceZ),
         nvrhi::BindingSetItem::Texture_UAV(32, m_renderTargets->DenoiserMotionVectors),
         nvrhi::BindingSetItem::Texture_UAV(33, m_renderTargets->DenoiserNormalRoughness),
@@ -5705,6 +5721,28 @@ bool Sample::ResolveBackgroundLayerTemporal(bool reset)
     return true;
 }
 
+bool Sample::ResolveLayerCoverageTemporal(bool reset)
+{
+    if (m_layerCoverageTemporalAntiAliasingPass == nullptr || m_view == nullptr)
+        return false;
+
+    PlanarView outputView = *m_view;
+    outputView.SetViewport(nvrhi::Viewport(float(m_displaySize.x), float(m_displaySize.y)));
+    outputView.SetPixelOffset(dm::float2::zero());
+    outputView.UpdateCache();
+
+    const bool previousViewValid = !reset && (GetFrameIndex() != 0);
+    m_commandList->beginMarker("LayerCoverageTemporalResolve");
+    m_layerCoverageTemporalAntiAliasingPass->TemporalResolve(
+        m_commandList,
+        m_ui.TemporalAntiAliasingParams,
+        previousViewValid,
+        *m_view,
+        outputView);
+    m_commandList->endMarker();
+    return true;
+}
+
 bool Sample::ResolveForegroundLayerTemporal(bool reset)
 {
     if (m_temporalAntiAliasingPass == nullptr || m_view == nullptr)
@@ -5756,6 +5794,7 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
     {
         bool foregroundLayerReadyForDisplay = false;
         bool backgroundLayerReadyForDisplay = false;
+        bool layerCoverageReadyForDisplay = false;
         const bool hasSkipToneMappingMaterials = m_materialsBaker != nullptr && m_materialsBaker->HasSkipToneMappingMaterials();
 
         // Stable-plane rendering does not write the final HDR color directly when
@@ -5775,8 +5814,10 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
             // TODO: Remove Redundant copy for non AA case
             m_commandList->copyTexture(m_renderTargets->ProcessedOutputColor, nvrhi::TextureSlice(), m_renderTargets->OutputColor, nvrhi::TextureSlice());
             m_commandList->copyTexture(m_renderTargets->BackgroundProcessedOutputColor, nvrhi::TextureSlice(), m_renderTargets->BackgroundOutputColor, nvrhi::TextureSlice());
+            m_commandList->copyTexture(m_renderTargets->LayerCoverageProcessed, nvrhi::TextureSlice(), m_renderTargets->LayerCoverage, nvrhi::TextureSlice());
             foregroundLayerReadyForDisplay = true;
             backgroundLayerReadyForDisplay = true;
+            layerCoverageReadyForDisplay = true;
         }
         else if (m_ui.RealtimeAA == 1 && m_temporalAntiAliasingPass != nullptr )
         {
@@ -5803,6 +5844,11 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
                 m_backgroundTemporalAntiAliasingPass->TemporalResolve(m_commandList, m_ui.TemporalAntiAliasingParams, previousViewValid, *m_view, *m_view);
                 backgroundLayerReadyForDisplay = true;
             }
+            if (m_layerCoverageTemporalAntiAliasingPass != nullptr)
+            {
+                m_layerCoverageTemporalAntiAliasingPass->TemporalResolve(m_commandList, m_ui.TemporalAntiAliasingParams, previousViewValid, *m_view, *m_view);
+                layerCoverageReadyForDisplay = true;
+            }
 
             m_commandList->endMarker();
 
@@ -5814,6 +5860,7 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
         }
         else if (m_ui.RealtimeAA >= 2)
         {
+            layerCoverageReadyForDisplay = ResolveLayerCoverageTemporal(reset);
             if (hasSkipToneMappingMaterials)
             {
                 backgroundLayerReadyForDisplay = ResolveBackgroundLayerTemporal(reset);
@@ -5972,6 +6019,8 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
         }
         if (m_ui.RealtimeAA >= 1 && !backgroundLayerReadyForDisplay)
             UpscaleBackgroundLayer();
+        if (m_ui.RealtimeAA >= 1 && !layerCoverageReadyForDisplay)
+            ResolveLayerCoverageTemporal(reset);
         }
     }
     else
@@ -5983,6 +6032,7 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
 
         m_accumulationPass->Render(m_commandList, *m_view, *m_view, accumulationWeight);
         m_backgroundAccumulationPass->Render(m_commandList, *m_view, *m_view, accumulationWeight);
+        m_layerCoverageAccumulationPass->Render(m_commandList, *m_view, *m_view, accumulationWeight);
     }
 
 }

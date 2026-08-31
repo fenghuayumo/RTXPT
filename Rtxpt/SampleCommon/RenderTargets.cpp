@@ -177,10 +177,15 @@ void RenderTargets::Init(
     desc.debugName = "BackgroundOutputColor";
     BackgroundOutputColor = device->createTexture(desc);
 
+    desc.debugName = "LayerCoverage";
+    LayerCoverage = device->createTexture(desc);
+
     desc.format = nvrhi::Format::RGBA32_FLOAT;
     desc.clearValue = nvrhi::Color(0.0f);
     desc.debugName = "BackgroundAccumulatedRadiance";
     BackgroundAccumulatedRadiance = device->createTexture(desc);
+    desc.debugName = "LayerCoverageAccumulated";
+    LayerCoverageAccumulated = device->createTexture(desc);
 
     desc.format = nvrhi::Format::R8_UNORM;
     desc.isUAV = true;
@@ -242,6 +247,8 @@ void RenderTargets::Init(
     ProcessedOutputColor = device->createTexture(desc);
     desc.debugName = "BackgroundProcessedOutputColor";
     BackgroundProcessedOutputColor = device->createTexture(desc);
+    desc.debugName = "LayerCoverageProcessed";
+    LayerCoverageProcessed = device->createTexture(desc);
     desc.format = nvrhi::Format::RGBA16_SNORM;
     desc.debugName = "TemporalFeedback1";
     TemporalFeedback1 = device->createTexture(desc);
@@ -251,6 +258,10 @@ void RenderTargets::Init(
     BackgroundTemporalFeedback1 = device->createTexture(desc);
     desc.debugName = "BackgroundTemporalFeedback2";
     BackgroundTemporalFeedback2 = device->createTexture(desc);
+    desc.debugName = "LayerCoverageTemporalFeedback1";
+    LayerCoverageTemporalFeedback1 = device->createTexture(desc);
+    desc.debugName = "LayerCoverageTemporalFeedback2";
+    LayerCoverageTemporalFeedback2 = device->createTexture(desc);
 
     desc.format = nvrhi::Format::SRGBA8_UNORM;
     desc.isUAV = true;
@@ -401,6 +412,7 @@ void RenderTargets::Clear(nvrhi::ICommandList* commandList)
 
     // Renderers that don't go through the path tracer never write the split layer.
     commandList->clearTextureFloat(BackgroundOutputColor, nvrhi::AllSubresources, nvrhi::Color(0));
+    commandList->clearTextureFloat(LayerCoverage, nvrhi::AllSubresources, nvrhi::Color(0));
 }
 
 uint32_t RenderTargets::GetNumMipLevels(uint32_t width, uint32_t height)

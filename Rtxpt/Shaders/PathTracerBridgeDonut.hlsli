@@ -720,10 +720,18 @@ static PathTracer::SurfaceData Bridge::loadSurface( const uint instanceIndex, co
     ptShadingData.mtl.setThinSurface( donutMaterialThinSurface );
     ptShadingData.mtl.setPSDExclude( (donutMaterial.flags & PTMaterialFlags_PSDExclude) != 0 );
     ptShadingData.mtl.setPSDDominantDeltaLobeP1( (donutMaterial.flags & PTMaterialFlags_PSDDominantDeltaLobeP1Mask) >> PTMaterialFlags_PSDDominantDeltaLobeP1Shift );
-    const bool unlitReceiveShadows = (donutMaterial.flags & PTMaterialFlags_UnlitReceiveShadows) != 0;
+    // Glass must keep reflecting/refracting. Skip-tone-mapping and unlit are
+    // plate-only: applying them on a transmissive primary hit would terminate
+    // the path and clip the HDR glass lobe to white.
+#if !defined(RTXPT_MATERIAL_HAS_TRANSMISSION) || RTXPT_MATERIAL_HAS_TRANSMISSION
+    const bool hasTransmission = max(donutMaterial.transmission, donutMaterial.diffuseTransmission) > 1e-5;
+#else
+    const bool hasTransmission = false;
+#endif
+    const bool unlitReceiveShadows = !hasTransmission && (donutMaterial.flags & PTMaterialFlags_UnlitReceiveShadows) != 0;
     ptShadingData.mtl.setUnlitReceiveShadows(unlitReceiveShadows);
     ptShadingData.mtl.setUnlitShadowStrength(donutMaterial.unlitShadowStrength);
-    ptShadingData.mtl.setSkipToneMapping( (donutMaterial.flags & PTMaterialFlags_SkipToneMapping) != 0 );
+    ptShadingData.mtl.setSkipToneMapping( !hasTransmission && (donutMaterial.flags & PTMaterialFlags_SkipToneMapping) != 0 );
     ptShadingData.unlitColor = donutMaterial.baseColor;
     ptShadingData.unlitShadowStrength = donutMaterial.unlitShadowStrength;
 
@@ -1270,6 +1278,7 @@ void Bridge::ExportSurfaceInit(uint2 pixelPos)
 {
     u_Depth[pixelPos] = 0;                  // this is a signal that data is invalid - there's (rare) cases where neither ExportSurface or ExportNonSurface get called
     u_SpecularHitT[pixelPos] = 0;           // it is common for this to be missing
+    u_LayerCoverage[pixelPos] = 0;          // primary hit writes replicated coverage
     
     // u_MotionVectors[pixelPos] = float4( 0, 0, 0, 0 );   // this should not be strictly necessary as we already know from u_Depth[] that the signal is invalid
     // DebugPixel( pixelPos.xy, float4( 0.0.xxx, 1 ) ); 
@@ -1356,6 +1365,7 @@ PathTracer::WorkingContext GetWorkingContext()
     ret.StablePlanes = StablePlanesContext::make(u_StablePlanesHeader, u_StablePlanesBuffer, u_StableRadiance, g_Const.ptConsts);
     ret.OutputColor = u_OutputColor;
     ret.BackgroundOutputColor = u_BackgroundOutputColor;
+    ret.LayerCoverage = u_LayerCoverage;
     return ret;
 }
 
