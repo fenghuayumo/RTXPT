@@ -197,7 +197,8 @@ void ToneMappingPass::PreRender(const ToneMappingParameters& params)
 bool ToneMappingPass::Render(
     nvrhi::ICommandList* commandList, 
     const donut::engine::ICompositeView& compositeView,
-    nvrhi::ITexture* sourceTexture, bool enabled, nvrhi::ITexture* backgroundTexture, nvrhi::ITexture* coverageTexture)
+    nvrhi::ITexture* sourceTexture, bool enabled, nvrhi::ITexture* backgroundTexture, nvrhi::ITexture* coverageTexture,
+    bool combinedSkipToneMapping)
 {
     assert( m_FrameParamsSet ); // forgot to call PreRender before this?
     m_FrameParamsSet = false;
@@ -368,7 +369,7 @@ bool ToneMappingPass::Render(
 		toneMappingConsts.colorTransform[1] = float4(m_ColorTransform.col(1), 0);
 		toneMappingConsts.colorTransform[2] = float4(m_ColorTransform.col(2), 0);
         toneMappingConsts.enabled = enabled;
-        toneMappingConsts.backgroundEnabled = (backgroundTexture != nullptr);
+        toneMappingConsts.backgroundEnabled = combinedSkipToneMapping ? 2u : ((backgroundTexture != nullptr) ? 1u : 0u);
         commandList->writeBuffer(m_ToneMappingCB, &toneMappingConsts, sizeof(ToneMappingConstants));
 
         commandList->setGraphicsState(state);

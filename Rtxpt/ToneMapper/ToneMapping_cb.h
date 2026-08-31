@@ -37,7 +37,7 @@ struct ToneMappingConstants
 	float autoExposureLumValueMax;
     float3x4 colorTransform;
     uint enabled;
-    uint backgroundEnabled;         // when 1, add the independently resolved background layer after tone mapping
+    uint backgroundEnabled;         // 0: none, 1: split plate layer, 2: combined DLSS color with plate coverage
     uint _padding1;
     uint _padding2;
 };

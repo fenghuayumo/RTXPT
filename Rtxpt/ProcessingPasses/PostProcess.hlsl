@@ -712,7 +712,8 @@ void main( uint3 dispatchThreadID : SV_DispatchThreadID )
     if (hasSurface)
     {
         const float3 denoisedRadiance = max(0, (diffRadiance.rgb + specRadiance.rgb));
-        if (primarySkipsToneMapping)
+        const bool combinedDLSSSkipMode = g_MiniConst.params.z != 0;
+        if (primarySkipsToneMapping && !combinedDLSSSkipMode)
             u_BackgroundInputOutput[pixelPos.xy].xyz += denoisedRadiance;
         else
             u_InputOutput[pixelPos.xy].xyz += denoisedRadiance;
@@ -740,8 +741,20 @@ void main( uint3 dispatchThreadID : SV_DispatchThreadID )
     const uint dominantStablePlaneIndex = stablePlanes.LoadDominantIndex(pixelPos);
     const bool primarySkipsToneMapping = stablePlanes.LoadStablePlane(pixelPos, dominantStablePlaneIndex).IsSkipToneMapping();
     const float4 combinedRadiance = float4(stablePlanes.GetAllRadiance(pixelPos), 1.0);
-    u_OutputColor[pixelPos] = primarySkipsToneMapping ? float4(0, 0, 0, 0) : combinedRadiance;
-    u_BackgroundOutputColor[pixelPos] = primarySkipsToneMapping ? combinedRadiance : float4(0, 0, 0, 0);
+    const bool splitLayers = g_MiniConst.params.z != 0;
+    if (splitLayers)
+    {
+        u_OutputColor[pixelPos] = primarySkipsToneMapping ? float4(0, 0, 0, 0) : combinedRadiance;
+        u_BackgroundOutputColor[pixelPos] = primarySkipsToneMapping ? combinedRadiance : float4(0, 0, 0, 0);
+    }
+    else
+    {
+        // DLSS/DLSS-RR needs the full scene context in one HDR input. The
+        // coverage signal later decides which direct plate pixels bypass the
+        // display tone curve; reflected and refracted plate light stays HDR.
+        u_OutputColor[pixelPos] = combinedRadiance;
+        u_BackgroundOutputColor[pixelPos] = float4(0, 0, 0, 0);
+    }
 }
 #endif // NO_DENOISER_FINAL_MERGE
 

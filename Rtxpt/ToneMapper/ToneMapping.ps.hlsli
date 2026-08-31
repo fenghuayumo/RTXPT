@@ -136,22 +136,28 @@ float4 applyToneMapping(float2 texC)
 {
     float4 color = gColorTex.Sample(gColorSampler, texC);
     float3 finalColor = color.rgb;
+    const uint backgroundMode = gParams.backgroundEnabled;
+    const bool splitBackground = backgroundMode == 1;
+    const bool combinedSkipToneMapping = backgroundMode == 2;
 
-    const float3 backgroundColor = (gParams.backgroundEnabled != 0)
+    const float3 backgroundColor = splitBackground
         ? gBackgroundTex.SampleLevel(gColorSampler, texC, 0).rgb
         : 0.0.xxx;
 
     // Coverage has its own accumulation/TAA history using the same jitter,
     // motion vectors and temporal parameters as both color layers. Never mix
     // temporally resolved colors with a raw current-frame classification mask.
-    const float plateCoverage = (gParams.backgroundEnabled != 0)
+    const float plateCoverage = (backgroundMode != 0)
         ? saturate(gCoverageTex.SampleLevel(gColorSampler, texC, 0).r)
         : 0.0;
     const float fgCoverage = saturate(1.0 - plateCoverage);
-    if (fgCoverage > 1e-3)
-        finalColor /= fgCoverage;
-    else
-        finalColor = 0.0.xxx;
+    if (splitBackground)
+    {
+        if (fgCoverage > 1e-3)
+            finalColor /= fgCoverage;
+        else
+            finalColor = 0.0.xxx;
+    }
 /*
 #ifdef _TONE_MAPPER_AUTO_EXPOSURE
     // apply auto exposure
@@ -188,9 +194,19 @@ float4 applyToneMapping(float2 texC)
             finalColor = saturate(finalColor);
     }
 
-    // Re-premultiply after the tone curve, then add the display-linear plate.
-    finalColor *= fgCoverage;
-    finalColor += backgroundColor;
+    if (splitBackground)
+    {
+        // Re-premultiply after the tone curve, then add the separately resolved plate.
+        finalColor = finalColor * fgCoverage + backgroundColor;
+    }
+    else if (combinedSkipToneMapping)
+    {
+        // DLSS/DLSS-RR has already reconstructed the full HDR scene. Preserve
+        // its denoised direct plate pixels while tone mapping foreground,
+        // reflections and refractions normally. Stable coverage avoids edge
+        // classification flicker without running TAA on color.
+        finalColor = lerp(finalColor, color.rgb, plateCoverage);
+    }
 
     return float4(finalColor, color.a);
 }

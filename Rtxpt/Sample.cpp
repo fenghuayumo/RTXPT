@@ -2110,6 +2110,7 @@ void Sample::CreateRenderPasses( bool& exposureResetRequired, nvrhi::CommandList
         taaParams.resolvedColor = m_renderTargets->LayerCoverageProcessed;
         taaParams.feedback1 = m_renderTargets->LayerCoverageTemporalFeedback1;
         taaParams.feedback2 = m_renderTargets->LayerCoverageTemporalFeedback2;
+        taaParams.isMaskSignal = true;
         m_layerCoverageTemporalAntiAliasingPass = std::make_unique<TemporalAntiAliasingPass>(GetDevice(), m_shaderFactory, m_CommonPasses, *m_view, taaParams);
     }
 
@@ -3252,7 +3253,11 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
     PostProcessPreToneMapping(m_commandList, fullscreenView);   // writing to m_renderTargets->ProcessedOutputColor
 
     //Tone Mapping; it will read from m_renderTargets->ProcessedOutputColor and write into m_renderTargets->LdrColor; in case tonemapping is disabled, it's just a passthrough
-    if (m_toneMappingPass->Render(m_commandList, fullscreenView, m_renderTargets->ProcessedOutputColor, m_ui.EnableToneMapping, m_renderTargets->BackgroundProcessedOutputColor, m_renderTargets->LayerCoverageProcessed))
+    const bool combinedDLSSSkipToneMapping = m_ui.RealtimeMode && m_ui.RealtimeAA >= 2 &&
+        m_materialsBaker != nullptr && m_materialsBaker->HasSkipToneMappingMaterials();
+    nvrhi::ITexture* toneMappingBackground = combinedDLSSSkipToneMapping ? nullptr : m_renderTargets->BackgroundProcessedOutputColor.Get();
+    if (m_toneMappingPass->Render(m_commandList, fullscreenView, m_renderTargets->ProcessedOutputColor, m_ui.EnableToneMapping,
+        toneMappingBackground, m_renderTargets->LayerCoverageProcessed, combinedDLSSSkipToneMapping))
     {
         // first run tonemapper can close & re-open command list - when that happens, we have to re-upload volatile constants
         m_commandList->writeBuffer(m_constantBuffer, &constants, sizeof(constants));
@@ -5564,6 +5569,8 @@ void Sample::Denoise(nvrhi::IFramebuffer* framebuffer)
     PostProcess::ComputePassType mergePassType = nrdUseRelax ? PostProcess::ComputePassType::RELAXDenoiserFinalMerge : PostProcess::ComputePassType::REBLURDenoiserFinalMerge;
 
     bool resetHistory = m_ui.ResetRealtimeCaches;
+    const bool combinedDLSSSkipMode = m_ui.RealtimeAA >= 2 && m_materialsBaker != nullptr &&
+        m_materialsBaker->HasSkipToneMappingMaterials();
 
     int maxPassCount = std::min(m_ui.StablePlanesActiveCount, (int)std::size(m_nrd));
     bool initWithStableRadiance = true;
@@ -5571,7 +5578,7 @@ void Sample::Denoise(nvrhi::IFramebuffer* framebuffer)
     {
         m_commandList->beginMarker(passNames[pass]);
 
-        SampleMiniConstants miniConstants = { uint4((uint)pass, initWithStableRadiance?1:0, 0, 0) };
+        SampleMiniConstants miniConstants = { uint4((uint)pass, initWithStableRadiance?1:0, combinedDLSSSkipMode ? 1u : 0u, 0) };
         initWithStableRadiance = false;
 
         // Direct inputs to denoiser are reused between passes; there's redundant copies but it makes interfacing simpler
@@ -5796,13 +5803,14 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
         bool backgroundLayerReadyForDisplay = false;
         bool layerCoverageReadyForDisplay = false;
         const bool hasSkipToneMappingMaterials = m_materialsBaker != nullptr && m_materialsBaker->HasSkipToneMappingMaterials();
+        const bool combinedDLSSSkipMode = hasSkipToneMappingMaterials && m_ui.RealtimeAA >= 2;
 
         // Stable-plane rendering does not write the final HDR color directly when
-        // standalone denoising is disabled. Build the two HDR layers before any
-        // temporal/upscaling pass so both layers get the same frame history.
+        // standalone denoising is disabled. Build either the legacy split layers
+        // or one contextual HDR input before temporal reconstruction/upscaling.
         if (!m_ui.ActualUseStandaloneDenoiser())
         {
-            SampleMiniConstants miniConstants = { uint4(0, 0, 0, 0) };
+            SampleMiniConstants miniConstants = { uint4(0, 0, combinedDLSSSkipMode ? 0u : 1u, 0) };
             nvrhi::TextureDesc tdesc = m_renderTargets->OutputColor->getDesc();
             m_commandList->beginMarker("NoDenoiserFinalMerge");
             m_postProcess->Apply(m_commandList, PostProcess::ComputePassType::NoDenoiserFinalMerge, m_constantBuffer, miniConstants, m_bindingSet, m_bindingLayout, tdesc.width, tdesc.height);
@@ -5861,18 +5869,15 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
         else if (m_ui.RealtimeAA >= 2)
         {
             layerCoverageReadyForDisplay = ResolveLayerCoverageTemporal(reset);
-            if (hasSkipToneMappingMaterials)
+            if (hasSkipToneMappingMaterials && !combinedDLSSSkipMode)
             {
                 backgroundLayerReadyForDisplay = ResolveBackgroundLayerTemporal(reset);
-                foregroundLayerReadyForDisplay = ResolveForegroundLayerTemporal(reset);
             }
         }
 
-        // DLSS has no layer/coverage input. Feeding it a foreground-only image
-        // makes small objects lose the surrounding context and can produce dark
-        // holes. When the feature is active, resolve both layers with TAA instead.
-        if (!hasSkipToneMappingMaterials)
-        {
+        // DLSS/DLSS-RR resolves and denoises the tone-mapped foreground path even
+        // when a skip-tone-map plate is present. The display-linear plate and its
+        // coverage keep matching TAA histories and are composited after tone mapping.
 #if DONUT_WITH_STREAMLINE
         const bool useStreamlineThisFrame = !GetDeviceManager()->GetDeviceParams().headlessDevice;
         if (useStreamlineThisFrame)
@@ -5944,7 +5949,7 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
             GetDeviceManager()->GetStreamline().EvaluateDLSS(m_commandList);
             m_commandList->clearState();
             foregroundLayerReadyForDisplay = true;
-            if (!backgroundLayerReadyForDisplay)
+            if (!combinedDLSSSkipMode && !backgroundLayerReadyForDisplay)
                 UpscaleBackgroundLayer();
         }
         }
@@ -5953,7 +5958,7 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
             RAII_SCOPE(m_commandList->beginMarker("DLSS-RR");, m_commandList->endMarker(); );
 
             // Direct inputs to denoiser are reused between passes; there's redundant copies but it makes interfacing simpler
-            SampleMiniConstants miniConstants = { uint4(0, 0, 1, 0) };
+            SampleMiniConstants miniConstants = { uint4(0, 0, combinedDLSSSkipMode ? 0u : 1u, 0) };
             nvrhi::TextureDesc tdesc = m_renderTargets->OutputColor->getDesc();
             m_commandList->beginMarker("DLSSRR_PrepareInputs");
             m_postProcess->Apply(m_commandList, PostProcess::ComputePassType::DLSSRRDenoiserPrepareInputs, m_constantBuffer, miniConstants, m_bindingSet, m_bindingLayout, tdesc.width, tdesc.height);
@@ -5998,7 +6003,7 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
             GetDeviceManager()->GetStreamline().EvaluateDLSSRR(m_commandList);
             m_commandList->clearState();
             foregroundLayerReadyForDisplay = true;
-            if (!backgroundLayerReadyForDisplay)
+            if (!combinedDLSSSkipMode && !backgroundLayerReadyForDisplay)
                 UpscaleBackgroundLayer();
         }
 #endif
@@ -6017,11 +6022,10 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
             UpscaleForegroundLayer();
             foregroundLayerReadyForDisplay = true;
         }
-        if (m_ui.RealtimeAA >= 1 && !backgroundLayerReadyForDisplay)
+        if (m_ui.RealtimeAA >= 1 && !combinedDLSSSkipMode && !backgroundLayerReadyForDisplay)
             UpscaleBackgroundLayer();
         if (m_ui.RealtimeAA >= 1 && !layerCoverageReadyForDisplay)
             ResolveLayerCoverageTemporal(reset);
-        }
     }
     else
     {
