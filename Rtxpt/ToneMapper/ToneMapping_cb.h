@@ -42,7 +42,7 @@ struct ToneMappingConstants
 	float autoExposureLumValueMax;
     float3x4 colorTransform;
     uint enabled;
-    uint _padding0;
+    uint applyCameraLutAfterToneMap;
     float photoSoftShoulderStart;
     uint _padding2;
     float3 cameraLutDomainMin;

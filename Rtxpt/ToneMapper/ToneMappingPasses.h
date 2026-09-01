@@ -50,6 +50,9 @@ struct ToneMappingParameters
     float whiteMaxLuminance = 1.0f;
     float whiteScale = 5.1f;
     float photoSoftShoulderStart = 0.8f;
+    // When true, run cameraLut after toneMapOperator instead of using CameraLut
+    // as the operator itself. This supports calibrated post-tone-map response.
+    bool applyCameraLutAfterToneMap = false;
     float3 cameraLutDomainMin = float3(0.0f);
     float3 cameraLutDomainMax = float3(1.0f);
     std::array<float4, TONEMAPPING_CAMERA_LUT_SIZE> cameraLut = [] {
@@ -150,6 +153,7 @@ private:
     float m_WhiteMaxLuminance;
     float m_WhiteScale;
     float m_PhotoSoftShoulderStart;
+    bool m_ApplyCameraLutAfterToneMap = false;
     float3 m_CameraLutDomainMin;
     float3 m_CameraLutDomainMax;
     std::array<float4, TONEMAPPING_CAMERA_LUT_SIZE> m_CameraLut;

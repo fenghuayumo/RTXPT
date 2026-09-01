@@ -1184,6 +1184,10 @@ void RegisterCoreBindings(nb::module_& m)
         .def_prop_rw("tone_mapper_photo_soft_shoulder_start",
             [](SampleUIData& s) { return s.ToneMappingParams.photoSoftShoulderStart; },
             [](SampleUIData& s, float value) { s.ToneMappingParams.photoSoftShoulderStart = std::clamp(value, 0.0f, 0.999f); })
+        .def_prop_rw("tone_mapper_camera_lut_after_tone_map",
+            [](SampleUIData& s) { return s.ToneMappingParams.applyCameraLutAfterToneMap; },
+            [](SampleUIData& s, bool value) { s.ToneMappingParams.applyCameraLutAfterToneMap = value; },
+            "Apply CameraLut after the selected tone mapper instead of selecting CameraLut as the operator.")
         .def_prop_rw("tone_mapper_camera_lut_domain_min",
             [](SampleUIData& s) { return Float3ToTuple(s.ToneMappingParams.cameraLutDomainMin); },
             [](SampleUIData& s, const nb::object& value) { s.ToneMappingParams.cameraLutDomainMin = ToFloat3(value); })

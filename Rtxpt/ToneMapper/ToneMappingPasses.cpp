@@ -345,6 +345,7 @@ bool ToneMappingPass::Render(
 		toneMappingConsts.colorTransform[1] = float4(m_ColorTransform.col(1), 0);
 		toneMappingConsts.colorTransform[2] = float4(m_ColorTransform.col(2), 0);
         toneMappingConsts.enabled = enabled;
+        toneMappingConsts.applyCameraLutAfterToneMap = m_ApplyCameraLutAfterToneMap ? 1u : 0u;
         toneMappingConsts.photoSoftShoulderStart = m_PhotoSoftShoulderStart;
         toneMappingConsts.cameraLutDomainMin = m_CameraLutDomainMin;
         toneMappingConsts.cameraLutDomainMax = m_CameraLutDomainMax;
@@ -387,6 +388,7 @@ void ToneMappingPass::SetParameters(const ToneMappingParameters& params)
 	m_WhiteMaxLuminance = params.whiteMaxLuminance;
 	m_WhiteScale = params.whiteScale;
     m_PhotoSoftShoulderStart = clamp(params.photoSoftShoulderStart, 0.0f, 0.999f);
+    m_ApplyCameraLutAfterToneMap = params.applyCameraLutAfterToneMap;
     m_CameraLutDomainMin = params.cameraLutDomainMin;
     m_CameraLutDomainMax = max(params.cameraLutDomainMax, params.cameraLutDomainMin + float3(1e-6f));
     m_CameraLut = params.cameraLut;

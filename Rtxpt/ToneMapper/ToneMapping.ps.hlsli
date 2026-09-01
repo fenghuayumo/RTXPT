@@ -298,6 +298,11 @@ float4 applyToneMapping(float2 texC)
         // apply tone mapping
         finalColor = toneMap(finalColor);
 
+        // CameraLut normally replaces the selected operator. For calibration
+        // workflows it can instead correct the selected operator's output.
+        if (gParams.applyCameraLutAfterToneMap)
+            finalColor = toneMapCameraLut(finalColor);
+
         if (gParams.clamped)
             finalColor = saturate(finalColor);
     }
