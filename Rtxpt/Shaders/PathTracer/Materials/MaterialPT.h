@@ -51,7 +51,7 @@ struct PTMaterialData
     uint        Flags;
 
     float3      SpecularColor;
-    int         _padding0;
+    float       CameraPlateSecondaryScale;
 
     float3      EmissiveColor;
     float       ShadowNoLFadeout;

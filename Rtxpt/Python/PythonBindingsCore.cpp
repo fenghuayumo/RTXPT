@@ -69,6 +69,7 @@ namespace py_enums
     enum class OidnPasses     : int { ColorOnly = 0, Albedo = 1, AlbedoNormal = 2 };
     enum class OidnPrefilter  : int { None_ = 0, Fast = 1, Accurate = 2 };
     enum class OidnQuality    : int { Fast = 0, Balanced = 1, High = 2 };
+    enum class ToneMapperOperator : int { Linear = 0, Reinhard = 1, ReinhardModified = 2, HejiHableAlu = 3, HableUc2 = 4, Aces = 5, PbrNeutral = 6, PhotoSoftShoulder = 7, Agx = 8, CameraLut = 9 };
     enum class GaussianSplatSortMode : int { GpuSort = 0, StochasticSplats = 1 };
     enum class GaussianSplatStorageFormat : int { Float32 = 0, Float16 = 1, Uint8 = 2 };
     enum class GaussianSplatFrustumCulling : int { Disabled = 0, AtDistanceStage = 1, AtRasterStage = 2 };
@@ -91,6 +92,26 @@ namespace
     }
 
     nb::tuple Float3ToTuple(const float3& v) { return nb::make_tuple(v.x, v.y, v.z); }
+
+    nb::list CameraLutToList(const std::array<float4, TONEMAPPING_CAMERA_LUT_SIZE>& lut)
+    {
+        nb::list result;
+        for (const float4& value : lut)
+            result.append(nb::make_tuple(value.x, value.y, value.z));
+        return result;
+    }
+
+    void SetCameraLutFromPython(std::array<float4, TONEMAPPING_CAMERA_LUT_SIZE>& lut, const nb::object& src)
+    {
+        nb::sequence sequence = nb::cast<nb::sequence>(src);
+        std::vector<float3> values;
+        for (auto handle : sequence)
+            values.push_back(ToFloat3(nb::borrow<nb::object>(handle)));
+        if (values.size() != TONEMAPPING_CAMERA_LUT_SIZE)
+            throw std::runtime_error("Camera LUT must contain exactly 256 RGB entries");
+        for (size_t index = 0; index < values.size(); ++index)
+            lut[index] = float4(values[index], 0.0f);
+    }
     nb::tuple Double3ToTuple(const double3& v) { return nb::make_tuple(v.x, v.y, v.z); }
 
     std::string LowerCopy(std::string value)
@@ -568,6 +589,20 @@ void RegisterCoreBindings(nb::module_& m)
         .value("High",     OidnQuality::High)
         .export_values();
 
+    nb::enum_<py_enums::ToneMapperOperator>(m, "ToneMapperOperator",
+        "Tone-mapping curve applied after scene-linear rendering.", nb::is_arithmetic())
+        .value("Linear",            py_enums::ToneMapperOperator::Linear)
+        .value("Reinhard",          py_enums::ToneMapperOperator::Reinhard)
+        .value("ReinhardModified",  py_enums::ToneMapperOperator::ReinhardModified)
+        .value("HejiHableAlu",       py_enums::ToneMapperOperator::HejiHableAlu)
+        .value("HableUc2",           py_enums::ToneMapperOperator::HableUc2)
+        .value("Aces",               py_enums::ToneMapperOperator::Aces)
+        .value("PbrNeutral",          py_enums::ToneMapperOperator::PbrNeutral)
+        .value("PhotoSoftShoulder",   py_enums::ToneMapperOperator::PhotoSoftShoulder)
+        .value("Agx",                 py_enums::ToneMapperOperator::Agx)
+        .value("CameraLut",           py_enums::ToneMapperOperator::CameraLut)
+        .export_values();
+
     nb::enum_<GaussianSplatSortMode>(m, "GaussianSplatSortMode",
         "3D Gaussian Splat rasterization ordering mode.",
         nb::is_arithmetic())
@@ -772,6 +807,10 @@ void RegisterCoreBindings(nb::module_& m)
             [](PTMaterial& self) { return self.SkipToneMapping; },
             [](PTMaterial& self, bool v) { self.SkipToneMapping = v; self.GPUDataDirty = true; },
             "Pixels whose primary hit is this material bypass auto-exposure and the tone curve.")
+        .def_prop_rw("camera_plate_secondary_scale",
+            [](PTMaterial& self) { return self.CameraPlateSecondaryScale; },
+            [](PTMaterial& self, float v) { self.CameraPlateSecondaryScale = std::max(v, 0.0f); self.GPUDataDirty = true; },
+            "PBR albedo scale used when secondary rays hit a skip-tone-mapping camera plate.")
         .def_prop_rw("enable_as_analytic_light_proxy",
             [](PTMaterial& self) { return self.EnableAsAnalyticLightProxy; },
             [](PTMaterial& self, bool v) { self.EnableAsAnalyticLightProxy = v; self.GPUDataDirty = true; })
@@ -1135,6 +1174,34 @@ void RegisterCoreBindings(nb::module_& m)
         .def_rw("reference_firefly_filter_threshold",&SampleUIData::ReferenceFireflyFilterThreshold)
 
         .def_rw("enable_tone_mapping",           &SampleUIData::EnableToneMapping)
+        .def_prop_rw("tone_mapper_operator",
+            [](SampleUIData& s) { return static_cast<int>(s.ToneMappingParams.toneMapOperator); },
+            [](SampleUIData& s, int value) {
+                s.ToneMappingParams.toneMapOperator = static_cast<::ToneMapperOperator>(std::clamp(value, 0, 9));
+            },
+            "ToneMapperOperator value: Linear, Reinhard, ReinhardModified, HejiHableAlu, HableUc2, Aces, PbrNeutral, PhotoSoftShoulder, Agx, or CameraLut.")
+        .def_prop_rw("tone_mapper_auto_exposure",
+            [](SampleUIData& s) { return s.ToneMappingParams.autoExposure; },
+            [](SampleUIData& s, bool value) { s.ToneMappingParams.autoExposure = value; })
+        .def_prop_rw("tone_mapper_exposure_compensation",
+            [](SampleUIData& s) { return s.ToneMappingParams.exposureCompensation; },
+            [](SampleUIData& s, float value) { s.ToneMappingParams.exposureCompensation = std::clamp(value, -12.0f, 12.0f); })
+        .def_prop_rw("tone_mapper_white_scale",
+            [](SampleUIData& s) { return s.ToneMappingParams.whiteScale; },
+            [](SampleUIData& s, float value) { s.ToneMappingParams.whiteScale = std::max(value, 1e-4f); })
+        .def_prop_rw("tone_mapper_photo_soft_shoulder_start",
+            [](SampleUIData& s) { return s.ToneMappingParams.photoSoftShoulderStart; },
+            [](SampleUIData& s, float value) { s.ToneMappingParams.photoSoftShoulderStart = std::clamp(value, 0.0f, 0.999f); })
+        .def_prop_rw("tone_mapper_camera_lut_domain_min",
+            [](SampleUIData& s) { return Float3ToTuple(s.ToneMappingParams.cameraLutDomainMin); },
+            [](SampleUIData& s, const nb::object& value) { s.ToneMappingParams.cameraLutDomainMin = ToFloat3(value); })
+        .def_prop_rw("tone_mapper_camera_lut_domain_max",
+            [](SampleUIData& s) { return Float3ToTuple(s.ToneMappingParams.cameraLutDomainMax); },
+            [](SampleUIData& s, const nb::object& value) { s.ToneMappingParams.cameraLutDomainMax = ToFloat3(value); })
+        .def_prop_rw("tone_mapper_camera_lut",
+            [](SampleUIData& s) { return CameraLutToList(s.ToneMappingParams.cameraLut); },
+            [](SampleUIData& s, const nb::object& value) { SetCameraLutFromPython(s.ToneMappingParams.cameraLut, value); },
+            "Exactly 256 linear-light RGB entries for the calibrated camera response LUT.")
         .def_rw("enable_bloom",                  &SampleUIData::EnableBloom)
         .def_rw("bloom_intensity",               &SampleUIData::BloomIntensity)
         .def_rw("bloom_radius",                  &SampleUIData::BloomRadius)

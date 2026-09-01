@@ -3253,8 +3253,11 @@ void Sample::Render(nvrhi::IFramebuffer* framebuffer)
     PostProcessPreToneMapping(m_commandList, fullscreenView);   // writing to m_renderTargets->ProcessedOutputColor
 
     //Tone Mapping; it will read from m_renderTargets->ProcessedOutputColor and write into m_renderTargets->LdrColor; in case tonemapping is disabled, it's just a passthrough
-    const bool combinedDLSSSkipToneMapping = m_ui.RealtimeMode && m_ui.RealtimeAA >= 2 &&
-        m_materialsBaker != nullptr && m_materialsBaker->HasSkipToneMappingMaterials();
+    // Camera plates must remain outside DLSS reconstruction so realtime and
+    // reference modes preserve the same display-referred background. Glass,
+    // reflections and refractions now see the plate's scene-linear PBR proxy,
+    // therefore they stay entirely in the foreground DLSS input.
+    const bool combinedDLSSSkipToneMapping = false;
     nvrhi::ITexture* toneMappingBackground = combinedDLSSSkipToneMapping ? nullptr : m_renderTargets->BackgroundProcessedOutputColor.Get();
     if (m_toneMappingPass->Render(m_commandList, fullscreenView, m_renderTargets->ProcessedOutputColor, m_ui.EnableToneMapping,
         toneMappingBackground, m_renderTargets->LayerCoverageProcessed, combinedDLSSSkipToneMapping))
@@ -5803,7 +5806,10 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
         bool backgroundLayerReadyForDisplay = false;
         bool layerCoverageReadyForDisplay = false;
         const bool hasSkipToneMappingMaterials = m_materialsBaker != nullptr && m_materialsBaker->HasSkipToneMappingMaterials();
-        const bool combinedDLSSSkipMode = hasSkipToneMappingMaterials && m_ui.RealtimeAA >= 2;
+        // Keep the directly visible camera plate in its independent temporal
+        // layer. Only foreground radiance (including plate seen through glass)
+        // is reconstructed by DLSS/DLSS-RR.
+        const bool combinedDLSSSkipMode = false;
 
         // Stable-plane rendering does not write the final HDR color directly when
         // standalone denoising is disabled. Build either the legacy split layers
@@ -5871,7 +5877,13 @@ void Sample::PostProcessAA(nvrhi::IFramebuffer* framebuffer, bool reset)
             layerCoverageReadyForDisplay = ResolveLayerCoverageTemporal(reset);
             if (hasSkipToneMappingMaterials && !combinedDLSSSkipMode)
             {
-                backgroundLayerReadyForDisplay = ResolveBackgroundLayerTemporal(reset);
+                // The plate is already display-referred and contains no HDR
+                // lighting signal for DLSS/TAA to reconstruct. A deterministic
+                // spatial upscale preserves its photographed texture and avoids
+                // low-sample temporal grain; coverage keeps its own temporal
+                // history for stable foreground/plate edges.
+                UpscaleBackgroundLayer();
+                backgroundLayerReadyForDisplay = true;
             }
         }
 

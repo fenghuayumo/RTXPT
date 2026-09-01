@@ -19,6 +19,10 @@ enum class ToneMapperOperator : uint32_t
     HejiHableAlu,       ///< John Hable's ALU approximation of Jim Heji's filmic operator
     HableUc2,           ///< John Hable's filmic tone-mapping used in Uncharted 2
     Aces,               ///< Aces Filmic Tone-Mapping
+    PbrNeutral,         ///< Khronos PBR Neutral tone mapping
+    PhotoSoftShoulder,  ///< Photo-preserving identity curve with a soft highlight shoulder
+    Agx,                ///< AgX high-dynamic-range tone mapping
+    CameraLut,          ///< Calibrated per-channel camera response LUT
 };
 
 /** Tone mapper parameters shared between host and device.

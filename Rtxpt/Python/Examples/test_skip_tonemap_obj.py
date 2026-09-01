@@ -121,7 +121,7 @@ def apply_camera(renderer, c2w: np.ndarray, camera, rtxpt, convert_rdf_to_donut:
     renderer.set_camera_intrinsics(fx, fy, cx, cy, float(camera[0]), float(camera[1]))
 
 
-def set_materials(renderer, skip: bool, shadow_strength: float) -> int:
+def set_materials(renderer, skip: bool, shadow_strength: float, secondary_scale: float) -> int:
     changed = 0
     for mat in renderer.app.scene.get_materials():
         if not hasattr(mat, "unlit_receive_shadows"):
@@ -130,10 +130,15 @@ def set_materials(renderer, skip: bool, shadow_strength: float) -> int:
         mat.unlit_shadow_strength = float(shadow_strength)
         if hasattr(mat, "skip_tone_mapping"):
             mat.skip_tone_mapping = bool(skip)
+        if hasattr(mat, "camera_plate_secondary_scale"):
+            mat.camera_plate_secondary_scale = max(0.0, float(secondary_scale))
         if hasattr(mat, "mark_dirty"):
             mat.mark_dirty()
         changed += 1
-        print(f"[material] {mat.name}: unlit=True shadow={shadow_strength} skip_tone_mapping={skip}")
+        print(
+            f"[material] {mat.name}: unlit=True shadow={shadow_strength} "
+            f"skip_tone_mapping={skip} secondary_scale={secondary_scale}"
+        )
     return changed
 
 
@@ -161,7 +166,7 @@ def render_variant(args, skip: bool, out_path: Path, rtxpt, camera, c2w) -> None
             settings.realtime_mode = True
             settings.realtime_aa = int(rtxpt.RealtimeAA.Off)
         apply_camera(renderer, c2w, camera, rtxpt, args.convert_rdf_to_donut, args.look_at)
-        if set_materials(renderer, skip, args.shadow_strength) == 0:
+        if set_materials(renderer, skip, args.shadow_strength, args.secondary_scale) == 0:
             raise RuntimeError("No material exposing unlit_receive_shadows was found")
         renderer.settings.reset_accumulation = True
         renderer.step_n(max(1, args.frames))
@@ -185,6 +190,12 @@ def main() -> int:
         type=float,
         default=0.5,
         help="Visibility-shadow strength received by unlit scan materials (0 disables shadows, 1 is full strength).",
+    )
+    parser.add_argument(
+        "--secondary-scale",
+        type=float,
+        default=0.65,
+        help="PBR albedo scale used when secondary rays hit a skip-tone-mapping plate.",
     )
     parser.add_argument("--convert-rdf-to-donut", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--look-at", type=float, nargs=3, default=None, metavar=("X", "Y", "Z"))

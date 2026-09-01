@@ -700,6 +700,25 @@ static PathTracer::SurfaceData Bridge::loadSurface( const uint instanceIndex, co
     // Get donut material (normal map is evaluated here)
     MaterialProperties donutMaterial = sampleGeometryMaterialRTXPT(donutGS, materialIndex, MatAttr_All, s_MaterialSampler, textureSampler);
 
+    // A photographed camera plate has two representations. The primary camera
+    // hit keeps the sampled display color for post-tone-map compositing. All
+    // secondary transport uses the regular scene-linear PBR proxy instead of
+    // returning the display-referred texture as unlit radiance.
+    const bool authoredSkipToneMapping = (donutMaterial.flags & PTMaterialFlags_SkipToneMapping) != 0;
+    if (authoredSkipToneMapping && !isPrimaryHit)
+    {
+        const lpfloat secondaryScale = (lpfloat)max(t_PTMaterialData[materialIndex].CameraPlateSecondaryScale, 0.0);
+        const lpfloat3 unscaledBaseColor = donutMaterial.baseColor;
+        donutMaterial.baseColor *= secondaryScale;
+        donutMaterial.diffuseAlbedo *= secondaryScale;
+
+        // Preserve dielectric F0 while scaling only the metallic base-color
+        // contribution. Specular-gloss materials already author specular F0
+        // independently, so their specular term remains unchanged.
+        if ((donutMaterial.flags & PTMaterialFlags_UseSpecularGlossModel) == 0)
+            donutMaterial.specularF0 += donutMaterial.metalness * unscaledBaseColor * (secondaryScale - (lpfloat)1.0);
+    }
+
     bool ignoreTangent = (donutMaterial.flags & PTMaterialFlags_IgnoreMeshTangentSpace) != 0;
 
     // after this point we have valid tangent space in ptShadingData.N/.T/.B using geometry (interpolated) normal, but without normalmap yet
@@ -728,10 +747,13 @@ static PathTracer::SurfaceData Bridge::loadSurface( const uint instanceIndex, co
 #else
     const bool hasTransmission = false;
 #endif
-    const bool unlitReceiveShadows = !hasTransmission && (donutMaterial.flags & PTMaterialFlags_UnlitReceiveShadows) != 0;
+    const bool authoredUnlitReceiveShadows = (donutMaterial.flags & PTMaterialFlags_UnlitReceiveShadows) != 0;
+    const bool useCameraPlateDisplayColor = authoredSkipToneMapping && isPrimaryHit;
+    const bool unlitReceiveShadows = !hasTransmission && authoredUnlitReceiveShadows
+        && (!authoredSkipToneMapping || useCameraPlateDisplayColor);
     ptShadingData.mtl.setUnlitReceiveShadows(unlitReceiveShadows);
     ptShadingData.mtl.setUnlitShadowStrength(donutMaterial.unlitShadowStrength);
-    ptShadingData.mtl.setSkipToneMapping( !hasTransmission && (donutMaterial.flags & PTMaterialFlags_SkipToneMapping) != 0 );
+    ptShadingData.mtl.setSkipToneMapping(!hasTransmission && authoredSkipToneMapping);
     ptShadingData.unlitColor = donutMaterial.baseColor;
     ptShadingData.unlitShadowStrength = donutMaterial.unlitShadowStrength;
 

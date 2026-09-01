@@ -370,6 +370,10 @@ bool ToneMappingPass::Render(
 		toneMappingConsts.colorTransform[2] = float4(m_ColorTransform.col(2), 0);
         toneMappingConsts.enabled = enabled;
         toneMappingConsts.backgroundEnabled = combinedSkipToneMapping ? 2u : ((backgroundTexture != nullptr) ? 1u : 0u);
+        toneMappingConsts.photoSoftShoulderStart = m_PhotoSoftShoulderStart;
+        toneMappingConsts.cameraLutDomainMin = m_CameraLutDomainMin;
+        toneMappingConsts.cameraLutDomainMax = m_CameraLutDomainMax;
+        std::copy(m_CameraLut.begin(), m_CameraLut.end(), toneMappingConsts.cameraLut);
         commandList->writeBuffer(m_ToneMappingCB, &toneMappingConsts, sizeof(ToneMappingConstants));
 
         commandList->setGraphicsState(state);
@@ -407,6 +411,10 @@ void ToneMappingPass::SetParameters(const ToneMappingParameters& params)
 	m_WhitePoint = params.whitePoint;
 	m_WhiteMaxLuminance = params.whiteMaxLuminance;
 	m_WhiteScale = params.whiteScale;
+    m_PhotoSoftShoulderStart = clamp(params.photoSoftShoulderStart, 0.0f, 0.999f);
+    m_CameraLutDomainMin = params.cameraLutDomainMin;
+    m_CameraLutDomainMax = max(params.cameraLutDomainMax, params.cameraLutDomainMin + float3(1e-6f));
+    m_CameraLut = params.cameraLut;
     m_Clamped = params.clamped;
     m_ExposureValueMin = params.exposureValueMin;
     m_ExposureValueMax = params.exposureValueMax;

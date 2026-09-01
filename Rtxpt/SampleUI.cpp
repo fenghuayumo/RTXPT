@@ -2297,6 +2297,13 @@ void SampleUI::buildUI(void)
                 ImGui::InputFloat("White Scale", &m_ui.ToneMappingParams.whiteScale);
                 m_ui.ToneMappingParams.whiteScale = dm::clamp(m_ui.ToneMappingParams.whiteScale, 0.f, 100.f);
 
+                if (m_ui.ToneMappingParams.toneMapOperator == ToneMapperOperator::PhotoSoftShoulder)
+                {
+                    ImGui::SliderFloat("Photo Shoulder Start", &m_ui.ToneMappingParams.photoSoftShoulderStart, 0.0f, 0.999f, "%.3f");
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("RGB values at or below this peak remain unchanged; brighter values roll off smoothly toward 1.");
+                }
+
                 ImGui::Checkbox("Enable Clamp", &m_ui.ToneMappingParams.clamped);
             }
 

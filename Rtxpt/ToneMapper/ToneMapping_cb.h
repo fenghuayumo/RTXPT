@@ -13,6 +13,7 @@
 
 #define TONEMAPPING_AUTOEXPOSURE_CPU     1
 #define TONEMAPPING_EXPOSURE_KEY         0.042
+#define TONEMAPPING_CAMERA_LUT_SIZE       256
 
 enum class ToneMapperOperator : uint32_t
 {
@@ -22,6 +23,10 @@ enum class ToneMapperOperator : uint32_t
 	HejiHableAlu,       ///< John Hable's ALU approximation of Jim Heji's filmic operator
 	HableUc2,           ///< John Hable's filmic tone-mapping used in Uncharted 2
 	Aces,               ///< Aces Filmic Tone-Mapping
+	PbrNeutral,         ///< Khronos PBR Neutral tone mapping
+	PhotoSoftShoulder,  ///< Photo-preserving identity curve with a soft highlight shoulder
+	Agx,                ///< AgX high-dynamic-range tone mapping
+	CameraLut,          ///< Calibrated per-channel camera response LUT
 };
 
 
@@ -38,8 +43,13 @@ struct ToneMappingConstants
     float3x4 colorTransform;
     uint enabled;
     uint backgroundEnabled;         // 0: none, 1: split plate layer, 2: combined DLSS color with plate coverage
-    uint _padding1;
+    float photoSoftShoulderStart;
     uint _padding2;
+    float3 cameraLutDomainMin;
+    uint _padding3;
+    float3 cameraLutDomainMax;
+    uint _padding4;
+    float4 cameraLut[TONEMAPPING_CAMERA_LUT_SIZE];
 };
 
 

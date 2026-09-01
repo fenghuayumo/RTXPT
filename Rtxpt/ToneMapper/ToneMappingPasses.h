@@ -12,6 +12,7 @@
 
 #include <nvrhi/nvrhi.h>
 #include <memory>
+#include <array>
 #include <unordered_map>
 #include <donut/render/MipMapGenPass.h>
 #include "ToneMapping_cb.h"
@@ -48,6 +49,18 @@ struct ToneMappingParameters
     float whitePoint = 6500.0f;
     float whiteMaxLuminance = 1.0f;
     float whiteScale = 5.1f;
+    float photoSoftShoulderStart = 0.8f;
+    float3 cameraLutDomainMin = float3(0.0f);
+    float3 cameraLutDomainMax = float3(1.0f);
+    std::array<float4, TONEMAPPING_CAMERA_LUT_SIZE> cameraLut = [] {
+        std::array<float4, TONEMAPPING_CAMERA_LUT_SIZE> result{};
+        for (uint32_t index = 0; index < TONEMAPPING_CAMERA_LUT_SIZE; ++index)
+        {
+            const float value = float(index) / float(TONEMAPPING_CAMERA_LUT_SIZE - 1);
+            result[index] = float4(value, value, value, 0.0f);
+        }
+        return result;
+    }();
     bool clamped = true;
     float exposureValueMin = -16.0f;
     float exposureValueMax = 16.0f;
@@ -64,7 +77,11 @@ static const std::unordered_map<ToneMapperOperator, std::string> tonemapOperator
     {ToneMapperOperator::ReinhardModified, "Reinhard Modified"},
     {ToneMapperOperator::HejiHableAlu, "Heji Hable ALU"},
     {ToneMapperOperator::HableUc2, "Hable UC2"},
-    {ToneMapperOperator::Aces, "Aces"}
+    {ToneMapperOperator::Aces, "Aces"},
+    {ToneMapperOperator::PbrNeutral, "Khronos PBR Neutral"},
+    {ToneMapperOperator::PhotoSoftShoulder, "Photo Soft Shoulder"},
+    {ToneMapperOperator::Agx, "AgX"},
+    {ToneMapperOperator::CameraLut, "Camera LUT"}
 };
 
 class ToneMappingPass
@@ -134,6 +151,10 @@ private:
     float m_WhitePoint;
     float m_WhiteMaxLuminance;
     float m_WhiteScale;
+    float m_PhotoSoftShoulderStart;
+    float3 m_CameraLutDomainMin;
+    float3 m_CameraLutDomainMax;
+    std::array<float4, TONEMAPPING_CAMERA_LUT_SIZE> m_CameraLut;
     int m_Clamped;
         
     //Pre-computed fields
