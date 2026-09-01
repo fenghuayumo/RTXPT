@@ -530,7 +530,6 @@ Assets/Materials/default/antman_merged.antman_merged_0.material.json
   "ExcludeFromNEE": false,
   "UnlitReceiveShadows": false,
   "UnlitShadowStrength": 1.0,
-  "SkipToneMapping": false,
   "PSDExclude": false,
   "PSDDominantDeltaLobe": -1,
   "NestedPriority": 0,
@@ -578,7 +577,6 @@ Assets/Materials/default/antman_merged.antman_merged_0.material.json
 | `ExcludeFromNEE` | bool | 是否从 NEE 中排除。 |
 | `UnlitReceiveShadows` | bool | 不计算 BRDF、直接光强度或间接光，仅以采样光源的阴影可见性调制 base color。 |
 | `UnlitShadowStrength` | number | `UnlitReceiveShadows` 的阴影强度，范围 0–1；0 保留原始重建纹理，1 应用完整阴影。 |
-| `SkipToneMapping` | bool | 主摄像机射线命中该材质时，着色写入背景层并跳过自动曝光与色调映射曲线。与 `UnlitReceiveShadows` 搭配可让背景几何体逐像素匹配拍摄/扫描底片。透射/玻璃材质会忽略此标志；反射和折射中的底片二次命中仍进入降噪、色调映射的 HDR 路径。 |
 | `PSDExclude` | bool | 是否从 path space decomposition 中排除。 |
 | `PSDDominantDeltaLobe` | integer | PSD dominant delta lobe，`-1` 表示无 dominant。 |
 | `PSDBlockMotionVectorsAtSurfaceType` | integer | 曲面/复杂表面的 motion vector 阻断模式。 |

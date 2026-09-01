@@ -100,8 +100,6 @@ private:
         nvrhi::BindingSetHandle luminanceBindingSet;
         nvrhi::BindingSetHandle colorBindingSet;
         nvrhi::TextureHandle sourceTexture;
-        nvrhi::TextureHandle backgroundTexture;
-        nvrhi::TextureHandle coverageTexture;
 
 #if TONEMAPPING_AUTOEXPOSURE_CPU
         // used for readback
@@ -190,10 +188,8 @@ public:
 
     void PreRender(const ToneMappingParameters& params);
 
-    // note - if enable == false, it still does autoexposure (if enabled) and everything else, but the foreground output is passthrough
-    // backgroundTexture is an independently resolved linear layer that is added after foreground tone mapping.
-    // combinedSkipToneMapping keeps the full reconstructed color together and uses coverage only to bypass the tone curve.
-    bool Render( nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView, nvrhi::ITexture* sourceTexture, bool enabled, nvrhi::ITexture* backgroundTexture = nullptr, nvrhi::ITexture* coverageTexture = nullptr, bool combinedSkipToneMapping = false );
+    // note - if enable == false, it still does autoexposure (if enabled) and everything else, but the output is just passthrough
+    bool Render( nvrhi::ICommandList* commandList, const donut::engine::ICompositeView& compositeView, nvrhi::ITexture* sourceTexture, bool enabled );
 
 #if TONEMAPPING_AUTOEXPOSURE_CPU
     float3 GetPreExposedGray( uint viewIndex );

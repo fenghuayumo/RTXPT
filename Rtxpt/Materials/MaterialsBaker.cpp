@@ -206,8 +206,6 @@ void PTMaterial::Write(Json::Value& output)
     STORE_FIELD(ExcludeFromNEE);
     STORE_FIELD(UnlitReceiveShadows);
     STORE_FIELD(UnlitShadowStrength);
-    STORE_FIELD(SkipToneMapping);
-    STORE_FIELD(CameraPlateSecondaryScale);
     STORE_FIELD(PSDExclude);
     STORE_FIELD(PSDDominantDeltaLobe);
     STORE_FIELD(PSDBlockMotionVectorsAtSurfaceType);
@@ -338,8 +336,6 @@ bool PTMaterial::Read(
     LOAD_FIELD(ExcludeFromNEE);
     LOAD_FIELD(UnlitReceiveShadows);
     LOAD_FIELD(UnlitShadowStrength);
-    LOAD_FIELD(SkipToneMapping);
-    LOAD_FIELD(CameraPlateSecondaryScale);
     LOAD_FIELD(PSDExclude);
     LOAD_FIELD(PSDBlockMotionVectorsAtSurfaceType);
 
@@ -538,22 +534,6 @@ bool PTMaterial::EditorGUI(MaterialsBaker & baker)
             update |= ImGui::SliderFloat("Unlit shadow strength", &UnlitShadowStrength, 0.0f, 1.0f);
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("0 keeps the reconstructed texture unchanged; 1 applies the full sampled shadow.");
-
-        update |= ImGui::Checkbox("Skip tone mapping", &SkipToneMapping);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip(
-            "Pixels whose primary camera hit is this material use the background layer and bypass\n"
-            "auto-exposure and the tone curve. Combined with 'Unlit, receive shadows' this puts the\n"
-            "base color texture on screen unaltered, matching a photographed plate. Ignored on\n"
-            "transmissive materials; reflected/refracted plate hits remain in the HDR path.");
-
-        {
-            UI_SCOPED_DISABLE(!SkipToneMapping);
-            update |= ImGui::SliderFloat("Camera plate secondary scale", &CameraPlateSecondaryScale, 0.0f, 2.0f);
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip(
-            "Scales the scene-linear PBR albedo seen by reflection, refraction, and indirect rays.\n"
-            "The directly visible camera plate is unchanged. Use this to calibrate photographed\n"
-            "display color against the scene-linear proxy material.");
 
         update |= ImGui::SliderFloat("Shadow NoL Fadeout", &ShadowNoLFadeout, 0.0f, 0.2f);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip(
@@ -887,9 +867,6 @@ void PTMaterial::FillData(PTMaterialData & data)
     if (UnlitReceiveShadows)
         data.Flags |= PTMaterialFlags_UnlitReceiveShadows;
 
-    if (SkipToneMapping)
-        data.Flags |= PTMaterialFlags_SkipToneMapping;
-
     // free parameters
 
     data.BaseOrDiffuseColor = BaseOrDiffuseColor;
@@ -907,7 +884,6 @@ void PTMaterial::FillData(PTMaterialData & data)
     data.TransmissionFactor = (EnableTransmission)?(TransmissionFactor):(0);
     data.DiffuseTransmissionFactor = (EnableTransmission)?(DiffuseTransmissionFactor):(0);
     data.UnlitShadowStrength = std::clamp(UnlitShadowStrength, 0.0f, 1.0f);
-    data.CameraPlateSecondaryScale = std::max(CameraPlateSecondaryScale, 0.0f);
     data.Opacity = Opacity;
     data.AlphaCutoff = AlphaCutoff;
     data.IoR = IoR;
@@ -927,6 +903,7 @@ void PTMaterial::FillData(PTMaterialData & data)
 
     data.ShadowNoLFadeout = std::clamp(ShadowNoLFadeout, 0.0f, 0.25f);
 
+    data._padding0 = 42;
 }
 
 std::filesystem::path MaterialsBaker::GetMaterialStoragePath(PTMaterialBase& material)

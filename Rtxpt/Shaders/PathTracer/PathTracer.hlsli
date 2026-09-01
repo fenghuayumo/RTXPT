@@ -165,17 +165,7 @@ namespace PathTracer
     inline void CommitPixel( const PathState path, const WorkingContext workingContext )
     {
 #if PATH_TRACER_MODE==PATH_TRACER_MODE_REFERENCE
-        const float4 output = float4(path.GetL().rgb, 1);
-        if (path.isPrimarySkipToneMapping())
-        {
-            workingContext.OutputColor[path.GetPixelPos()] = float4(0, 0, 0, 0);
-            workingContext.BackgroundOutputColor[path.GetPixelPos()] = output;
-        }
-        else
-        {
-            workingContext.OutputColor[path.GetPixelPos()] = output;
-            workingContext.BackgroundOutputColor[path.GetPixelPos()] = float4(0, 0, 0, 0);
-        }
+        workingContext.OutputColor[path.GetPixelPos()] = float4(path.GetL().rgb, 1);
 #elif PATH_TRACER_MODE==PATH_TRACER_MODE_BUILD_STABLE_PLANES
 #elif PATH_TRACER_MODE==PATH_TRACER_MODE_FILL_STABLE_PLANES
     workingContext.StablePlanes.CommitDenoiserRadiance(path);
@@ -579,13 +569,6 @@ namespace PathTracer
                 StablePlanesHandleMiss(path, 0, rayOrigin, rayDir, rayTCurrent, workingContext);
 #endif
             return;
-        }
-
-        if (path.getVertexIndex() == 1)
-        {
-            const bool skipPlate = surfaceData.shadingData.mtl.isSkipToneMapping();
-            path.setPrimarySkipToneMapping(skipPlate);
-            workingContext.LayerCoverage[path.GetPixelPos()] = skipPlate ? 1.0.xxxx : 0.0.xxxx;
         }
 
         // These will not change anymore, so make const shortcuts

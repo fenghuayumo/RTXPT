@@ -70,7 +70,6 @@ float2 FirstHitFromVBuffer(inout PathState path, const uint basePlaneIndex, cons
     path.SetOrigin( sp.RayOrigin );
     path.setFlag(PathFlags::stablePlaneOnPlane , true);
     path.setFlag(PathFlags::stablePlaneOnBranch, true);
-    path.setPrimarySkipToneMapping(sp.IsSkipToneMapping());
     path.setStablePlaneIndex(basePlaneIndex);
     path.stableBranchID = stableBranchID;
     path.SetThp( thp );

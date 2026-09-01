@@ -125,7 +125,6 @@ ToneMappingPass::ToneMappingPass(
 		layoutDesc.visibility = nvrhi::ShaderType::Pixel;
 		layoutDesc.bindings = {
 			nvrhi::BindingLayoutItem::Texture_SRV(0),
-			nvrhi::BindingLayoutItem::Texture_SRV(1),
 			nvrhi::BindingLayoutItem::Sampler(1)
 		};
 		m_LuminanceBindingLayout = m_device->createBindingLayout(layoutDesc);
@@ -164,8 +163,6 @@ ToneMappingPass::ToneMappingPass(
             nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),
             nvrhi::BindingLayoutItem::Texture_SRV(0),
             nvrhi::BindingLayoutItem::Texture_SRV(1),
-            nvrhi::BindingLayoutItem::Texture_SRV(2),
-            nvrhi::BindingLayoutItem::Texture_SRV(3),
             nvrhi::BindingLayoutItem::Sampler(0),
             nvrhi::BindingLayoutItem::Sampler(1)
         };
@@ -197,17 +194,12 @@ void ToneMappingPass::PreRender(const ToneMappingParameters& params)
 bool ToneMappingPass::Render(
     nvrhi::ICommandList* commandList, 
     const donut::engine::ICompositeView& compositeView,
-    nvrhi::ITexture* sourceTexture, bool enabled, nvrhi::ITexture* backgroundTexture, nvrhi::ITexture* coverageTexture,
-    bool combinedSkipToneMapping)
+    nvrhi::ITexture* sourceTexture, bool enabled)
 {
     assert( m_FrameParamsSet ); // forgot to call PreRender before this?
     m_FrameParamsSet = false;
 
     bool commandListWasClosed = false; // to track the need to re-create volatile constant buffers
-
-    // A black background is the correct fallback for renderers that do not produce a split layer.
-    nvrhi::ITexture* resolvedBackgroundTexture = (backgroundTexture != nullptr) ? backgroundTexture : m_commonPasses->m_BlackTexture.Get();
-    nvrhi::ITexture* resolvedCoverageTexture = (coverageTexture != nullptr) ? coverageTexture : m_commonPasses->m_BlackTexture.Get();
 
     for (uint viewIndex = 0; viewIndex < compositeView.GetNumChildViews(ViewType::PLANAR); viewIndex++)
     {
@@ -219,19 +211,6 @@ bool ToneMappingPass::Render(
             viewData.luminanceBindingSet = nullptr;
             viewData.colorBindingSet = nullptr;
             viewData.sourceTexture = sourceTexture;
-        }
-
-        if (viewData.backgroundTexture != resolvedBackgroundTexture)
-        {
-            viewData.colorBindingSet = nullptr;
-            viewData.luminanceBindingSet = nullptr;
-            viewData.backgroundTexture = resolvedBackgroundTexture;
-        }
-
-        if (viewData.coverageTexture != resolvedCoverageTexture)
-        {
-            viewData.colorBindingSet = nullptr;
-            viewData.coverageTexture = resolvedCoverageTexture;
         }
     }
 
@@ -248,7 +227,6 @@ bool ToneMappingPass::Render(
 				nvrhi::BindingSetDesc bindingSetDesc;
 				bindingSetDesc.bindings = {
 					nvrhi::BindingSetItem::Texture_SRV(0, sourceTexture),
-					nvrhi::BindingSetItem::Texture_SRV(1, resolvedBackgroundTexture),
 					nvrhi::BindingSetItem::Sampler(1, m_linearSampler)
 				};
 				bindingSet = m_device->createBindingSet(bindingSetDesc, m_LuminanceBindingLayout);
@@ -324,8 +302,6 @@ bool ToneMappingPass::Render(
                 nvrhi::BindingSetItem::ConstantBuffer(0, m_ToneMappingCB),
                 nvrhi::BindingSetItem::Texture_SRV(0, sourceTexture),                       //Color texture
                 nvrhi::BindingSetItem::Texture_SRV(1, m_PerView[viewIndex].luminanceTexture),                    //Luminance Texture
-                nvrhi::BindingSetItem::Texture_SRV(2, resolvedBackgroundTexture),            //Independently resolved background layer
-                nvrhi::BindingSetItem::Texture_SRV(3, resolvedCoverageTexture),              //Temporally resolved primary plate coverage
                 nvrhi::BindingSetItem::Sampler(0, m_linearSampler),    //Luminance sampler
                 nvrhi::BindingSetItem::Sampler(1, m_pointSampler)      //Color sampler
 			};
@@ -369,7 +345,6 @@ bool ToneMappingPass::Render(
 		toneMappingConsts.colorTransform[1] = float4(m_ColorTransform.col(1), 0);
 		toneMappingConsts.colorTransform[2] = float4(m_ColorTransform.col(2), 0);
         toneMappingConsts.enabled = enabled;
-        toneMappingConsts.backgroundEnabled = combinedSkipToneMapping ? 2u : ((backgroundTexture != nullptr) ? 1u : 0u);
         toneMappingConsts.photoSoftShoulderStart = m_PhotoSoftShoulderStart;
         toneMappingConsts.cameraLutDomainMin = m_CameraLutDomainMin;
         toneMappingConsts.cameraLutDomainMax = m_CameraLutDomainMax;

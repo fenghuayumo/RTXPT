@@ -67,7 +67,6 @@ struct StablePlane
 
     float3          GetNoisyRadiance()          { return Fp16ToFp32(PackedNoisyRadianceAndSpecAvg).xyz; }
     float4          GetNoisyRadianceAndSpecRA() { return Fp16ToFp32(PackedNoisyRadianceAndSpecAvg).xyzw; }
-    bool            IsSkipToneMapping()       { return (FlagsAndVertexIndex & (((uint)PathFlags::primarySkipToneMapping) << kVertexIndexBitCount)) != 0; }
 
     float3          GetNoisyDiffRadiance()      { float4 l = Fp16ToFp32(PackedNoisyRadianceAndSpecAvg); float totalAvg = Average(l.rgb); return l.rgb * saturate(1.0 - (l.a*kSpecHeuristicBoost) / (totalAvg+1e-12)).xxx; }
     float3          GetNoisySpecRadiance()      { float4 l = Fp16ToFp32(PackedNoisyRadianceAndSpecAvg); float totalAvg = Average(l.rgb); return l.rgb * saturate((l.a*kSpecHeuristicBoost) / (totalAvg+1e-12)).xxx; }

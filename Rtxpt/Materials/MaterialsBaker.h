@@ -200,16 +200,6 @@ struct PTMaterial : public PTMaterialBase
     bool                    UnlitReceiveShadows                 = false;
     float                   UnlitShadowStrength                 = 1.0f;
 
-    // Pixels whose primary hit is this material bypass auto-exposure and the tone mapping curve,
-    // so the linear shading result reaches the sRGB backbuffer unaltered. Intended for background
-    // geometry that must match photographic/scanned plates pixel for pixel.
-    bool                    SkipToneMapping                     = false;
-
-    // A skip-tone-mapping plate uses its authored display color only for a direct camera hit.
-    // Reflection/refraction/GI rays see the regular PBR material, with its albedo scaled by this
-    // calibration value. This keeps display-referred plate pixels out of scene-linear transport.
-    float                   CameraPlateSecondaryScale           = 1.0f;
-
     // will not propagate dominant stable plane when doing path space decomposition
     bool                    PSDExclude                          = true;
     // for path space decomposition: -1 means no dominant; 0 usually means transmission, 1 usually means reflection, 2 usually means clearcoat reflection - must match corresponding BSDFSample::getDeltaLobeIndex()!
@@ -290,13 +280,6 @@ public:
 
     nvrhi::BufferHandle             GetMaterialDataBuffer() const           { return m_materialData; }
     uint                            GetMaterialDataCount() const            { return m_materialsGPU.size(); }
-    bool                            HasSkipToneMappingMaterials() const
-    {
-        for (const auto& material : m_materials)
-            if (material != nullptr && material->SkipToneMapping)
-                return true;
-        return false;
-    }
 
     const std::unordered_map<std::string, PTTexture> &
                                     GetUsedTextures() const                 { return m_textures; }

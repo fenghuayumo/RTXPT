@@ -174,19 +174,6 @@ void RenderTargets::Init(
     desc.isUAV = true;
     OutputColor = device->createTexture(desc);
 
-    desc.debugName = "BackgroundOutputColor";
-    BackgroundOutputColor = device->createTexture(desc);
-
-    desc.debugName = "LayerCoverage";
-    LayerCoverage = device->createTexture(desc);
-
-    desc.format = nvrhi::Format::RGBA32_FLOAT;
-    desc.clearValue = nvrhi::Color(0.0f);
-    desc.debugName = "BackgroundAccumulatedRadiance";
-    BackgroundAccumulatedRadiance = device->createTexture(desc);
-    desc.debugName = "LayerCoverageAccumulated";
-    LayerCoverageAccumulated = device->createTexture(desc);
-
     desc.format = nvrhi::Format::R8_UNORM;
     desc.isUAV = true;
     desc.debugName = "DenoiserDisocclusionThresholdMix";
@@ -245,23 +232,11 @@ void RenderTargets::Init(
     desc.format = radianceFormat;
     desc.debugName = "ProcessedOutputColor";
     ProcessedOutputColor = device->createTexture(desc);
-    desc.debugName = "BackgroundProcessedOutputColor";
-    BackgroundProcessedOutputColor = device->createTexture(desc);
-    desc.debugName = "LayerCoverageProcessed";
-    LayerCoverageProcessed = device->createTexture(desc);
     desc.format = nvrhi::Format::RGBA16_SNORM;
     desc.debugName = "TemporalFeedback1";
     TemporalFeedback1 = device->createTexture(desc);
     desc.debugName = "TemporalFeedback2";
     TemporalFeedback2 = device->createTexture(desc);
-    desc.debugName = "BackgroundTemporalFeedback1";
-    BackgroundTemporalFeedback1 = device->createTexture(desc);
-    desc.debugName = "BackgroundTemporalFeedback2";
-    BackgroundTemporalFeedback2 = device->createTexture(desc);
-    desc.debugName = "LayerCoverageTemporalFeedback1";
-    LayerCoverageTemporalFeedback1 = device->createTexture(desc);
-    desc.debugName = "LayerCoverageTemporalFeedback2";
-    LayerCoverageTemporalFeedback2 = device->createTexture(desc);
 
     desc.format = nvrhi::Format::SRGBA8_UNORM;
     desc.isUAV = true;
@@ -360,9 +335,6 @@ void RenderTargets::Init(
     ProcessedOutputFramebuffer = std::make_shared<donut::engine::FramebufferFactory>(device);
     ProcessedOutputFramebuffer->RenderTargets = { ProcessedOutputColor };
 
-    BackgroundProcessedOutputFramebuffer = std::make_shared<donut::engine::FramebufferFactory>(device);
-    BackgroundProcessedOutputFramebuffer->RenderTargets = { BackgroundProcessedOutputColor };
-
     LdrFramebuffer = std::make_shared<donut::engine::FramebufferFactory>(device);
     LdrFramebuffer->RenderTargets = { LdrColor };
 
@@ -409,10 +381,6 @@ void RenderTargets::Clear(nvrhi::ICommandList* commandList)
     commandList->clearTextureFloat(Depth, nvrhi::AllSubresources, nvrhi::Color(depthClearValue));
 
     commandList->clearTextureFloat(CombinedHistoryClampRelax, nvrhi::AllSubresources, nvrhi::Color(0));
-
-    // Renderers that don't go through the path tracer never write the split layer.
-    commandList->clearTextureFloat(BackgroundOutputColor, nvrhi::AllSubresources, nvrhi::Color(0));
-    commandList->clearTextureFloat(LayerCoverage, nvrhi::AllSubresources, nvrhi::Color(0));
 }
 
 uint32_t RenderTargets::GetNumMipLevels(uint32_t width, uint32_t height)

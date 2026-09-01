@@ -22,7 +22,6 @@ Texture2D<float4>                       t_LdrColorScratch               : regist
 
 // All outputs are defined here
 RWTexture2D<float4>                     u_OutputColor                   : register(u0); // main HDR output - RenderTargets::OutputColor
-RWTexture2D<float4>                     u_BackgroundOutputColor         : register(u3); // background layer before tone mapping - RenderTargets::BackgroundOutputColor
 RWTexture2D<float4>                     u_ProcessedOutputColor          : register(u1); // tonemapping inputs - RenderTargets::ProcessedOutputColor
 RWTexture2D<float4>                     u_PostTonemapOutputColor        : register(u2); // tonemapping outputs - RenderTargets::LdrColor
 
@@ -31,7 +30,6 @@ RWTexture2D<float4>                     u_MotionVectors                 : regist
 RWTexture2D<float>                      u_Depth                         : register(u6); // used by RTXDI, DLSS/TAA, etc.
 RWTexture2D<float>                      u_SpecularHitT                  : register(u7); // used by denoisers
 RWTexture2D<float>                      u_ScratchFloat1                 : register(u8); // used by post-processing
-RWTexture2D<float4>                     u_LayerCoverage                 : register(u9); // replicated primary plate coverage for accumulation/TAA
 
 RWTexture2DArray<uint>                  u_StablePlanesHeader            : register(u40);
 RWStructuredBuffer<StablePlane>         u_StablePlanesBuffer            : register(u42);

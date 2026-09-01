@@ -309,7 +309,7 @@ namespace PathTracer
             
             bool isDominant = path.hasFlag(PathFlags::stablePlaneOnDominantBranch);
             workingContext.StablePlanes.StoreStablePlane(pixelPos, currentSPIndex, vertexIndex, rayOrigin, rayDir, path.stableBranchID, path.GetSceneLength(), rayTCurrent, path.GetThp(), 
-                motionVectors, roughness, worldNormal, diffBSDFEstimate, specBSDFEstimate, isDominant, path.flagsAndVertexIndex, path.packedCounters);
+                motionVectors, roughness, worldNormal, diffBSDFEstimate, specBSDFEstimate, isDominant, 0, 0); //path.flagsAndVertexIndex, path.packedCounters);
 
             if (isDominant)
             {
@@ -401,7 +401,7 @@ namespace PathTracer
         // if blockedAtSurface is true, one of the previous vertices landed on high curvature surface which breaks our motion vector calculations; 
         // so we stop calculating MVs at that surface and consider everything else as zero roughness specular for denoising purposes (as DLSS-RR can infer specular MVs)
         workingContext.StablePlanes.StoreStablePlane(pixelPos, path.getStablePlaneIndex(), vertexIndex, rayOrigin, rayDir, path.stableBranchID, (blockedAtSurface)?(sceneLengthForMVs):(1.#INF), 0, // inf indicates MISS
-            path.GetThp(), motionVectors, (blockedAtSurface)?0.1:1, -rayDir, skyAlbedo, (blockedAtSurface)?0.5.xxx:0.xxx, path.hasFlag(PathFlags::stablePlaneOnDominantBranch), path.flagsAndVertexIndex, path.packedCounters);
+            path.GetThp(), motionVectors, (blockedAtSurface)?0.1:1, -rayDir, skyAlbedo, (blockedAtSurface)?0.5.xxx:0.xxx, path.hasFlag(PathFlags::stablePlaneOnDominantBranch), 0, 0);
 
         if (isDominant)
         {

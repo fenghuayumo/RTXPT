@@ -356,22 +356,7 @@ void main( uint3 dispatchThreadID : SV_DispatchThreadID )
 
     // we feed this as the main input into denoiser
 
-    // Only a direct camera hit on a plate bypasses tone mapping. Secondary
-    // plate hits (reflection/refraction) stay in combinedRadiance and therefore
-    // retain the glass throughput, denoising and normal HDR tone mapping.
-    const bool splitLayers = g_MiniConst.params.z != 0;
-    const bool primarySkipsToneMapping = stablePlanes.LoadStablePlane(pixelPos, dominantStablePlaneIndex).IsSkipToneMapping();
-    if (splitLayers)
-    {
-        u_OutputColor[pixelPos] = primarySkipsToneMapping ? float4(0, 0, 0, 0) : float4(combinedRadiance, 1.0);
-        u_BackgroundOutputColor[pixelPos] = primarySkipsToneMapping ? float4(combinedRadiance, 1.0) : float4(0, 0, 0, 0);
-    }
-    else
-    {
-        // This pass also prepares OIDN guides in reference mode, where stable
-        // plane metadata is unavailable and split output is not requested.
-        u_OutputColor[pixelPos] = float4(combinedRadiance, 1.0);
-    }
+    u_OutputColor[pixelPos] = float4(combinedRadiance, 1.0);
 
 #if 0 // remove guide buffers (but not motion vectors and depth!)
     diffAlbedo = 0.5.xxx;
@@ -471,13 +456,7 @@ void main( uint3 dispatchThreadID : SV_DispatchThreadID )
     StablePlanesContext stablePlanes = StablePlanesContext::make(u_StablePlanesHeader, u_StablePlanesBuffer, u_StableRadiance, g_Const.ptConsts);
 
     if (initWithStableRadiance)
-    {
-        const uint dominantStablePlaneIndex = stablePlanes.LoadDominantIndex(pixelPos);
-        const bool primarySkipsToneMapping = stablePlanes.LoadStablePlane(pixelPos, dominantStablePlaneIndex).IsSkipToneMapping();
-        const float4 stableRadiance = float4(stablePlanes.LoadStableRadiance(pixelPos), 1);
-        u_OutputColor[pixelPos] = primarySkipsToneMapping ? float4(0, 0, 0, 0) : stableRadiance;
-        u_BackgroundOutputColor[pixelPos] = primarySkipsToneMapping ? stableRadiance : float4(0, 0, 0, 0);
-    }
+        u_OutputColor[pixelPos] = float4( stablePlanes.LoadStableRadiance(pixelPos), 1 );
 
     bool hasSurface = false;
     uint spBranchID = stablePlanes.GetBranchID(pixelPos, stablePlaneIndex);
@@ -606,14 +585,12 @@ ConstantBuffer<SampleConstants>         g_Const             : register(b0);
 VK_PUSH_CONSTANT ConstantBuffer<SampleMiniConstants>     g_MiniConst         : register(b1);
 
 RWTexture2D<float4>     u_InputOutput                           : register(u0);
-RWTexture2D<float4>     u_BackgroundInputOutput                 : register(u3);
 Texture2D<float4>       t_DiffRadiance                          : register(t2);
 Texture2D<float4>       t_SpecRadiance                          : register(t3);
 Texture2D<float4>       t_DenoiserValidation                    : register(t5);
 Texture2D<float>        t_DenoiserViewspaceZ                    : register(t6);
 Texture2D<float>        t_DenoiserDisocclusionThresholdMix      : register(t7);
 StructuredBuffer<StablePlane> t_StablePlanesBuffer              : register(t10);
-Texture2DArray<uint>     t_StablePlanesHeader                   : register(t11);
 
 [numthreads(NUM_COMPUTE_THREADS_PER_DIM, NUM_COMPUTE_THREADS_PER_DIM, 1)]
 void main( uint3 dispatchThreadID : SV_DispatchThreadID )
@@ -629,10 +606,6 @@ void main( uint3 dispatchThreadID : SV_DispatchThreadID )
     float relaxedDisocclusion = 0; 
 
     bool hasSurface = t_DenoiserViewspaceZ[pixelPos] != VIEWZ_SKY_MARKER;
-
-    const uint dominantStablePlaneIndex = t_StablePlanesHeader.Load(int4(pixelPos, 3, 0)) & 0x3;
-    const uint dominantSPAddress = GenericTSPixelToAddress(pixelPos, dominantStablePlaneIndex, g_Const.ptConsts.genericTSLineStride, g_Const.ptConsts.genericTSPlaneStride);
-    const bool primarySkipsToneMapping = t_StablePlanesBuffer[dominantSPAddress].IsSkipToneMapping();
 
     uint spAddress = GenericTSPixelToAddress(pixelPos, stablePlaneIndex, g_Const.ptConsts.genericTSLineStride, g_Const.ptConsts.genericTSPlaneStride);
 
@@ -710,14 +683,7 @@ void main( uint3 dispatchThreadID : SV_DispatchThreadID )
 #endif // #if ENABLE_DEBUG_VIZUALISATIONS
 
     if (hasSurface)
-    {
-        const float3 denoisedRadiance = max(0, (diffRadiance.rgb + specRadiance.rgb));
-        const bool combinedDLSSSkipMode = g_MiniConst.params.z != 0;
-        if (primarySkipsToneMapping && !combinedDLSSSkipMode)
-            u_BackgroundInputOutput[pixelPos.xy].xyz += denoisedRadiance;
-        else
-            u_InputOutput[pixelPos.xy].xyz += denoisedRadiance;
-    }
+        u_InputOutput[pixelPos.xy].xyz += max(0, (diffRadiance.rgb + specRadiance.rgb));
     //else
     //    u_InputOutput[pixelPos.xy].xyz = float3(1,0,0);
 }
@@ -735,26 +701,9 @@ void main( uint3 dispatchThreadID : SV_DispatchThreadID )
     if (any(pixelPos >= uint2(g_Const.ptConsts.imageWidth, g_Const.ptConsts.imageHeight) ))
         return;
 
-    const Ray cameraRay = Bridge::computeCameraRay( pixelPos );
     StablePlanesContext stablePlanes = StablePlanesContext::make(u_StablePlanesHeader, u_StablePlanesBuffer, u_StableRadiance, g_Const.ptConsts);
 
-    const uint dominantStablePlaneIndex = stablePlanes.LoadDominantIndex(pixelPos);
-    const bool primarySkipsToneMapping = stablePlanes.LoadStablePlane(pixelPos, dominantStablePlaneIndex).IsSkipToneMapping();
-    const float4 combinedRadiance = float4(stablePlanes.GetAllRadiance(pixelPos), 1.0);
-    const bool splitLayers = g_MiniConst.params.z != 0;
-    if (splitLayers)
-    {
-        u_OutputColor[pixelPos] = primarySkipsToneMapping ? float4(0, 0, 0, 0) : combinedRadiance;
-        u_BackgroundOutputColor[pixelPos] = primarySkipsToneMapping ? combinedRadiance : float4(0, 0, 0, 0);
-    }
-    else
-    {
-        // DLSS/DLSS-RR needs the full scene context in one HDR input. The
-        // coverage signal later decides which direct plate pixels bypass the
-        // display tone curve; reflected and refracted plate light stays HDR.
-        u_OutputColor[pixelPos] = combinedRadiance;
-        u_BackgroundOutputColor[pixelPos] = float4(0, 0, 0, 0);
-    }
+    u_OutputColor[pixelPos] = float4(stablePlanes.GetAllRadiance(pixelPos), 1.0);
 }
 #endif // NO_DENOISER_FINAL_MERGE
 
