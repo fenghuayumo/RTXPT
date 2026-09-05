@@ -566,6 +566,17 @@ void RegisterCoreBindings(nb::module_& m)
         .value("LowLatencyWithBoost", ReflexMode::LowLatencyWithBoost)
         .export_values();
 
+    nb::enum_<DebugViewType>(m, "DebugViewType",
+        "Path-tracer / denoiser debug visualization. Overlays the selected buffer on the back buffer.",
+        nb::is_arithmetic())
+        .value("Disabled", DebugViewType::Disabled)
+        .value("DenoiserGuide_Albedo", DebugViewType::DenoiserGuide_Albedo)
+        .value("DenoiserGuide_SpecAlbedo", DebugViewType::DenoiserGuide_SpecAlbedo)
+        .value("FirstHit_Diffuse", DebugViewType::FirstHit_Diffuse)
+        .value("FirstHit_Specular", DebugViewType::FirstHit_Specular)
+        .value("FirstHit_Roughness", DebugViewType::FirstHit_Roughness)
+        .export_values();
+
     // --- OIDN denoiser enums (mirror OidnDenoiser::Passes/Prefilter/Quality)
     nb::enum_<OidnPasses>(m, "OidnPasses",
         "Auxiliary guide passes used by OIDN (Color Only / Albedo / Albedo+Normal).",
@@ -1150,6 +1161,31 @@ void RegisterCoreBindings(nb::module_& m)
                 "0 = uniform, 1 = power-based, 2 = NEE-AT")
         .def_rw("nee_candidate_samples",         &SampleUIData::NEECandidateSamples)
         .def_rw("nee_full_samples",              &SampleUIData::NEEFullSamples)
+        .def_prop_rw("nee_shadow_ray_origin_bias_scale",
+            [](SampleUIData& s) { return s.NEEShadowRayOriginBiasScale; },
+            [](SampleUIData& s, float v) { s.NEEShadowRayOriginBiasScale = std::max(v, 0.0f); },
+            "Scale factor for NEE shadow ray origin offset. "
+            "1.0 = default (Ray Tracing Gems method). "
+            "Increase (e.g. 2.0, 4.0) to push the ray origin further from the surface, reducing self-occlusion on thin geometry or unlit shadow receivers.")
+        .def_prop_rw("nee_shadow_ray_tmax_shortening_k",
+            [](SampleUIData& s) { return s.NEEShadowRayTMaxShorteningK; },
+            [](SampleUIData& s, float v) { s.NEEShadowRayTMaxShorteningK = std::clamp(v, 0.5f, 1.0f); },
+            "NEE shadow ray TMax shortening factor to avoid self-intersection at the light source. "
+            "0.9985 = default. Decrease (e.g. 0.99, 0.98) for larger scenes with nearby emissive geometry.")
+        .def_prop_rw("unlit_shadow_ray_normal_bias",
+            [](SampleUIData& s) { return s.UnlitShadowRayNormalBias; },
+            [](SampleUIData& s, float v) {
+                const float bias = std::max(v, 0.0f);
+                // Keep the regular NEE and RTXDI visibility paths in sync so a
+                // Python script does not need to know which direct-lighting path
+                // happens to be active for the current renderer configuration.
+                s.UnlitShadowRayNormalBias = bias;
+                s.RTXDI.unlitShadowRayNormalBias = bias;
+            },
+            "World-space normal offset for visibility rays on unlit shadow-receiving surfaces. "
+            "Applied to both regular NEE and RTXDI visibility rays. "
+            "Photo-scan backgrounds need this to escape reconstruction noise that causes self-occlusion smudges. "
+ "Scene-scale dependent; for a ~1m scene try 0.005-0.02. 0 disables.")
         .def_rw("nee_mis_type",                  &SampleUIData::NEEMISType)
 
         .def_rw("use_restir_di",                 &SampleUIData::UseReSTIRDI)
@@ -1307,6 +1343,14 @@ void RegisterCoreBindings(nb::module_& m)
         .def_rw("dlss_rr_micro_jitter",          &SampleUIData::DLSSRRMicroJitter)
         .def_rw("dlss_rr_brightness_clamp_k",    &SampleUIData::DLSSRRBrightnessClampK)
         .def_rw("disable_restirs_with_dlss_rr",  &SampleUIData::DisableReSTIRsWithDLSSRR)
+
+        .def_prop_rw("debug_view",
+            [](SampleUIData& s) { return int(s.DebugView); },
+            [](SampleUIData& s, int v) {
+                s.DebugView = DebugViewType(std::clamp(v, 0, int(DebugViewType::MaxCount)));
+                s.ResetAccumulation = true;
+            },
+            "DebugViewType integer. FirstHit_Diffuse and DenoiserGuide_Albedo dump albedo overlays.")
 
         // Reflex (low latency)
         .def_rw("reflex_mode",                   &SampleUIData::ReflexMode,

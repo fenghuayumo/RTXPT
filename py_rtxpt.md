@@ -1157,6 +1157,9 @@ Rasterization runs over all enabled 3DGS scene objects. Emissive proxy sampling 
 | `nee_type` | `int` | `0=uniform`, `1=power-based`, `2=NEE-AT`. |
 | `nee_candidate_samples` | `int` | Candidate sample count. |
 | `nee_full_samples` | `int` | Full sample count. |
+| `nee_shadow_ray_origin_bias_scale` | `float` | Scale for the regular NEE ray-origin offset; `1.0` is the default. |
+| `nee_shadow_ray_tmax_shortening_k` | `float` | Regular NEE ray-length shortening factor; `0.9985` is the default. |
+| `unlit_shadow_ray_normal_bias` | `float` | Extra world-space normal offset for unlit shadow receivers. Applies to both regular NEE and RTXDI visibility rays; try `0.005–0.02` for a ~1 m scanned scene. |
 | `nee_mis_type` | `int` | MIS mode. |
 | `use_restir_di` | `bool` | ReSTIR direct illumination. |
 | `use_restir_gi` | `bool` | ReSTIR global illumination. |

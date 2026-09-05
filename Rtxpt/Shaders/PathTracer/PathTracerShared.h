@@ -66,8 +66,12 @@ struct PathTracerConstants
 
     uint    environmentMapVisibleToCamera;
     float   stablePlanesSplitStopThreshold;
-    float   _padding3;
+    float   shadowRayOriginBiasScale;   // scale factor for NEE shadow ray origin offset (1.0 = default from Ray Tracing Gems)
     float   stablePlanesSuppressPrimaryIndirectSpecularK;
+    float   unlitShadowRayNormalBias;   // world-space normal offset for unlit shadow receiver shadow rays (clears self-occlusion)
+    float   _padding4;                  // keep 16-byte register packing for HLSL cbuffer
+    float   _padding5;                  // keep 16-byte register packing for HLSL cbuffer
+    float   _padding10;                 // keep 16-byte register packing for HLSL cbuffer
 
     float   denoiserRadianceClampK;
     float   DLSSRRBrightnessClampK;
@@ -84,7 +88,7 @@ struct PathTracerConstants
     uint    NEECandidateSamples;
     uint    NEEFullSamples;
   
-    uint    _padding6;
+    float   shadowRayTMaxShorteningK;   // NEE shadow ray TMax shortening factor to avoid self-intersection at the light (default 0.9985)
     uint    STFMagnificationMethod;
     uint    STFFilterMode;
     float   STFGaussianSigma;

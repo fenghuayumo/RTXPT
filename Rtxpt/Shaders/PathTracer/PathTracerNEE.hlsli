@@ -174,7 +174,9 @@ namespace PathTracer
     // Computes shading surface visibility ray starting position with an offset to avoid self intersection at source, and a
     // shortening offset to avoid self-intersection at the light source end. 
     // Optimal selfIntersectionShorteningK default found empirically.
-    RayDesc ComputeVisibilityRay(LightSample lightSample, const ShadingData shadingData, const float selfIntersectionShorteningK = 0.9985)
+    RayDesc ComputeVisibilityRay(LightSample lightSample, const ShadingData shadingData,
+                                 const float selfIntersectionShorteningK, const float originBiasScale,
+                                 const float unlitNormalBias)
     {
         float3 surfaceShadingNormal = shadingData.N;
 
@@ -184,13 +186,22 @@ namespace PathTracer
             : (dot(surfaceShadingNormal, lightSample.Direction) >= 0 ? 1.0 : -1.0);
 
         float3 surfaceFaceNormal = shadingData.faceNCorrected * faceSide;
-        float3 surfaceWorldPos = ComputeRayOrigin(shadingData.posW, surfaceFaceNormal);
+        float3 surfaceWorldPos = ComputeRayOrigin(shadingData.posW, surfaceFaceNormal, originBiasScale);
+        // Extra world-space normal offset for unlit shadow receivers to clear self-occlusion
+        surfaceWorldPos += surfaceFaceNormal * unlitNormalBias;
+
+        // LightSample's direction and distance were calculated from shadingData.posW.
+        // Reconstruct the sampled light position and evaluate the ray from its
+        // offset origin, so the ray terminates at the sampled point instead of
+        // potentially passing through the light geometry.
+        float3 toLight = shadingData.posW + lightSample.Direction * lightSample.Distance - surfaceWorldPos;
+        float rayDistance = length(toLight);
 
         RayDesc ret; 
         ret.Origin = surfaceWorldPos; 
-        ret.Direction = lightSample.Direction; 
+        ret.Direction = normalize(toLight);
         ret.TMin = 0.0; 
-        ret.TMax = lightSample.Distance*selfIntersectionShorteningK;
+        ret.TMax = rayDistance * selfIntersectionShorteningK;
         return ret;
     }
 
@@ -211,7 +222,10 @@ namespace PathTracer
             }
             else
             {
-                RayDesc ray = ComputeVisibilityRay(lightSample, shadingData);
+                RayDesc ray = ComputeVisibilityRay(lightSample, shadingData,
+                    workingContext.PtConsts.shadowRayTMaxShorteningK,
+                    workingContext.PtConsts.shadowRayOriginBiasScale,
+                    shadingData.mtl.isUnlitReceiveShadows() ? workingContext.PtConsts.unlitShadowRayNormalBias : 0.0f);
                 visibility = Bridge::traceVisibilityRay(ray, preScatterPath.rayCone, preScatterPath.getVertexIndex(), workingContext.Debug);
             }
         }

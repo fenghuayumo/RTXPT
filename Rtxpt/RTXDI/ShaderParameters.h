@@ -258,7 +258,7 @@ struct RtxdiBridgeConstants
     uint reStirGIEnableTemporalResampling;
     uint reStirGIVaryAgeThreshold;
     uint _padding1;
-    uint _padding2;
+    float unlitShadowRayNormalBias; // world-space normal offset for unlit shadow receivers (photo-scan surfaces)
 };
 
 struct SecondarySurface

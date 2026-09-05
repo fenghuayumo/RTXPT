@@ -2335,7 +2335,8 @@ void Sample::UpdatePathTracerConstants( PathTracerConstants & constants, const P
     constants.maxStablePlaneVertexDepth         = std::min( std::min( (uint)m_ui.StablePlanesMaxVertexDepth, cStablePlaneMaxVertexIndex ), (uint)m_ui.BounceCount );
     constants.allowPrimarySurfaceReplacement    = m_ui.AllowPrimarySurfaceReplacement;
     constants.stablePlanesSplitStopThreshold    = m_ui.StablePlanesSplitStopThreshold;
-    constants._padding3                         = 0;
+    constants.shadowRayOriginBiasScale          = m_ui.NEEShadowRayOriginBiasScale;
+    constants.unlitShadowRayNormalBias          = m_ui.UnlitShadowRayNormalBias;
     constants.stablePlanesSuppressPrimaryIndirectSpecularK  = m_ui.StablePlanesSuppressPrimaryIndirectSpecular?m_ui.StablePlanesSuppressPrimaryIndirectSpecularK:0.0f;
     constants.stablePlanesAntiAliasingFallthrough = m_ui.StablePlanesAntiAliasingFallthrough;
     constants.frameIndex                        = m_frameIndex & 0xFFFFFFFF; //GetFrameIndex();
@@ -2346,6 +2347,7 @@ void Sample::UpdatePathTracerConstants( PathTracerConstants & constants, const P
     constants.NEEType                           = m_ui.NEEType;
     constants.NEECandidateSamples               = m_ui.NEECandidateSamples;
     constants.NEEFullSamples                    = m_ui.NEEFullSamples;
+    constants.shadowRayTMaxShorteningK          = m_ui.NEEShadowRayTMaxShorteningK;
 
     constants.EnvironmentMapDiffuseSampleMIPLevel = m_ui.EnvironmentMapDiffuseSampleMIPLevel;
 

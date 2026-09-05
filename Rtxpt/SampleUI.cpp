@@ -1929,6 +1929,12 @@ void SampleUI::buildUI(void)
 			            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Prevents samples which are from the current frame or have no reasonable temporal history merged being spread to neighbors");
                         ImGui::Separator();
                         RTXDI_RESTIR_RESET_ON_CHANGE(ImGui::DragFloat("Ray Epsilon", &m_ui.RTXDI.rayEpsilon, 0.0001f, 0.0001f, 0.01f, "%.4f"));
+                        if (ImGui::DragFloat("Unlit Shadow Ray Normal Bias", &m_ui.UnlitShadowRayNormalBias, 0.001f, 0.0f, 0.05f, "%.4f"))
+                        {
+                            m_ui.RTXDI.unlitShadowRayNormalBias = m_ui.UnlitShadowRayNormalBias;
+                            m_ui.ResetAccumulation = true;
+                            m_ui.RTXDIRestirPreset = RTXDIRestirQualityPreset::Custom;
+                        }
                         ImGui::PopItemWidth();
                     }
 

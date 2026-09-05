@@ -26,11 +26,11 @@
 // Computes new ray origin based on hit position to avoid self-intersections. 
 // The function assumes that the hit position has been computed by barycentric interpolation, and not from the ray t which is less accurate.
 // Described in Ray Tracing Gems, Chapter 6, "A Fast and Robust Method for Avoiding Self-Intersection" by Carsten Wächter and Nikolaus Binder.
-float3 ComputeRayOrigin(float3 worldPosition, float3 faceNormal)  // expects triangle faceNormal pointing towards the intended ray direction
+float3 ComputeRayOrigin(float3 worldPosition, float3 faceNormal, float biasScale = 1.0f)  // expects triangle faceNormal pointing towards the intended ray direction
 {
     const float origin = 1.f / 16.f;
-    const float fScale = 3.f / 65536.f;
-    const float iScale = 3 * 256.f;
+    const float fScale = 3.f / 65536.f * biasScale;
+    const float iScale = 3 * 256.f * biasScale;
 
     // Per-component integer offset to bit representation of fp32 position.
     int3 iOff = int3(faceNormal * iScale);

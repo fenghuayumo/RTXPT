@@ -744,10 +744,28 @@ uint getLightIndex(uint firstGeometryInstanceIndex, uint geometryIndex, uint pri
 RayDesc setupVisibilityRay(RAB_Surface surface, RAB_LightSample lightSample, float offset = 0.001)
 {
     float3 surfacePos = RAB_GetNewRayOrigin(surface);
-   // float3 toLight = lightSample.position - surfacePos;
-    float3 toLight;// = normalize(lightSample.position - RAB_GetSurfaceWorldPos(surface));
+    // Unlit shadow receivers are typically photo-scanned backgrounds whose
+    // reconstruction noise is much taller than the default ULP ray-origin
+    // offset. Push the origin along the geometric face normal so shadow rays
+    // escape the noise layer instead of self-occluding into dark smudges.
+    if (surface.IsUnlitReceiveShadows())
+        surfacePos += surface.GetFaceNCorrected() * g_RtxdiBridgeConst.unlitShadowRayNormalBias;
+
+    // RAB_GetLightDirDistance uses the unoffset surface position. Once the
+    // ray origin moves, recalculate the finite-light segment from surfacePos
+    // so Direction and TMax still end at the sampled light point.
+    float3 toLight;
     float dis;
-    RAB_GetLightDirDistance(surface, lightSample, toLight, dis);
+    if (lightSample.lightType == PolymorphicLightType::kEnvironment)
+    {
+        toLight = -lightSample.normal;
+        dis = DISTANT_LIGHT_DISTANCE;
+    }
+    else
+    {
+        toLight = lightSample.position - surfacePos;
+        dis = length(toLight);
+    }
 
     RayDesc ray;
     ray.TMin = 0;// offset;

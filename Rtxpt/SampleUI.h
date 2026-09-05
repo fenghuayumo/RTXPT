@@ -272,6 +272,9 @@ struct SampleUIData
     int                                 NEEType         /*Defaults in CommandLine >*/;      // '0' is uniform, '1' is power, '2' is NEE-AT; once this solidifies make it a proper enum
     int                                 NEECandidateSamples                     = 5;        // each full sample is picked from a number of candidate samples; these are not visibility tested so taking too many can hurt quality in heavily shadowed scenarios
     int                                 NEEFullSamples                          = 1;        // each full sample requires a shadow ray!
+    float                               NEEShadowRayOriginBiasScale             = 1.0f;     // scale factor for NEE shadow ray origin offset; increase to push ray origin further from surface (reduces self-occlusion)
+    float                               UnlitShadowRayNormalBias                = 0.0f;     // world-space normal offset for unlit shadow receiver shadow rays
+    float                               NEEShadowRayTMaxShorteningK             = 0.9985f;  // NEE shadow ray TMax shortening factor; decrease to shorten rays more (avoids self-intersection at the light source)
     int                                 NEEMISType                              = 1;        // '0' full MIS always; '1' full MIS in reference, approx in realtime; '2' approx MIS always
     //bool                                NEEAT_AntiLagPass                       = false;
     float                               NEEAT_GlobalTemporalFeedbackWeight      = 0.75f;

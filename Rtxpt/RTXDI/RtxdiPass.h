@@ -86,6 +86,11 @@ struct RtxdiUserSettings
 	} regirIndirect;
 
 	float rayEpsilon = 1.0e-4f;
+	// Extra world-space normal offset applied to visibility rays for unlit
+	// shadow-receiving surfaces (photo-scan backgrounds). The default ULP
+	// ray-origin offset is too small to escape reconstruction noise, which
+	// causes self-occlusion smudges. Scene-scale dependent; 0 disables.
+	float unlitShadowRayNormalBias = 0.0f;
 	bool reStirGIEnableTemporalResampling = true;
 	bool reStirGIVaryAgeThreshold = true;
 };

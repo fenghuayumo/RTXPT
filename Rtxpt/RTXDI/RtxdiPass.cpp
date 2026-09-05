@@ -476,6 +476,7 @@ void RtxdiPass::FillSharedConstants(struct RtxdiBridgeConstants& bridgeConstants
 	bridgeConstants.frameIndex = m_BridgeParameters.frameIndex;
 	bridgeConstants.frameDim = m_BridgeParameters.frameDims;
 	bridgeConstants.rayEpsilon = m_BridgeParameters.userSettings.rayEpsilon;
+	bridgeConstants.unlitShadowRayNormalBias = m_BridgeParameters.userSettings.unlitShadowRayNormalBias;
 	bridgeConstants.localLightPdfTextureSize = uint2(m_rtxdiResources->LocalLightPdfTexture->getDesc().width, m_rtxdiResources->LocalLightPdfTexture->getDesc().height);
 	bridgeConstants.localLightPdfLastMipLevel = m_rtxdiResources->LocalLightPdfTexture->getDesc().mipLevels - 1 ;
 	bridgeConstants.maxLights = uint32_t(m_rtxdiResources->LightDataBuffer->getDesc().byteSize / (sizeof(PolymorphicLightInfo) * 2));
